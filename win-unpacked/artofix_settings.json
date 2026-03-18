@@ -1,22 +1,3 @@
-{
-  "fxParticles": "stars",
-  "fxSpeed": 1.9,
-  "fxScanlines": "on",
-  "colors": null,
-  "theme": "",
-  "fingerprint": {
-    "webgl": false,
-    "platform": false,
-    "canvas": false,
-    "resolution": false,
-    "ua": false
-  },
-  "cheburnet": {
-    "autostart": false,
-    "autorestart": true,
-    "interval": 30,
-    "dns1": "1.1.1.1",
-    "dns2": "1.0.0.1",
-    "dnsMode": "doh"
-  }
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:b8acfd01ca222da5737230ee61eb2fd5034021bc4d435a6211028f3e9bfafdf8
+size 389
