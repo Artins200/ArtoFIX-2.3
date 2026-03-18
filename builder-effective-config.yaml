@@ -1,0 +1,48 @@
+directories:
+  output: dist
+  buildResources: build
+appId: com.artofix.app
+productName: Artofix
+copyright: Artofix 2024
+asar: true
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: icon.png
+  requestedExecutionLevel: requireAdministrator
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  installerLanguages:
+    - Russian
+  shortcutName: Artofix
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  deleteAppDataOnUninstall: false
+  runAfterFinish: true
+extraResources:
+  - from: engine.py
+    to: engine.py
+  - from: icon.png
+    to: icon.png
+  - from: Zapret/
+    to: Zapret/
+    filter:
+      - '**/*'
+  - from: assets/
+    to: assets/
+    filter:
+      - '**/*'
+  - from: install/
+    to: install/
+    filter:
+      - '**/*'
+files:
+  - filter:
+      - main.js
+      - index.html
+      - setup.html
+      - package.json
+electronVersion: 40.6.1

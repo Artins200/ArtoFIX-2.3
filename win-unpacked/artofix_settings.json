@@ -1,0 +1,22 @@
+{
+  "fxParticles": "stars",
+  "fxSpeed": 1.9,
+  "fxScanlines": "on",
+  "colors": null,
+  "theme": "",
+  "fingerprint": {
+    "webgl": false,
+    "platform": false,
+    "canvas": false,
+    "resolution": false,
+    "ua": false
+  },
+  "cheburnet": {
+    "autostart": false,
+    "autorestart": true,
+    "interval": 30,
+    "dns1": "1.1.1.1",
+    "dns2": "1.0.0.1",
+    "dnsMode": "doh"
+  }
+}
