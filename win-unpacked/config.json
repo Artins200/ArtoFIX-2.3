@@ -1,0 +1,14 @@
+{
+  "fingerprint": {
+    "webgl_vendor": "Google Inc. (NVIDIA)",
+    "webgl_renderer": "ANGLE (NVIDIA, NVIDIA GeForce GTX 1660 SUPER Direct3D11 vs_5_0 ps_5_0, D3D11)",
+    "platform": "Win32",
+    "canvas_noise": 39
+  },
+  "spoof": {
+    "account_age": "",
+    "history": "",
+    "timezone": "",
+    "lang": ""
+  }
+}
