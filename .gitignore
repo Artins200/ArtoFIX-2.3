@@ -1,0 +1,5 @@
+win-unpacked/
+*.7z
+*.nsis
+*.lnk
+.icon-ico/
