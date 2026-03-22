@@ -1,3 +1,1 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:9d9832f02f42e60be30f94a7a1b051342db0b1b0092c656a7bc10e730d63b234
-size 20
+domain.example.abc
