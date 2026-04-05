@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Artofix — Установка</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+:root {
+  --ac:#00f0ff; --acr:0,240,255;
+  --bg:#04050f; --panel:rgba(255,255,255,.04);
+  --grn:#00ff88; --red:#ff1a4e;
+  --tx:#e8eaf6; --tx2:rgba(232,234,246,.45);
+  --mono:'Share Tech Mono',monospace;
+}
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700&family=Share+Tech+Mono&family=Rajdhani:wght@400;600&display=swap');
+
+body {
+  background:var(--bg); color:var(--tx);
+  font-family:'Rajdhani',sans-serif; font-size:14px;
+  height:100vh; overflow:hidden;
+  display:flex; flex-direction:column;
+  user-select:none;
+}
+
+/* Titlebar */
+#titlebar {
+  height:38px; background:rgba(0,0,0,.5);
+  border-bottom:1px solid rgba(var(--acr),.12);
+  display:flex; align-items:center; padding:0 14px;
+  -webkit-app-region:drag; flex-shrink:0;
+}
+#titlebar-title {
+  font-family:'Orbitron',monospace; font-size:11px;
+  color:var(--ac); letter-spacing:2px;
+}
+#titlebar-close {
+  margin-left:auto; -webkit-app-region:no-drag;
+  width:24px; height:24px; border-radius:6px;
+  background:rgba(255,26,78,.08); border:1px solid rgba(255,26,78,.2);
+  color:rgba(255,26,78,.5); cursor:pointer; display:flex;
+  align-items:center; justify-content:center; font-size:12px;
+  transition:.15s;
+}
+#titlebar-close:hover { background:rgba(255,26,78,.25); color:var(--red); }
+
+/* Content */
+#content {
+  flex:1; padding:24px 28px 20px;
+  display:flex; flex-direction:column; gap:16px; overflow:hidden;
+}
+
+.logo-row {
+  display:flex; align-items:center; gap:12px;
+}
+.logo-icon {
+  width:44px; height:44px; border-radius:12px;
+  background:linear-gradient(135deg,rgba(var(--acr),.15),rgba(var(--acr),.05));
+  border:1px solid rgba(var(--acr),.25);
+  display:flex; align-items:center; justify-content:center;
+  font-size:22px;
+}
+.logo-text { font-family:'Orbitron',monospace; font-size:18px; color:var(--ac); letter-spacing:2px; }
+.logo-sub  { font-size:11px; color:var(--tx2); font-family:var(--mono); margin-top:2px; }
+
+/* Step label */
+#step-label {
+  font-size:13px; color:var(--tx2); font-family:var(--mono);
+  letter-spacing:.5px; min-height:18px; transition:.3s;
+}
+
+/* Progress bar */
+.progress-wrap {
+  background:rgba(255,255,255,.05); border:1px solid rgba(var(--acr),.15);
+  border-radius:6px; height:10px; overflow:hidden;
+}
+#progress-bar {
+  height:100%; width:0%; border-radius:6px;
+  background:linear-gradient(90deg, var(--ac), #7b2fff);
+  box-shadow:0 0 10px rgba(var(--acr),.6);
+  transition:width .5s cubic-bezier(.4,0,.2,1);
+}
+
+/* Steps list */
+.steps-row {
+  display:flex; gap:0; align-items:center;
+}
+.step-dot {
+  display:flex; flex-direction:column; align-items:center; flex:1;
+  font-size:9px; font-family:var(--mono); color:var(--tx2);
+  letter-spacing:.5px; gap:5px;
+}
+.step-dot .dot {
+  width:10px; height:10px; border-radius:50%;
+  border:2px solid rgba(255,255,255,.15);
+  background:transparent; transition:.3s;
+}
+.step-dot.done .dot   { background:var(--grn); border-color:var(--grn); box-shadow:0 0 8px rgba(0,255,136,.5); }
+.step-dot.active .dot { background:var(--ac);  border-color:var(--ac);  box-shadow:0 0 8px rgba(var(--acr),.6); animation:pulse .9s infinite; }
+@keyframes pulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.3)} }
+.step-line { flex:1; height:1px; background:rgba(255,255,255,.08); margin-bottom:14px; }
+.step-dot.done ~ .step-line { background:rgba(0,255,136,.3); }
+
+/* Log box */
+#log-box {
+  flex:1; background:rgba(0,0,0,.4); border:1px solid rgba(var(--acr),.1);
+  border-radius:8px; padding:10px 12px; overflow-y:auto;
+  font-family:var(--mono); font-size:11px; line-height:1.8;
+  min-height:0;
+}
+.log-info { color:var(--tx2); }
+.log-ok   { color:var(--grn); }
+.log-warn { color:#ffcc00; }
+.log-err  { color:var(--red); }
+
+/* Buttons */
+.btn-row { display:flex; gap:10px; flex-shrink:0; }
+.btn {
+  flex:1; padding:11px; border-radius:8px; font-size:12px;
+  font-family:'Rajdhani',sans-serif; font-weight:600;
+  letter-spacing:1px; cursor:pointer; transition:.18s;
+  border:1px solid transparent; text-transform:uppercase;
+}
+.btn-primary {
+  background:linear-gradient(135deg,rgba(var(--acr),.18),rgba(var(--acr),.08));
+  border-color:rgba(var(--acr),.35); color:var(--ac);
+}
+.btn-primary:hover { background:linear-gradient(135deg,rgba(var(--acr),.28),rgba(var(--acr),.14)); box-shadow:0 0 14px rgba(var(--acr),.25); }
+.btn-secondary {
+  background:rgba(255,255,255,.04); border-color:rgba(255,255,255,.1); color:var(--tx2);
+}
+.btn-secondary:hover { background:rgba(255,255,255,.08); color:var(--tx); }
+.btn:disabled { opacity:.35; pointer-events:none; }
+
+/* Done state */
+#done-msg {
+  display:none; text-align:center; padding:10px 0;
+  font-size:15px; color:var(--grn); font-family:'Orbitron',monospace;
+  letter-spacing:2px;
+}
+#done-msg.show { display:block; }
+
+/* Error state */
+#error-msg {
+  display:none; padding:10px 14px; border-radius:8px;
+  background:rgba(255,26,78,.08); border:1px solid rgba(255,26,78,.25);
+  color:var(--red); font-size:12px; font-family:var(--mono);
+}
+#error-msg.show { display:block; }
+
+/* Restart msg */
+#restart-msg {
+  display:none; padding:10px 14px; border-radius:8px;
+  background:rgba(255,200,0,.08); border:1px solid rgba(255,200,0,.25);
+  color:#ffcc00; font-size:12px; font-family:var(--mono);
+}
+#restart-msg.show { display:block; }
+
+/* Scrollbar */
+#log-box::-webkit-scrollbar { width:4px; }
+#log-box::-webkit-scrollbar-track { background:transparent; }
+#log-box::-webkit-scrollbar-thumb { background:rgba(var(--acr),.25); border-radius:2px; }
+</style>
+</head>
+<body>
+<div id="titlebar">
+  <div id="titlebar-title">⚡ ARTOFIX — ПЕРВЫЙ ЗАПУСК</div>
+  <div id="titlebar-close" onclick="const {ipcRenderer}=require('electron');ipcRenderer.send('setup-skip')">✕</div>
+</div>
+
+<div id="content">
+
+  <div class="logo-row">
+    <div class="logo-icon">⚡</div>
+    <div>
+      <div class="logo-text">ARTOFIX <span style="color:rgba(var(--acr),.5);font-size:13px">2.3</span></div>
+      <div class="logo-sub">Установка компонентов</div>
+    </div>
+  </div>
+
+  <!-- Шаги -->
+  <div class="steps-row">
+    <div class="step-dot active" id="sd-python"><div class="dot"></div>Python</div>
+    <div class="step-line"></div>
+    <div class="step-dot" id="sd-pip"><div class="dot"></div>pip</div>
+    <div class="step-line"></div>
+    <div class="step-dot" id="sd-selenium"><div class="dot"></div>Selenium</div>
+    <div class="step-line"></div>
+    <div class="step-dot" id="sd-chrome"><div class="dot"></div>ChromeDriver</div>
+    <div class="step-line"></div>
+    <div class="step-dot" id="sd-edge"><div class="dot"></div>EdgeDriver</div>
+    <div class="step-line"></div>
+    <div class="step-dot" id="sd-done"><div class="dot"></div>Готово</div>
+  </div>
+
+  <!-- Текущий шаг -->
+  <div id="step-label">⏳ Подготовка...</div>
+
+  <!-- Прогресс -->
+  <div class="progress-wrap"><div id="progress-bar"></div></div>
+
+  <!-- Лог -->
+  <div id="log-box"><span class="log-info">Запуск установщика...</span></div>
+
+  <!-- Сообщения -->
+  <div id="error-msg"></div>
+  <div id="restart-msg"></div>
+  <div id="done-msg">✓ УСТАНОВКА ЗАВЕРШЕНА</div>
+
+  <!-- Кнопки -->
+  <div class="btn-row">
+    <button class="btn btn-primary" id="btn-launch" style="display:none" onclick="launchApp()">▶ Запустить Artofix</button>
+    <button class="btn btn-secondary" id="btn-restart" style="display:none" onclick="restartApp()">↺ Перезапустить</button>
+    <button class="btn btn-secondary" id="btn-skip" onclick="skipSetup()">Пропустить</button>
+  </div>
+
+</div>
+
+<script>
+const { ipcRenderer } = require('electron');
+
+// ── Шаги по проценту ──
+const STEP_MAP = [
+  { pct:  5, id:'sd-python'   },
+  { pct: 25, id:'sd-pip'      },
+  { pct: 35, id:'sd-selenium' },
+  { pct: 65, id:'sd-chrome'   },
+  { pct: 78, id:'sd-edge'     },
+  { pct:100, id:'sd-done'     },
+];
+let lastPct = 0;
+
+function updateSteps(pct) {
+  STEP_MAP.forEach(function(s, i) {
+    var el = document.getElementById(s.id);
+    if (!el) return;
+    el.classList.remove('active','done');
+    if (pct > s.pct) el.classList.add('done');
+    else if (pct >= (STEP_MAP[i-1] ? STEP_MAP[i-1].pct : 0)) el.classList.add('active');
+  });
+}
+
+ipcRenderer.on('setup-step', function(e, d) {
+  document.getElementById('step-label').textContent = '⏳ ' + d.text;
+  document.getElementById('progress-bar').style.width = d.pct + '%';
+  updateSteps(d.pct);
+});
+
+ipcRenderer.on('setup-log', function(e, d) {
+  var box = document.getElementById('log-box');
+  if (typeof d === 'string') {
+    // raw stdout
+    d.split('\n').forEach(function(line) {
+      if (!line.trim()) return;
+      var span = document.createElement('div');
+      span.className = 'log-info';
+      span.textContent = line;
+      box.appendChild(span);
+    });
+  } else {
+    var span = document.createElement('div');
+    span.className = 'log-' + (d.type || 'info');
+    span.textContent = d.msg;
+    box.appendChild(span);
+  }
+  box.scrollTop = box.scrollHeight;
+});
+
+ipcRenderer.on('setup-error', function(e, msg) {
+  var el = document.getElementById('error-msg');
+  el.textContent = '✗ ' + msg;
+  el.classList.add('show');
+  document.getElementById('step-label').textContent = '✗ Ошибка установки';
+  document.getElementById('btn-skip').textContent = 'Пропустить';
+});
+
+ipcRenderer.on('setup-need-restart', function(e, msg) {
+  var el = document.getElementById('restart-msg');
+  el.textContent = '↺ ' + msg;
+  el.classList.add('show');
+  document.getElementById('step-label').textContent = '↺ Требуется перезапуск';
+  document.getElementById('btn-restart').style.display = '';
+  document.getElementById('btn-skip').style.display = 'none';
+});
+
+ipcRenderer.on('setup-done', function() {
+  document.getElementById('progress-bar').style.width = '100%';
+  document.getElementById('step-label').textContent = '✓ Готово!';
+  document.getElementById('done-msg').classList.add('show');
+  document.getElementById('btn-launch').style.display = '';
+  document.getElementById('btn-skip').style.display = 'none';
+  updateSteps(100);
+  ipcRenderer.send('open-main');
+});
+
+function launchApp()  { ipcRenderer.send('open-main'); }
+function skipSetup()  { ipcRenderer.send('setup-skip'); ipcRenderer.send('open-main'); }
+function restartApp() {
+  const { app } = require('@electron/remote') || {};
+  require('electron').ipcRenderer.send('win-act', 'close');
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,62 @@
+{
+  "name": "artofix",
+  "version": "2.3.0",
+  "description": "Artofix Freedom Tool",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "start:dev": "electron . --dev",
+    "build": "electron-builder --win --x64",
+    "build:dir": "electron-builder --win --x64 --dir"
+  },
+  "build": {
+    "appId": "com.artofix.app",
+    "productName": "Artofix",
+    "copyright": "Artofix 2024",
+    "asar": true,
+
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] }
+      ],
+      "icon": "icon.png",
+      "requestedExecutionLevel": "requireAdministrator"
+    },
+
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerLanguages": ["Russian"],
+      "shortcutName": "Artofix",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true
+    },
+
+    "extraResources": [
+      { "from": "engine.py",  "to": "engine.py"  },
+      { "from": "icon.png",   "to": "icon.png"   },
+      { "from": "Zapret/",    "to": "Zapret/",    "filter": ["**/*"] },
+      { "from": "assets/",    "to": "assets/",    "filter": ["**/*"] },
+      { "from": "install/",   "to": "install/",   "filter": ["**/*"] }
+    ],
+
+    "files": [
+      "main.js",
+      "index.html",
+      "setup.html",
+      "package.json"
+    ],
+
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    }
+  },
+
+  "devDependencies": {
+    "electron": "^29.0.0",
+    "electron-builder": "^24.0.0"
+  }
+}

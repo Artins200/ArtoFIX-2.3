@@ -1,0 +1,16 @@
+{
+  "user_agent": "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.6367.82 Mobile Safari/537.36",
+  "resolution": "1280,720",
+  "spoof": {
+    "account_age": "6-12 мес",
+    "history": "редкий",
+    "timezone": "Europe/Moscow",
+    "lang": "de-DE,de"
+  },
+  "fingerprint": {
+    "webgl_vendor": "Google Inc. (NVIDIA)",
+    "webgl_renderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+    "platform": "Win32",
+    "canvas_noise": 48
+  }
+}

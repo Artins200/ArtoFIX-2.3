@@ -1,0 +1,3464 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>ARTOFIX 2.3</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+
+/* =========================================
+   VARIABLES + THEMES
+   ========================================= */
+:root {
+  --ac:   #00f0ff;
+  --ac2:  #7b2fff;
+  --acr:  0,240,255;
+  --ac2r: 123,47,255;
+  --red:  #ff1a4e;
+  --redr: 255,26,78;
+  --grn:  #00ffaa;
+  --grnr: 0,255,170;
+  --ylw:  #ffd000;
+  --bg:   #04050f;
+  --bg2:  #070818;
+  --panelbg: rgba(4,5,15,0.97);
+  --cardbg:  rgba(255,255,255,0.032);
+  --cardbr:  rgba(255,255,255,0.075);
+  --tx:   #cdd5f0;
+  --tx2:  rgba(180,190,220,0.35);
+  --font: 'Rajdhani',sans-serif;
+  --mono: 'Share Tech Mono',monospace;
+  --radius: 14px;
+  --sidebar-w: 220px;
+  --glow: 0 0 20px rgba(var(--acr),.35), 0 0 60px rgba(var(--acr),.1);
+}
+
+/* ── THEMES ── */
+body.th-cyber   { --ac:#ff00e5; --ac2:#ffe600; --acr:255,0,229;   --ac2r:255,230,0;   }
+body.th-hacker  { --ac:#00ff41; --ac2:#00aa22; --acr:0,255,65;    --ac2r:0,170,34;    --font:'Share Tech Mono',monospace; }
+body.th-blood   { --ac:#ff2222; --ac2:#ff6600; --acr:255,34,34;   --ac2r:255,102,0;   --bg:#060001; --panelbg:rgba(8,1,1,0.97); }
+body.th-ocean   { --ac:#00c8ff; --ac2:#0055ff; --acr:0,200,255;   --ac2r:0,85,255;    --bg:#00060f; --panelbg:rgba(0,5,16,0.97); }
+body.th-gold    { --ac:#ffd000; --ac2:#ff8800; --acr:255,208,0;   --ac2r:255,136,0;   --bg:#070600; --panelbg:rgba(9,8,0,0.97); }
+body.th-matrix  { --ac:#00ff41; --ac2:#003311; --acr:0,255,65;    --ac2r:0,51,17;     --bg:#000800; --panelbg:rgba(0,6,0,0.98); --font:'Share Tech Mono',monospace; }
+body.th-rose    { --ac:#ff6eb4; --ac2:#c44dff; --acr:255,110,180; --ac2r:196,77,255;  --bg:#09010a; --panelbg:rgba(10,2,12,0.97); }
+body.th-ice     { --ac:#80ffff; --ac2:#4488ff; --acr:128,255,255; --ac2r:68,136,255;  --bg:#010810; --panelbg:rgba(1,8,18,0.97); }
+body.th-toxic   { --ac:#aaff00; --ac2:#ff8800; --acr:170,255,0;   --ac2r:255,136,0;   --bg:#030800; --panelbg:rgba(3,8,0,0.97); }
+
+/* =========================================
+   RESET
+   ========================================= */
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html, body { width:100%; height:100%; overflow:hidden; background:var(--bg); color:var(--tx); font-family:var(--font); }
+button  { cursor:pointer; font-family:var(--font); }
+input, select, textarea { font-family:var(--mono); user-select:text; cursor:text; }
+select  { cursor:pointer; }
+
+/* =========================================
+   CANVAS + SCANLINES + NOISE
+   ========================================= */
+#bgcanvas { position:fixed; inset:0; z-index:0; pointer-events:none; }
+#scanlines {
+  position:fixed; inset:0; z-index:1; pointer-events:none;
+  background: repeating-linear-gradient(
+    0deg, transparent, transparent 2px,
+    rgba(0,0,0,0.055) 2px, rgba(0,0,0,0.055) 4px
+  );
+}
+/* Vignette overlay */
+#scanlines::after {
+  content:''; position:absolute; inset:0; pointer-events:none;
+  background:radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,.55) 100%);
+}
+
+/* =========================================
+   APP SHELL
+   ========================================= */
+#app {
+  position:relative; z-index:2; width:100vw; height:100vh;
+  background:var(--panelbg); display:flex; flex-direction:column;
+  animation: appBoot .5s cubic-bezier(.22,1,.36,1) both;
+}
+@keyframes appBoot {
+  from { opacity:0; transform:scale(.975) translateY(8px); filter:blur(4px); }
+  to   { opacity:1; transform:scale(1)    translateY(0);   filter:blur(0); }
+}
+
+/* =========================================
+   TITLEBAR
+   ========================================= */
+#titlebar {
+  height:44px; flex-shrink:0;
+  background:rgba(0,0,0,.6);
+  border-bottom:1px solid rgba(var(--acr),.1);
+  display:flex; align-items:center; justify-content:space-between;
+  padding:0 16px; -webkit-app-region:drag;
+  position:relative; z-index:10; 
+}
+/* Gradient underline */
+#titlebar::after {
+  content:''; position:absolute; bottom:0; left:0; right:0; height:1px; pointer-events:none;
+  background:linear-gradient(90deg,
+    transparent 0%,
+    rgba(var(--acr),.9) 30%,
+    rgba(var(--ac2r),.6) 60%,
+    transparent 100%
+  );
+}
+
+/* Logo */
+#logo {
+  display:flex; align-items:center; gap:10px; -webkit-app-region:no-drag;
+  font-family:'Orbitron',monospace; font-weight:900; font-size:12.5px;
+  letter-spacing:3.5px; cursor:default; user-select:none;
+}
+#logo-box {
+  width:28px; height:28px; border:1.5px solid rgba(var(--acr),.6);
+  border-radius:7px; display:flex; align-items:center; justify-content:center;
+  font-size:13px; position:relative; overflow:hidden;
+  animation:logoGlow 4s ease-in-out infinite;
+}
+#logo-box::before {
+  content:''; position:absolute; inset:0; pointer-events:none;
+  background:linear-gradient(135deg, rgba(var(--acr),.15), transparent);
+}
+@keyframes logoGlow {
+  0%,100% { box-shadow:0 0 8px rgba(var(--acr),.3); }
+  50%     { box-shadow:0 0 22px rgba(var(--acr),.8), 0 0 44px rgba(var(--acr),.2); }
+}
+#logo .logo-accent { color:var(--ac); letter-spacing:1px; font-size:11px; opacity:.8; }
+
+/* Window buttons */
+#winbtns { -webkit-app-region:no-drag; display:flex; gap:5px; align-items:center; }
+.winbtn {
+  width:28px; height:28px; border-radius:7px;
+  background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.07);
+  color:rgba(255,255,255,.3); font-size:11px;
+  display:flex; align-items:center; justify-content:center;
+  transition:all .18s; cursor:pointer;
+}
+.winbtn:hover { background:rgba(255,255,255,.1); color:#fff; transform:scale(1.08); }
+#winbtn-close:hover {
+  background:rgba(var(--redr),.22); border-color:rgba(var(--redr),.55);
+  color:var(--red); box-shadow:0 0 12px rgba(var(--redr),.4);
+}
+
+/* =========================================
+   LAYOUT
+   ========================================= */
+#main-layout { display:flex; flex:1; overflow:hidden; }
+
+/* =========================================
+   SIDEBAR
+   ========================================= */
+#sidebar {
+  width:var(--sidebar-w); flex-shrink:0;
+  background:rgba(0,0,0,.28);
+  border-right:1px solid rgba(255,255,255,.04);
+  display:flex; flex-direction:column;
+  padding:12px 10px 10px; gap:2px;
+  position:relative; overflow:hidden;
+}
+/* Sidebar accent line */
+#sidebar::before {
+  content:''; position:absolute; top:0; right:0; width:1px; height:100%; pointer-events:none;
+  background:linear-gradient(180deg, transparent, rgba(var(--acr),.3) 40%, rgba(var(--ac2r),.2) 70%, transparent);
+}
+
+.nav-sep {
+  font-size:8px; letter-spacing:3px; color:var(--tx2);
+  padding:10px 10px 5px; text-transform:uppercase;
+  font-family:var(--mono); position:relative;
+}
+.nav-sep::after {
+  content:''; position:absolute; bottom:0; left:10px; right:10px; height:1px;
+  background:rgba(255,255,255,.05);
+}
+
+.nav-btn {
+  padding:10px 12px; border-radius:10px; background:transparent;
+  color:var(--tx2); border:1px solid transparent;
+  font-weight:600; font-size:12px; text-align:left;
+  letter-spacing:.5px; display:flex; align-items:center; gap:9px;
+  position:relative; overflow:hidden; transition:all .2s; width:100%;
+}
+.nav-btn .nav-icon { font-size:14px; flex-shrink:0; transition:transform .25s; }
+.nav-btn:hover {
+  background:rgba(255,255,255,.06); color:rgba(255,255,255,.85);
+  transform:translateX(3px);
+}
+.nav-btn:hover .nav-icon { transform:scale(1.15); }
+/* Ripple on click */
+.nav-btn::after {
+  content:''; position:absolute; inset:0; border-radius:10px; pointer-events:none;
+  background:radial-gradient(circle at var(--mx,50%) var(--my,50%), rgba(var(--acr),.18) 0%, transparent 70%);
+  opacity:0; transition:opacity .4s;
+}
+.nav-btn:active::after { opacity:1; }
+
+.nav-btn.is-active {
+  background:linear-gradient(90deg, rgba(var(--acr),.1), rgba(var(--ac2r),.05));
+  color:var(--ac); border-color:rgba(var(--acr),.2);
+  box-shadow:inset 0 0 20px rgba(var(--acr),.05);
+}
+.nav-btn.is-active::before {
+  content:''; position:absolute; left:0; top:15%; bottom:15%; width:3px; pointer-events:none;
+  background:linear-gradient(180deg, var(--ac), var(--ac2));
+  border-radius:0 2px 2px 0;
+  box-shadow:0 0 12px rgba(var(--acr),.9), 0 0 24px rgba(var(--acr),.3);
+}
+
+/* =========================================
+   STATUS BOX (sidebar bottom)
+   ========================================= */
+#status-box {
+  margin-top:auto; padding:13px 12px;
+  background:rgba(0,0,0,.45); border-radius:12px;
+  border:1px solid rgba(var(--acr),.1);
+  position:relative; overflow:hidden;
+}
+#status-box::before {
+  content:''; position:absolute; top:0; left:0; right:0; height:1px; pointer-events:none;
+  background:linear-gradient(90deg, transparent, rgba(var(--acr),.4), transparent);
+}
+.status-row { display:flex; align-items:center; gap:9px; margin-bottom:12px; }
+
+#zapret-dot {
+  width:9px; height:9px; border-radius:50%;
+  background:rgba(255,255,255,.08); flex-shrink:0;
+  border:1.5px solid rgba(255,255,255,.12); transition:all .5s;
+}
+#zapret-dot.is-on {
+  background:var(--grn);
+  border-color:var(--grn);
+  box-shadow:0 0 10px rgba(var(--grnr),.9), 0 0 24px rgba(var(--grnr),.4);
+  animation:dotPulse 2s ease-in-out infinite;
+}
+@keyframes dotPulse {
+  0%,100% { transform:scale(1); opacity:1; }
+  50%     { transform:scale(1.25); opacity:.7; }
+}
+
+#zapret-label {
+  font-size:8.5px; letter-spacing:2.5px; color:var(--tx2);
+  font-family:var(--mono); transition:.4s;
+}
+#zapret-label.is-on { color:var(--grn); text-shadow:0 0 8px rgba(var(--grnr),.6); }
+
+.status-btn {
+  display:block; width:100%; padding:9px; border:none; border-radius:9px;
+  font-size:9.5px; letter-spacing:1.5px; font-weight:700; text-transform:uppercase;
+  font-family:var(--font); margin-bottom:6px; transition:all .22s; cursor:pointer;
+  position:relative; overflow:hidden;
+}
+.status-btn:last-child { margin-bottom:0; }
+.status-btn::before {
+  content:''; position:absolute; inset:0; pointer-events:none;
+  background:linear-gradient(135deg, rgba(255,255,255,.1), transparent);
+  opacity:0; transition:.2s;
+}
+.status-btn:hover::before { opacity:1; }
+
+.sb-start {
+  background:linear-gradient(135deg, var(--ac), var(--ac2));
+  color:#000; box-shadow:0 4px 16px rgba(var(--acr),.35);
+}
+.sb-start:hover {
+  box-shadow:0 6px 28px rgba(var(--acr),.65), 0 0 40px rgba(var(--ac2r),.2);
+  transform:translateY(-2px);
+}
+.sb-stop {
+  background:rgba(var(--redr),.07); color:var(--red);
+  border:1px solid rgba(var(--redr),.25);
+}
+.sb-stop:hover {
+  background:rgba(var(--redr),.18);
+  box-shadow:0 0 16px rgba(var(--redr),.35);
+  transform:translateY(-1px);
+}
+
+/* =========================================
+   CONTENT AREA
+   ========================================= */
+#content-area {
+  flex:1; padding:24px 26px; overflow-y:auto; scroll-behavior:smooth;
+}
+#content-area::-webkit-scrollbar { width:4px; }
+#content-area::-webkit-scrollbar-track { background:transparent; }
+#content-area::-webkit-scrollbar-thumb {
+  background:rgba(var(--acr),.2); border-radius:4px;
+}
+#content-area::-webkit-scrollbar-thumb:hover { background:rgba(var(--acr),.4); }
+
+/* Tab animation — staggered entry */
+.tab-page { animation:tabIn .32s cubic-bezier(.22,1,.36,1) both; }
+@keyframes tabIn {
+  from { opacity:0; transform:translateY(14px) scale(.99); filter:blur(2px); }
+  to   { opacity:1; transform:translateY(0)     scale(1);  filter:blur(0); }
+}
+
+/* =========================================
+   TYPOGRAPHY
+   ========================================= */
+.page-title {
+  font-size:16px; font-weight:700; letter-spacing:2.5px; text-transform:uppercase;
+  margin-bottom:22px; display:flex; align-items:center; gap:12px;
+  font-family:'Orbitron',monospace; animation:titleSlide .4s cubic-bezier(.22,1,.36,1);
+}
+@keyframes titleSlide { from{opacity:0;transform:translateX(-10px)} to{opacity:1;transform:translateX(0)} }
+.page-title-accent { color:var(--ac); filter:drop-shadow(0 0 8px rgba(var(--acr),.6)); }
+.page-title-line {
+  flex:1; height:1px;
+  background:linear-gradient(90deg, rgba(var(--acr),.3), rgba(var(--ac2r),.15), transparent);
+}
+
+.section-title {
+  font-size:9.5px; letter-spacing:2.5px; color:var(--ac); text-transform:uppercase;
+  margin-bottom:13px; font-family:var(--mono);
+  text-shadow:0 0 10px rgba(var(--acr),.4);
+}
+.field-label {
+  font-size:9.5px; color:var(--tx2); font-family:var(--mono);
+  display:block; margin-bottom:5px; letter-spacing:.7px;
+}
+
+/* =========================================
+   GRIDS
+   ========================================= */
+.grid-auto { display:grid; grid-template-columns:repeat(auto-fill,minmax(255px,1fr)); gap:14px; }
+.grid-2    { display:grid; grid-template-columns:1fr 1fr; gap:9px; }
+.grid-3    { display:grid; grid-template-columns:repeat(3,1fr); gap:7px; }
+
+/* =========================================
+   CARDS
+   ========================================= */
+.af-card {
+  background:var(--cardbg); border:1px solid var(--cardbr);
+  border-radius:var(--radius); padding:18px;
+  position:relative; overflow:hidden;
+  transition:border-color .25s, transform .25s, box-shadow .25s;
+  
+}
+/* Top glow strip */
+.af-card::after {
+  content:''; position:absolute; top:0; left:15%; right:15%; height:1px;
+  background:linear-gradient(90deg, transparent, rgba(var(--acr),.25), transparent);
+  transition:.3s; pointer-events:none;
+}
+/* Radial hover glow */
+.af-card::before {
+  content:''; position:absolute; inset:0; pointer-events:none;
+  background:radial-gradient(circle at 50% -10%, rgba(var(--acr),.07), transparent 65%);
+  opacity:0; transition:.35s;
+}
+.af-card:hover {
+  border-color:rgba(var(--acr),.22);
+  transform:translateY(-4px);
+  box-shadow:0 18px 40px rgba(0,0,0,.55), 0 0 0 1px rgba(var(--acr),.06);
+}
+.af-card:hover::before  { opacity:1; }
+.af-card:hover::after   { background:linear-gradient(90deg,transparent,rgba(var(--acr),.5),transparent); }
+
+/* =========================================
+   BUTTONS
+   ========================================= */
+.btn {
+  display:inline-block; padding:9px 15px; border:none; border-radius:9px;
+  font-size:10px; font-weight:700; letter-spacing:1.5px; text-transform:uppercase;
+  font-family:var(--font); transition:all .22s; cursor:pointer;
+  position:relative; overflow:hidden;
+}
+/* Shimmer effect on all buttons */
+.btn::before {
+  content:''; position:absolute; top:0; left:-100%; width:60%; height:100%;
+  background:linear-gradient(90deg, transparent, rgba(255,255,255,.12), transparent);
+  transition:left .45s ease; pointer-events:none;
+}
+.btn:hover::before { left:150%; }
+
+.btn-primary {
+  background:linear-gradient(135deg, var(--ac), var(--ac2));
+  color:#000 !important;
+  box-shadow:0 4px 14px rgba(var(--acr),.3);
+}
+.btn-primary:hover {
+  box-shadow:0 6px 28px rgba(var(--acr),.6), 0 0 40px rgba(var(--ac2r),.15);
+  transform:translateY(-2px);
+}
+.btn-primary:active { transform:translateY(0); box-shadow:0 2px 8px rgba(var(--acr),.3); }
+
+.btn-secondary {
+  background:rgba(255,255,255,.06); color:rgba(255,255,255,.8) !important;
+  border:1px solid rgba(255,255,255,.1);
+}
+.btn-secondary:hover {
+  background:rgba(255,255,255,.11); color:#fff !important;
+  border-color:rgba(255,255,255,.22);
+  transform:translateY(-1px);
+  box-shadow:0 4px 16px rgba(0,0,0,.4);
+}
+
+.btn-danger {
+  background:rgba(var(--redr),.08); color:var(--red) !important;
+  border:1px solid rgba(var(--redr),.28);
+}
+.btn-danger:hover {
+  background:rgba(var(--redr),.2);
+  box-shadow:0 0 18px rgba(var(--redr),.4);
+  transform:translateY(-1px);
+}
+
+.btn-full { width:100%; display:block; text-align:center; margin-bottom:8px; }
+.btn-full:last-child { margin-bottom:0; }
+
+/* GLOW button variant */
+.btn-glow {
+  background:transparent; color:var(--ac) !important;
+  border:1px solid rgba(var(--acr),.4);
+  box-shadow:0 0 12px rgba(var(--acr),.15), inset 0 0 12px rgba(var(--acr),.04);
+}
+.btn-glow:hover {
+  background:rgba(var(--acr),.08);
+  border-color:rgba(var(--acr),.7);
+  box-shadow:0 0 24px rgba(var(--acr),.4), inset 0 0 20px rgba(var(--acr),.08);
+  transform:translateY(-2px);
+}
+
+/* =========================================
+   INPUTS
+   ========================================= */
+.af-input {
+  width:100%; padding:10px 14px; border-radius:9px;
+  border:1px solid rgba(255,255,255,.1);
+  background:rgba(0,0,0,.55); color:#fff; font-size:12.5px;
+  outline:none; font-family:var(--mono); transition:all .22s;
+  display:block; margin-bottom:9px;
+}
+.af-input:focus {
+  border-color:rgba(var(--acr),.6);
+  box-shadow:0 0 0 3px rgba(var(--acr),.1), 0 0 16px rgba(var(--acr),.12);
+  background:rgba(0,0,0,.65);
+}
+.af-input::placeholder { color:rgba(255,255,255,.2); }
+select.af-input { cursor:pointer; }
+select.af-input option { background:#0d0f1e; }
+
+/* =========================================
+   DATA ROWS
+   ========================================= */
+.data-row {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:9px 0; border-bottom:1px solid rgba(255,255,255,.04);
+  transition:background .2s;
+}
+.data-row:last-child { border-bottom:none; }
+.data-row:hover { background:rgba(var(--acr),.03); margin:0 -6px; padding:9px 6px; border-radius:6px; }
+.data-label { color:var(--tx2); font-family:var(--mono); font-size:10px; }
+.data-value { color:var(--ac); font-weight:700; font-family:var(--mono); font-size:10.5px; }
+
+/* =========================================
+   PROFILE CARDS
+   ========================================= */
+.profile-card {
+  background:var(--cardbg); border:1px solid var(--cardbr);
+  border-radius:var(--radius); padding:14px;
+  display:flex; align-items:center; gap:13px;
+  transition:all .22s; cursor:pointer; position:relative; overflow:hidden;
+}
+.profile-card::before {
+  content:''; position:absolute; inset:0; pointer-events:none;
+  background:linear-gradient(135deg, rgba(var(--acr),.04), transparent);
+  opacity:0; transition:.25s;
+}
+.profile-card:hover {
+  border-color:rgba(var(--acr),.28);
+  transform:translateY(-3px) scale(1.01);
+  box-shadow:0 12px 30px rgba(0,0,0,.5);
+}
+.profile-card:hover::before { opacity:1; }
+
+.profile-ava {
+  width:42px; height:42px; border-radius:10px; flex-shrink:0;
+  background:linear-gradient(135deg, rgba(var(--acr),.15), rgba(var(--ac2r),.15));
+  border:1px solid rgba(var(--acr),.25);
+  display:flex; align-items:center; justify-content:center;
+  font-size:20px; transition:transform .25s;
+}
+.profile-card:hover .profile-ava { transform:scale(1.08) rotate(-3deg); }
+.profile-name { font-size:13px; font-weight:700; margin-bottom:2px; }
+.profile-meta { font-size:10px; color:var(--tx2); font-family:var(--mono); }
+.profile-del {
+  margin-left:auto; width:28px; height:28px; border-radius:8px; flex-shrink:0;
+  background:rgba(var(--redr),.05); border:1px solid rgba(var(--redr),.15);
+  color:rgba(var(--redr),.45); font-size:13px;
+  display:flex; align-items:center; justify-content:center; transition:.18s; cursor:pointer;
+}
+.profile-del:hover {
+  background:rgba(var(--redr),.22); color:var(--red);
+  box-shadow:0 0 12px rgba(var(--redr),.3);
+  transform:scale(1.1);
+}
+.profile-add {
+  border:1px dashed rgba(255,255,255,.1); border-radius:var(--radius);
+  padding:20px; display:flex; align-items:center; justify-content:center;
+  gap:10px; color:var(--tx2); font-size:11px; letter-spacing:1px;
+  transition:all .22s; cursor:pointer; min-height:72px;
+  flex-direction:column;
+}
+.profile-add:hover {
+  border-color:rgba(var(--acr),.4); color:var(--ac);
+  background:rgba(var(--acr),.04);
+  box-shadow:inset 0 0 30px rgba(var(--acr),.04);
+  transform:translateY(-2px);
+}
+
+/* =========================================
+   THEME SELECTOR CARDS (new)
+   ========================================= */
+.theme-grid {
+  display:grid; grid-template-columns:repeat(3,1fr); gap:8px;
+}
+.theme-card {
+  border-radius:10px; padding:11px 8px; cursor:pointer;
+  border:1.5px solid rgba(255,255,255,.08); transition:all .22s;
+  display:flex; flex-direction:column; align-items:center; gap:6px;
+  font-size:9px; letter-spacing:1px; font-family:var(--mono);
+  color:rgba(255,255,255,.55); position:relative; overflow:hidden;
+}
+.theme-card::before {
+  content:''; position:absolute; top:0; left:0; right:0; height:3px; pointer-events:none;
+  border-radius:2px 2px 0 0; transition:.2s;
+}
+.theme-card:hover { transform:translateY(-3px); color:#fff; }
+.theme-card.is-active { border-color:rgba(255,255,255,.3); color:#fff; }
+
+.tc-default { background:rgba(0,240,255,.06); }
+.tc-default::before { background:linear-gradient(90deg,#00f0ff,#7b2fff); }
+.tc-cyber   { background:rgba(255,0,229,.06); }
+.tc-cyber::before   { background:linear-gradient(90deg,#ff00e5,#ffe600); }
+.tc-hacker  { background:rgba(0,255,65,.06); }
+.tc-hacker::before  { background:linear-gradient(90deg,#00ff41,#007a1f); }
+.tc-blood   { background:rgba(255,34,34,.06); }
+.tc-blood::before   { background:linear-gradient(90deg,#ff2222,#ff6600); }
+.tc-ocean   { background:rgba(0,200,255,.06); }
+.tc-ocean::before   { background:linear-gradient(90deg,#00c8ff,#0055ff); }
+.tc-gold    { background:rgba(255,208,0,.06); }
+.tc-gold::before    { background:linear-gradient(90deg,#ffd000,#ff8800); }
+.tc-matrix  { background:rgba(0,255,65,.06); }
+.tc-matrix::before  { background:linear-gradient(90deg,#00ff41,#003311); }
+.tc-rose    { background:rgba(255,110,180,.06); }
+.tc-rose::before    { background:linear-gradient(90deg,#ff6eb4,#c44dff); }
+.tc-ice     { background:rgba(128,255,255,.06); }
+.tc-ice::before     { background:linear-gradient(90deg,#80ffff,#4488ff); }
+.tc-toxic   { background:rgba(170,255,0,.06); }
+.tc-toxic::before   { background:linear-gradient(90deg,#aaff00,#ff8800); }
+
+/* =========================================
+   RANGE SLIDER
+   ========================================= */
+.range-row { display:flex; align-items:center; gap:10px; margin:6px 0 13px; }
+.range-row label { font-size:10px; color:var(--tx2); font-family:var(--mono); min-width:90px; }
+.range-row input[type=range] {
+  flex:1; -webkit-appearance:none; height:4px; border-radius:4px;
+  background:rgba(255,255,255,.1); outline:none; cursor:pointer;
+  transition:background .2s;
+}
+.range-row input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance:none; width:16px; height:16px; border-radius:50%;
+  background:var(--ac); box-shadow:0 0 10px rgba(var(--acr),.8); cursor:pointer;
+  transition:transform .15s;
+}
+.range-row input[type=range]::-webkit-slider-thumb:hover { transform:scale(1.2); }
+.range-val { font-size:10px; color:var(--ac); font-family:var(--mono); min-width:36px; text-align:right; }
+
+/* =========================================
+   COLOR ROW
+   ========================================= */
+.color-row {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:9px 0; border-bottom:1px solid rgba(255,255,255,.04);
+}
+.color-row label { font-size:10.5px; color:var(--tx2); font-family:var(--mono); }
+.color-row input[type=color] {
+  width:44px; height:30px; border:1.5px solid rgba(255,255,255,.12);
+  border-radius:8px; background:none; padding:2px; cursor:pointer; transition:.18s;
+}
+.color-row input[type=color]:hover { border-color:rgba(var(--acr),.6); transform:scale(1.05); }
+
+/* =========================================
+   TOASTS
+   ========================================= */
+#toasts {
+  position:fixed; bottom:18px; right:18px;
+  display:flex; flex-direction:column-reverse; gap:7px;
+  z-index:8000; pointer-events:none;
+}
+.toast {
+  background:rgba(4,5,18,.97); border:1px solid rgba(255,255,255,.1);
+  border-left:3px solid var(--ac); padding:11px 16px; border-radius:10px;
+  color:#fff; font-size:11.5px; font-weight:600; font-family:var(--font);
+  box-shadow:0 8px 28px rgba(0,0,0,.7), 0 0 20px rgba(var(--acr),.08);
+  animation:toastIn .32s cubic-bezier(.22,1,.36,1);
+  
+}
+.toast.toast-err { border-left-color:var(--red); box-shadow:0 8px 28px rgba(0,0,0,.7),0 0 20px rgba(var(--redr),.12); }
+.toast.toast-ok  { border-left-color:var(--grn); box-shadow:0 8px 28px rgba(0,0,0,.7),0 0 20px rgba(var(--grnr),.12); }
+@keyframes toastIn {
+  from { opacity:0; transform:translateX(44px) scale(.9); }
+  to   { opacity:1; transform:translateX(0)    scale(1); }
+}
+
+/* =========================================
+   MODAL
+   ========================================= */
+#modal-overlay {
+  position:fixed; inset:0; z-index:8888; background:rgba(0,0,0,.8);
+  display:none; align-items:center; justify-content:center;
+  
+}
+#modal-overlay.is-open { display:flex; }
+.modal-box {
+  background:rgba(6,7,20,.99); border:1px solid rgba(var(--acr),.22);
+  border-radius:18px; padding:28px 28px 22px; width:440px; max-width:92vw;
+  box-shadow:0 24px 80px rgba(0,0,0,.9), 0 0 0 1px rgba(var(--acr),.06), var(--glow);
+  animation:modalIn .25s cubic-bezier(.22,1,.36,1);
+  position:relative; overflow:hidden;
+}
+.modal-box::before {
+  content:''; position:absolute; top:0; left:20%; right:20%; height:1px; pointer-events:none;
+  background:linear-gradient(90deg,transparent,rgba(var(--acr),.6),transparent);
+}
+@keyframes modalIn {
+  from { opacity:0; transform:scale(.92) translateY(12px); }
+  to   { opacity:1; transform:scale(1)   translateY(0); }
+}
+.modal-title {
+  font-size:14px; font-weight:700; letter-spacing:1.5px;
+  font-family:'Orbitron',monospace; color:var(--ac);
+  margin-bottom:18px; display:flex; align-items:center; gap:9px;
+}
+.modal-close {
+  margin-left:auto; width:26px; height:26px; border-radius:7px; cursor:pointer;
+  background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.1);
+  color:rgba(255,255,255,.35); display:flex; align-items:center; justify-content:center;
+  font-size:13px; transition:.18s;
+}
+.modal-close:hover { background:rgba(var(--redr),.22); color:var(--red); border-color:rgba(var(--redr),.4); }
+
+/* =========================================
+   BIND CARDS
+   ========================================= */
+.bind-card {
+  background:var(--cardbg); border:1px solid var(--cardbr);
+  border-radius:12px; padding:13px 15px;
+  display:flex; align-items:center; gap:12px;
+  cursor:pointer; transition:all .22s; position:relative; overflow:hidden;
+}
+.bind-card::before {
+  content:''; position:absolute; left:0; top:0; bottom:0; width:3px; pointer-events:none;
+  background:linear-gradient(180deg, var(--ac), var(--ac2));
+  border-radius:0 2px 2px 0; opacity:0; transition:.2s;
+}
+.bind-card:hover { border-color:rgba(var(--acr),.25); transform:translateY(-2px); }
+.bind-card:hover::before { opacity:1; }
+
+/* =========================================
+   BADGE
+   ========================================= */
+.badge {
+  font-size:8px; letter-spacing:1.5px; padding:2px 7px; border-radius:4px;
+  font-family:var(--mono); font-weight:700; text-transform:uppercase;
+}
+.badge-bypass { background:rgba(var(--acr),.12); color:var(--ac); border:1px solid rgba(var(--acr),.25); }
+.badge-direct { background:rgba(255,255,255,.06); color:var(--tx2); border:1px solid rgba(255,255,255,.1); }
+
+/* =========================================
+   HOME ZAPRET STATUS CHIP
+   ========================================= */
+.zapret-chip {
+  display:inline-flex; align-items:center; gap:8px;
+  padding:8px 16px; border-radius:30px;
+  border:1px solid rgba(var(--acr),.2);
+  background:rgba(var(--acr),.05);
+  font-family:var(--mono); font-size:11px; letter-spacing:2px;
+  transition:all .3s;
+}
+.zapret-chip .chip-dot {
+  width:7px; height:7px; border-radius:50%; background:rgba(255,255,255,.2); transition:.3s;
+}
+.zapret-chip.online { border-color:rgba(var(--grnr),.35); background:rgba(var(--grnr),.06); }
+.zapret-chip.online .chip-dot { background:var(--grn); box-shadow:0 0 8px rgba(var(--grnr),.8); animation:dotPulse 2s infinite; }
+
+/* =========================================
+   QUICK LAUNCH SITE CARDS
+   ========================================= */
+.site-card {
+  background:var(--cardbg); border:1px solid var(--cardbr);
+  border-radius:var(--radius); padding:16px 18px;
+  position:relative; overflow:hidden; transition:all .22s;
+}
+.site-card-header {
+  display:flex; align-items:center; gap:10px; margin-bottom:12px;
+}
+.site-icon {
+  width:36px; height:36px; border-radius:9px; flex-shrink:0;
+  display:flex; align-items:center; justify-content:center; font-size:20px;
+  border:1px solid rgba(255,255,255,.08);
+  background:rgba(255,255,255,.04);
+}
+.site-name { font-size:14px; font-weight:700; letter-spacing:.5px; }
+
+/* =========================================
+   GLOW DIVIDER
+   ========================================= */
+.glow-sep {
+  height:1px; margin:18px 0;
+  background:linear-gradient(90deg, transparent, rgba(var(--acr),.25), rgba(var(--ac2r),.15), transparent);
+}
+
+/* =========================================
+   MATRIX RAIN (special canvas layer)
+   ========================================= */
+#matrix-canvas {
+  position:fixed; inset:0; z-index:0; pointer-events:none;
+  opacity:0; transition:opacity 1s;
+}
+body.th-matrix #matrix-canvas { opacity:.18; }
+body.th-hacker #matrix-canvas { opacity:.12; }
+
+/* =========================================
+   STAGGER ANIMATION HELPERS
+   ========================================= */
+.stagger > * { animation:staggerIn .35s cubic-bezier(.22,1,.36,1) both; }
+.stagger > *:nth-child(1)  { animation-delay:.04s; }
+.stagger > *:nth-child(2)  { animation-delay:.08s; }
+.stagger > *:nth-child(3)  { animation-delay:.12s; }
+.stagger > *:nth-child(4)  { animation-delay:.16s; }
+.stagger > *:nth-child(5)  { animation-delay:.20s; }
+.stagger > *:nth-child(6)  { animation-delay:.24s; }
+@keyframes staggerIn {
+  from { opacity:0; transform:translateY(12px) scale(.97); }
+  to   { opacity:1; transform:translateY(0)     scale(1); }
+}
+/* =========================================
+   DIAG ROWS
+   ========================================= */
+.diag-row {
+  display:flex; align-items:center; gap:12px;
+  padding:8px 12px; border-radius:8px;
+  background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.06);
+  transition:.2s;
+}
+.diag-row:hover { background:rgba(255,255,255,.05); }
+.diag-icon { font-size:15px; flex-shrink:0; width:20px; text-align:center; }
+.diag-name { flex:1; font-size:11px; font-weight:700; color:var(--tx); font-family:var(--mono); }
+.diag-ver  { font-size:10px; color:var(--tx2); font-family:var(--mono); min-width:90px; text-align:right; }
+.diag-status { font-size:10px; font-family:var(--mono); min-width:70px; text-align:right; font-weight:700; }
+.diag-status.ok   { color:var(--grn); }
+.diag-status.warn { color:#ffd000; }
+.diag-status.err  { color:var(--red); }
+.diag-status.wait { color:var(--ac); }
+.diag-row-placeholder { font-size:11px; color:var(--tx2); font-family:var(--mono); padding:10px 0; text-align:center; }
+.diag-log-ok   { color:var(--grn); }
+.diag-log-warn { color:#ffd000; }
+.diag-log-err  { color:var(--red); }
+.diag-log-info { color:var(--tx2); }
+.diag-log-step { color:var(--ac); font-weight:700; }
+
+/* =========================================
+   HOME SITE CARDS
+   ========================================= */
+.home-site-card { padding:14px 16px; }
+.home-site-name {
+  font-size:12px; font-weight:700; letter-spacing:.5px;
+  color:var(--tx); margin-bottom:10px; font-family:var(--font);
+}
+.home-site-btns { display:grid; grid-template-columns:1fr 1fr; gap:5px; }
+.home-site-btns button {
+  background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.08);
+  color:rgba(255,255,255,.7); border-radius:6px; padding:5px 8px;
+  font-size:10px; font-family:var(--mono); cursor:pointer; transition:all .18s;
+}
+.home-site-btns button:hover {
+  background:rgba(var(--acr),.12); border-color:rgba(var(--acr),.3);
+  color:var(--ac);
+}
+.home-site-btns button:active { transform:scale(.97); }
+.toggle-sw { position:relative; display:inline-block; width:38px; height:22px; flex-shrink:0; }
+.toggle-sw input { opacity:0; width:0; height:0; }
+.toggle-knob {
+  position:absolute; inset:0; border-radius:22px; cursor:pointer;
+  background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.15);
+  transition:all .25s;
+}
+.toggle-knob::before {
+  content:''; position:absolute; left:3px; top:50%; transform:translateY(-50%);
+  width:14px; height:14px; border-radius:50%; background:rgba(255,255,255,.4);
+  transition:all .25s;
+}
+.toggle-sw input:checked + .toggle-knob {
+  background:rgba(var(--acr),.25); border-color:rgba(var(--acr),.5);
+  box-shadow:0 0 10px rgba(var(--acr),.3);
+}
+.toggle-sw input:checked + .toggle-knob::before {
+  left:calc(100% - 17px); background:var(--ac);
+  box-shadow:0 0 8px rgba(var(--acr),.8);
+}
+
+/* =========================================
+   CHEBURNET STATUS
+   ========================================= */
+.cbn-test-row {
+  display:flex; align-items:center; gap:9px; padding:6px 10px;
+  border-radius:8px; background:rgba(255,255,255,.03);
+  border:1px solid rgba(255,255,255,.06); font-family:var(--mono); font-size:10.5px;
+  transition:all .25s;
+}
+.cbn-dot {
+  width:8px; height:8px; border-radius:50%; flex-shrink:0;
+  background:rgba(255,255,255,.2); transition:all .4s;
+}
+.cbn-dot.ok   { background:var(--grn); box-shadow:0 0 8px rgba(var(--grnr),.8); }
+.cbn-dot.err  { background:var(--red); box-shadow:0 0 8px rgba(var(--redr),.8); }
+.cbn-dot.wait { background:var(--ylw); animation:dotPulse 1s infinite; }
+
+</style>
+</head>
+<body>
+
+<canvas id="bgcanvas"></canvas>
+<canvas id="matrix-canvas"></canvas>
+<div id="scanlines"></div>
+
+<!-- ===========================
+     MODAL
+     =========================== -->
+<div id="modal-overlay" onclick="if(event.target===this)closeModal()">
+  <div class="modal-box" id="modal-box"></div>
+</div>
+
+<!-- ===========================
+     MAIN APP
+     =========================== -->
+<div id="app">
+  <div id="titlebar">
+    <div id="logo">
+      <div id="logo-box"><img id="logo-img" src="" width="22" height="22" style="border-radius:4px;display:block"></div>
+      ARTOFIX <span class="logo-accent">2.3</span>
+    </div>
+    <div id="winbtns">
+      <div class="winbtn" title="Свернуть" onclick="ipc.send('win-act','min')">─</div>
+      <div class="winbtn" id="winbtn-close" title="Скрыть в трей" onclick="ipc.send('win-act','hide')">✕</div>
+    </div>
+  </div>
+
+  <div id="main-layout">
+    <nav id="sidebar">
+      <div class="nav-sep">Меню</div>
+      <button class="nav-btn is-active" data-tab="home"     onclick="goTab('home',this)"><span class="nav-icon">⚡</span>Быстрый старт</button>
+      <button class="nav-btn"           data-tab="profiles" onclick="goTab('profiles',this)"><span class="nav-icon">👤</span>Аккаунты</button>
+      <button class="nav-btn"           data-tab="binds"    onclick="goTab('binds',this)"><span class="nav-icon">🔗</span>Бинды</button>
+      <button class="nav-btn"           data-tab="adblock"  onclick="goTab('adblock',this)"><span class="nav-icon">🛡️</span>Блокировка рекламы</button>
+      <div class="nav-sep">Система</div>
+      <button class="nav-btn"           data-tab="settings" onclick="goTab('settings',this)"><span class="nav-icon">🎨</span>Внешний вид</button>
+      <button class="nav-btn"           data-tab="config"   onclick="goTab('config',this)"><span class="nav-icon">⚙️</span>Конфигурация</button>
+      <button class="nav-btn"           data-tab="cheburnet" onclick="goTab('cheburnet',this)"><span class="nav-icon">🛡</span>Чебурнет</button>
+      <button class="nav-btn"           data-tab="logs"      onclick="goTab('logs',this)"><span class="nav-icon" id="logs-nav-icon">📋</span>Логи</button>
+      <button class="nav-btn"           data-tab="diag"      onclick="goTab('diag',this)"><span class="nav-icon">🔧</span>Компоненты</button>
+      <button class="nav-btn"           data-tab="zapret-update" onclick="goTab('zapret-update',this)"><span class="nav-icon">🔄</span>Обновление Zapret</button>
+      <button class="nav-btn"           data-tab="info"     onclick="goTab('info',this)"><span class="nav-icon">ℹ️</span>О программе</button>
+
+      <div id="status-box">
+        <div class="status-row">
+          <div id="zapret-dot"></div>
+          <span id="zapret-label">ZAPRET OFFLINE</span>
+        </div>
+        <button class="status-btn sb-start" onclick="zapretStart()">▶ Активировать</button>
+        <button class="status-btn sb-stop"  onclick="zapretStop()">■ Остановить</button>
+      </div>
+    </nav>
+
+    <main id="content-area"></main>
+  </div>
+
+  <div id="toasts"></div>
+</div>
+
+<!-- ===========================
+     PAGE TEMPLATES
+     =========================== -->
+
+<!-- HOME -->
+<template id="tpl-home">
+<div class="tab-page">
+  <div class="page-title"><span class="page-title-accent">⚡</span> Быстрый старт <div class="page-title-line"></div></div>
+
+  <!-- Zapret статус + кнопки управления -->
+  <div class="af-card" style="margin-bottom:14px;display:flex;align-items:center;gap:18px;flex-wrap:wrap">
+    <div style="display:flex;align-items:center;gap:10px;flex:1">
+      <div id="home-zap-dot" style="width:10px;height:10px;border-radius:50%;background:var(--red);flex-shrink:0;transition:.3s"></div>
+      <span style="font-family:var(--mono);font-size:11px;color:var(--tx2)">Zapret: <span id="home-zap-label" style="color:var(--red);font-weight:700">ВЫКЛ</span></span>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-primary" style="padding:7px 18px" onclick="zapretStart()">Запустить</button>
+      <button class="btn btn-secondary" style="padding:7px 18px" onclick="zapretStop()">Стоп</button>
+    </div>
+  </div>
+
+  <!-- Сайты -->
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px">
+
+    <div class="af-card home-site-card">
+      <div class="home-site-name">YouTube</div>
+      <div class="home-site-btns">
+        <button onclick="launchBrowser('https://youtube.com','yt','chrome',true)">Chrome</button>
+        <button onclick="launchBrowser('https://youtube.com','yt_e','msedge',true)">Edge</button>
+        <button onclick="launchBrowser('https://youtube.com','yt_f','firefox',true)">Firefox</button>
+        <button onclick="launchBrowser('https://youtube.com','yt_y','yandex',true)">Яндекс</button>
+      </div>
+    </div>
+
+    <div class="af-card home-site-card">
+      <div class="home-site-name">Discord</div>
+      <div class="home-site-btns">
+        <button onclick="launchBrowser('https://discord.com/app','dc','chrome',true)">Chrome</button>
+        <button onclick="launchBrowser('https://discord.com/app','dc_e','msedge',true)">Edge</button>
+        <button onclick="launchBrowser('https://discord.com/app','dc_f','firefox',true)">Firefox</button>
+        <button onclick="launchBrowser('https://discord.com/app','dc_y','yandex',true)">Яндекс</button>
+      </div>
+    </div>
+
+    <div class="af-card home-site-card">
+      <div class="home-site-name">Spotify</div>
+      <div class="home-site-btns">
+        <button onclick="launchBrowser('https://open.spotify.com','sp','chrome',true)">Chrome</button>
+        <button onclick="launchBrowser('https://open.spotify.com','sp_e','msedge',true)">Edge</button>
+        <button onclick="launchBrowser('https://open.spotify.com','sp_f','firefox',true)">Firefox</button>
+        <button onclick="launchBrowser('https://open.spotify.com','sp_y','yandex',true)">Яндекс</button>
+      </div>
+    </div>
+
+    <div class="af-card home-site-card">
+      <div class="home-site-name">Twitch</div>
+      <div class="home-site-btns">
+        <button onclick="launchBrowser('https://twitch.tv','tw','chrome',true)">Chrome</button>
+        <button onclick="launchBrowser('https://twitch.tv','tw_e','msedge',true)">Edge</button>
+        <button onclick="launchBrowser('https://twitch.tv','tw_f','firefox',true)">Firefox</button>
+        <button onclick="launchBrowser('https://twitch.tv','tw_y','yandex',true)">Яндекс</button>
+      </div>
+    </div>
+
+    <div class="af-card home-site-card">
+      <div class="home-site-name">Telegram Web</div>
+      <div class="home-site-btns">
+        <button onclick="launchBrowser('https://web.telegram.org','tg','chrome',true)">Chrome</button>
+        <button onclick="launchBrowser('https://web.telegram.org','tg_e','msedge',true)">Edge</button>
+        <button onclick="launchBrowser('https://web.telegram.org','tg_f','firefox',true)">Firefox</button>
+        <button onclick="launchBrowser('https://web.telegram.org','tg_y','yandex',true)">Яндекс</button>
+      </div>
+    </div>
+
+    <div class="af-card home-site-card">
+      <div class="home-site-name">Instagram</div>
+      <div class="home-site-btns">
+        <button onclick="launchBrowser('https://instagram.com','ig','chrome',true)">Chrome</button>
+        <button onclick="launchBrowser('https://instagram.com','ig_e','msedge',true)">Edge</button>
+        <button onclick="launchBrowser('https://instagram.com','ig_f','firefox',true)">Firefox</button>
+        <button onclick="launchBrowser('https://instagram.com','ig_y','yandex',true)">Яндекс</button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Инструменты -->
+  <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+    <button class="btn btn-secondary" onclick="runCmd('taskkill /f /im chrome.exe /t & taskkill /f /im msedge.exe /t & taskkill /f /im firefox.exe /t'); showToast('Браузеры закрыты')">Закрыть браузеры</button>
+    <button class="btn btn-secondary" onclick="ipc.send('open-folder','profiles')">Папка профилей</button>
+    <button class="btn btn-secondary" onclick="ipc.send('open-folder','Zapret')">Папка Zapret</button>
+  </div>
+</div>
+</template>
+
+<!-- PROFILES -->
+<template id="tpl-profiles">
+<div class="tab-page">
+  <div class="page-title"><span class="page-title-accent">👤</span> Аккаунты <div class="page-title-line"></div></div>
+  <div class="grid-auto" id="profiles-grid"></div>
+</div>
+</template>
+
+<!-- BINDS -->
+<template id="tpl-binds">
+<div class="tab-page">
+  <div class="page-title"><span class="page-title-accent">🔗</span> Бинды <div class="page-title-line"></div></div>
+
+  <!-- Форма создания бинда -->
+  <div class="af-card" style="margin-bottom:13px">
+    <div class="section-title">Создать бинд</div>
+    <div class="grid-2" style="margin-bottom:0">
+      <div>
+        <label class="field-label">URL или путь к .exe / ярлыку</label>
+        <input class="af-input" id="bind-url" type="text" placeholder="https://... или C:\path\to\app.exe">
+        <label class="field-label">Имя профиля браузера</label>
+        <input class="af-input" id="bind-profile" type="text" placeholder="my_profile (для браузера)">
+      </div>
+      <div>
+        <label class="field-label">Браузер</label>
+        <select class="af-input" id="bind-browser">
+          <option value="chrome">Chrome</option>
+          <option value="msedge">Edge</option>
+          <option value="firefox">Firefox</option>
+          <option value="yandex">Яндекс</option>
+          <option value="app">— Приложение / ярлык —</option>
+        </select>
+        <label class="field-label">Обход блокировок</label>
+        <select class="af-input" id="bind-bypass">
+          <option value="1">✅ С обходом (Zapret)</option>
+          <option value="0">❌ Без обхода</option>
+        </select>
+        <label class="field-label">Название бинда</label>
+        <input class="af-input" id="bind-name" type="text" placeholder="Мой YouTube" style="margin-bottom:0">
+      </div>
+    </div>
+    <div class="grid-2" style="margin-top:10px">
+      <button class="btn btn-primary" onclick="addBind()">＋ Добавить бинд</button>
+      <button class="btn btn-secondary" onclick="renderBinds()">↺ Обновить список</button>
+    </div>
+  </div>
+
+  <!-- Список сохранённых биндов -->
+  <div class="section-title" style="margin-bottom:9px">Сохранённые бинды</div>
+  <div class="grid-auto" id="binds-grid"></div>
+
+  <!-- Быстрые сайты -->
+  <div class="section-title" style="margin-top:16px;margin-bottom:9px">Быстрый запуск</div>
+  <div class="grid-auto">
+    <div class="af-card">
+      <div class="section-title">Популярные сайты</div>
+      <button class="btn btn-secondary btn-full" onclick="launchBrowser('https://twitch.tv','twitch','chrome',true)">🎮 Twitch</button>
+      <button class="btn btn-secondary btn-full" onclick="launchBrowser('https://web.telegram.org','tg','msedge',true)">💬 Telegram Web</button>
+      <button class="btn btn-secondary btn-full" onclick="launchBrowser('https://github.com','gh','chrome',false)">💻 GitHub</button>
+      <button class="btn btn-secondary btn-full" onclick="launchBrowser('https://open.spotify.com','spot','chrome',true)">🎵 Spotify</button>
+      <button class="btn btn-secondary btn-full" onclick="launchBrowser('https://netflix.com','nf','msedge',true)">📺 Netflix</button>
+      <button class="btn btn-secondary btn-full" onclick="launchBrowser('https://youtube.com','yt','chrome',true)">▶ YouTube</button>
+    </div>
+  </div>
+</div>
+</template>
+
+<!-- ADBLOCK -->
+<template id="tpl-adblock">
+<div class="tab-page">
+  <div class="page-title"><span class="page-title-accent">🛡️</span> Блокировка рекламы <div class="page-title-line"></div></div>
+  <div class="grid-auto">
+
+    <!-- HOSTS блок -->
+    <div class="af-card" style="grid-column:1/-1">
+      <div class="section-title">🌐 Системный блок (hosts-файл) — работает для всех браузеров</div>
+      <p style="font-size:10.5px;color:var(--tx2);font-family:var(--mono);margin-bottom:14px;line-height:1.7">
+        Добавляет домены рекламных сетей в <code style="color:var(--ac)">C:\Windows\System32\drivers\etc\hosts</code>.<br>
+        Работает сразу для всех браузеров и приложений. Требует прав администратора при первом применении.
+      </p>
+
+      <!-- Пресеты -->
+      <div class="section-title" style="margin-bottom:8px">Готовые списки</div>
+      <div style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:14px">
+        <button class="btn btn-secondary" style="font-size:9px;padding:7px 10px" onclick="addPreset('google_ads')">Google Ads</button>
+        <button class="btn btn-secondary" style="font-size:9px;padding:7px 10px" onclick="addPreset('yandex_ads')">Яндекс Реклама</button>
+        <button class="btn btn-secondary" style="font-size:9px;padding:7px 10px" onclick="addPreset('meta_ads')">Meta/Facebook Ads</button>
+        <button class="btn btn-secondary" style="font-size:9px;padding:7px 10px" onclick="addPreset('trackers')">Трекеры/Аналитика</button>
+        <button class="btn btn-secondary" style="font-size:9px;padding:7px 10px" onclick="addPreset('casino')">Казино/Ставки</button>
+        <button class="btn btn-secondary" style="font-size:9px;padding:7px 10px" onclick="addPreset('malware')">Малварь/Фишинг</button>
+        <button class="btn btn-danger"    style="font-size:9px;padding:7px 10px" onclick="clearAllDomains()">✕ Очистить всё</button>
+      </div>
+
+      <!-- Ручное добавление -->
+      <div class="section-title" style="margin-bottom:8px">Добавить домен вручную</div>
+      <div style="display:flex;gap:8px;margin-bottom:14px">
+        <input class="af-input" id="hosts-new-domain" type="text" placeholder="ads.example.com" style="margin-bottom:0;flex:1">
+        <button class="btn btn-primary" style="flex-shrink:0" onclick="addHostsDomain()">＋ Добавить</button>
+      </div>
+
+      <!-- Список доменов -->
+      <div class="section-title" style="margin-bottom:8px">Список блокировок (<span id="hosts-count">0</span> доменов)</div>
+      <div id="hosts-list" style="max-height:200px;overflow-y:auto;background:rgba(0,0,0,.35);border:1px solid var(--cardbr);border-radius:8px;padding:8px;margin-bottom:14px;font-family:var(--mono);font-size:10.5px">
+        <span style="color:var(--tx2)">Загрузка...</span>
+      </div>
+
+      <!-- Применить -->
+      <div class="grid-2">
+        <button class="btn btn-primary" onclick="applyHosts()">⚡ Применить к системе</button>
+        <button class="btn btn-secondary" onclick="loadHostsDomains()">↺ Перечитать hosts</button>
+      </div>
+      <div id="hosts-status" style="font-size:10px;color:var(--tx2);font-family:var(--mono);margin-top:8px;min-height:16px"></div>
+    </div>
+
+    <!-- uBlock блок -->
+    <div class="af-card" style="grid-column:1/-1">
+      <div class="section-title">🧩 uBlock Origin — автоустановка в профили браузера</div>
+      <p style="font-size:10.5px;color:var(--tx2);font-family:var(--mono);margin-bottom:14px;line-height:1.7">
+        Копирует расширение uBlock Origin в выбранный профиль Chrome/Edge/Yandex.<br>
+        <b style="color:var(--ac)">Требование:</b> Скачай <a onclick="openUblockLink()" style="color:var(--ac);cursor:pointer;text-decoration:underline">uBlock Origin CRX</a>,
+        распакуй в папку <code style="color:var(--ac)">assets/ublock/</code> рядом с программой.
+      </p>
+      <label class="field-label">Выбери профиль для установки</label>
+      <select class="af-input" id="ublock-profile" style="margin-bottom:10px"></select>
+      <div class="grid-2">
+        <button class="btn btn-primary" onclick="installUblock()">🧩 Установить uBlock</button>
+        <button class="btn btn-secondary" onclick="openUblockFolder()">📂 Открыть assets/ublock/</button>
+      </div>
+      <div id="ublock-status" style="font-size:10px;color:var(--tx2);font-family:var(--mono);margin-top:8px;min-height:16px"></div>
+    </div>
+
+  </div>
+</div>
+</template>
+
+<!-- SETTINGS -->
+<template id="tpl-settings">
+<div class="tab-page">
+  <div class="page-title"><span class="page-title-accent">🎨</span> Внешний вид <div class="page-title-line"></div></div>
+
+  <!-- Темы -->
+  <div class="af-card" style="margin-bottom:14px">
+    <div class="section-title">Темы оформления</div>
+    <div class="theme-grid stagger">
+      <div class="theme-card tc-default" onclick="setTheme('')"       id="tc-">⚡ Default</div>
+      <div class="theme-card tc-cyber"   onclick="setTheme('th-cyber')"  id="tc-th-cyber">🌸 Cyber</div>
+      <div class="theme-card tc-hacker"  onclick="setTheme('th-hacker')" id="tc-th-hacker">💻 Hacker</div>
+      <div class="theme-card tc-blood"   onclick="setTheme('th-blood')"  id="tc-th-blood">🩸 Blood</div>
+      <div class="theme-card tc-ocean"   onclick="setTheme('th-ocean')"  id="tc-th-ocean">🌊 Ocean</div>
+      <div class="theme-card tc-gold"    onclick="setTheme('th-gold')"   id="tc-th-gold">👑 Gold</div>
+      <div class="theme-card tc-matrix"  onclick="setTheme('th-matrix')" id="tc-th-matrix">🟩 Matrix</div>
+      <div class="theme-card tc-rose"    onclick="setTheme('th-rose')"   id="tc-th-rose">🌹 Rose</div>
+      <div class="theme-card tc-ice"     onclick="setTheme('th-ice')"    id="tc-th-ice">❄️ Ice</div>
+      <div class="theme-card tc-toxic"   onclick="setTheme('th-toxic')"  id="tc-th-toxic">☢️ Toxic</div>
+    </div>
+  </div>
+
+  <div class="grid-2" style="margin-bottom:14px">
+    <!-- Кастомные цвета -->
+    <div class="af-card">
+      <div class="section-title">Кастомные цвета</div>
+      <div class="color-row">
+        <label>Акцент 1</label>
+        <input type="color" id="color-accent"  value="#00f0ff" oninput="previewColors()">
+      </div>
+      <div class="color-row">
+        <label>Акцент 2</label>
+        <input type="color" id="color-accent2" value="#7b2fff" oninput="previewColors()">
+      </div>
+      <div class="color-row" style="border:none;padding-bottom:0">
+        <label>Прозрачность фона</label>
+        <span class="data-value" id="opacity-display">0.97</span>
+      </div>
+      <div class="range-row" style="margin-top:5px">
+        <label></label>
+        <input type="range" id="bg-opacity" min="0.70" max="0.99" step="0.01" value="0.97" oninput="previewColors()">
+      </div>
+      <div class="grid-2" style="margin-top:6px">
+        <button class="btn btn-primary" onclick="saveColors()">💾 Сохранить</button>
+        <button class="btn btn-danger"  onclick="resetColors()">↺ Сброс</button>
+      </div>
+    </div>
+
+    <!-- Эффекты -->
+    <div class="af-card">
+      <div class="section-title">Эффекты и анимации</div>
+      <div class="color-row">
+        <label>Частицы фона</label>
+        <select class="af-input" id="fx-particles" style="width:auto;margin:0;padding:5px 10px;font-size:10px" onchange="saveFx()">
+          <option value="net">Сетка</option>
+          <option value="dots">Точки</option>
+          <option value="stars">Звёзды</option>
+          <option value="none">Выкл</option>
+        </select>
+      </div>
+      <div class="color-row">
+        <label>Скорость частиц</label>
+        <span class="data-value" id="speed-display">0.5</span>
+      </div>
+      <div class="range-row" style="margin-top:5px">
+        <label></label>
+        <input type="range" id="fx-speed" min="0.1" max="2.0" step="0.1" value="0.5"
+               oninput="document.getElementById('speed-display').textContent=parseFloat(this.value).toFixed(1); saveFx()">
+      </div>
+      <div class="color-row" style="border:none">
+        <label>Сканлайны</label>
+        <select class="af-input" id="fx-scanlines" style="width:auto;margin:0;padding:5px 10px;font-size:10px" onchange="saveFx()">
+          <option value="on">Вкл</option>
+          <option value="off">Выкл</option>
+        </select>
+      </div>
+    </div>
+
+</div>
+</template>
+
+<!-- CONFIG -->
+<template id="tpl-config">
+<div class="tab-page">
+  <div class="page-title"><span class="page-title-accent">⚙️</span> Конфигурация <div class="page-title-line"></div></div>
+  <div class="grid-auto">
+
+    <div class="af-card">
+      <div class="section-title">User-Agent</div>
+      <label class="field-label">Пресеты</label>
+      <div class="grid-2" style="margin-bottom:9px">
+        <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" onclick="setUA('chrome_win')">Chrome / Win10</button>
+        <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" onclick="setUA('chrome_mac')">Chrome / Mac</button>
+        <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" onclick="setUA('edge_win')">Edge / Win11</button>
+        <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" onclick="setUA('firefox_win')">Firefox / Win</button>
+        <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" onclick="setUA('safari_mac')">Safari / Mac</button>
+        <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" onclick="setUA('mobile_android')">Android Chrome</button>
+      </div>
+      <label class="field-label">Кастомный User-Agent</label>
+      <input class="af-input" id="cfg-ua" type="text" placeholder="Mozilla/5.0 ...">
+    </div>
+
+    <div class="af-card">
+      <div class="section-title">Разрешение экрана</div>
+      <label class="field-label">Пресеты</label>
+      <div class="grid-3" style="margin-bottom:9px">
+        <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" onclick="setRes('1920,1080')">1920×1080</button>
+        <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" onclick="setRes('2560,1440')">2560×1440</button>
+        <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" onclick="setRes('1366,768')">1366×768</button>
+        <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" onclick="setRes('1280,720')">1280×720</button>
+        <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" onclick="setRes('1440,900')">1440×900</button>
+        <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" onclick="setRes('375,812')">375×812 📱</button>
+      </div>
+      <label class="field-label">Кастомное (ширина,высота)</label>
+      <input class="af-input" id="cfg-res" type="text" placeholder="1920,1080">
+      <div class="grid-2" style="margin-top:2px">
+        <button class="btn btn-primary" onclick="saveConfig()">💾 Сохранить всё</button>
+        <button class="btn btn-secondary" onclick="loadConfig()">↺ Загрузить</button>
+      </div>
+    </div>
+
+    <div class="af-card" style="grid-column:1/-1">
+      <div class="section-title">🎭 Обманка аккаунта — маскировка под старый профиль</div>
+      <p style="font-size:10.5px;color:var(--tx2);font-family:var(--mono);margin-bottom:13px;line-height:1.7">
+        Эти данные передаются в браузер через скрипты — сайты видят «старый» аккаунт вместо нового.
+      </p>
+      <div class="grid-2">
+        <div>
+          <label class="field-label">Возраст аккаунта Chrome</label>
+          <div class="grid-2" style="margin-bottom:9px">
+            <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" onclick="setSpoof('account_age','3+ года')">3+ лет</button>
+            <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" onclick="setSpoof('account_age','1-2 года')">1-2 года</button>
+            <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" onclick="setSpoof('account_age','6-12 мес')">6-12 мес</button>
+            <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" onclick="setSpoof('account_age','новый')">Новый</button>
+          </div>
+          <input class="af-input" id="spoof-age" type="text" placeholder="напр: 2 года 3 месяца">
+
+          <label class="field-label">История браузера (имитация)</label>
+          <div class="grid-2" style="margin-bottom:9px">
+            <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" onclick="setSpoof('history','активный')">Активный юзер</button>
+            <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" onclick="setSpoof('history','умеренный')">Умеренный</button>
+            <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" onclick="setSpoof('history','редкий')">Редкий</button>
+            <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" onclick="setSpoof('history','чистый')">Чистый</button>
+          </div>
+          <input class="af-input" id="spoof-history" type="text" placeholder="активный">
+        </div>
+        <div>
+          <label class="field-label">Временная зона</label>
+          <div class="grid-2" style="margin-bottom:9px">
+            <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" onclick="setSpoof('timezone','Europe/Moscow')">Москва</button>
+            <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" onclick="setSpoof('timezone','Europe/Kiev')">Киев</button>
+            <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" onclick="setSpoof('timezone','Europe/London')">Лондон</button>
+            <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" onclick="setSpoof('timezone','America/New_York')">Нью-Йорк</button>
+          </div>
+          <input class="af-input" id="spoof-tz" type="text" placeholder="Europe/Moscow">
+
+          <label class="field-label">Язык браузера</label>
+          <div class="grid-2" style="margin-bottom:9px">
+            <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" onclick="setSpoof('lang','ru-RU,ru')">Русский</button>
+            <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" onclick="setSpoof('lang','en-US,en')">English US</button>
+            <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" onclick="setSpoof('lang','uk-UA,uk')">Украинский</button>
+            <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" onclick="setSpoof('lang','de-DE,de')">Deutsch</button>
+          </div>
+          <input class="af-input" id="spoof-lang" type="text" placeholder="ru-RU,ru">
+        </div>
+      </div>
+      <div class="grid-2" style="margin-top:4px">
+        <button class="btn btn-primary" onclick="saveSpoofConfig()">💾 Сохранить обманку</button>
+        <button class="btn btn-secondary" onclick="loadSpoofConfig()">↺ Загрузить</button>
+      </div>
+    </div>
+
+    <div class="af-card">
+      <div class="section-title">Zapret</div>
+      <button class="btn btn-secondary btn-full" onclick="ipc.send('open-folder','Zapret')">📂 Открыть папку Zapret</button>
+      <button class="btn btn-secondary btn-full" onclick="ipc.send('zapret-service')">🔧 service.bat (диагностика)</button>
+      <button class="btn btn-danger btn-full" onclick="runCmd('taskkill /f /im winws.exe /t'); showToast('winws.exe убит','err')">💀 Убить winws.exe</button>
+    </div>
+
+    <!-- Fingerprint -->
+    <div class="af-card" style="grid-column:1/-1">
+      <div class="section-title">🎭 Fingerprint — рандомизация отпечатка браузера</div>
+      <p style="font-size:10.5px;color:var(--tx2);font-family:var(--mono);margin-bottom:13px;line-height:1.7">
+        Каждый запуск браузера будет с уникальным GPU, платформой и canvas — сайты не смогут отследить что это один и тот же девайс.
+      </p>
+      <div class="grid-2">
+        <div>
+          <div class="color-row">
+            <label style="font-size:10.5px;color:var(--tx);font-family:var(--mono)">Рандомный WebGL GPU</label>
+            <label class="toggle-sw"><input type="checkbox" id="fp-webgl" checked onchange="saveFpConfig()"><span class="toggle-knob"></span></label>
+          </div>
+          <div class="color-row">
+            <label style="font-size:10.5px;color:var(--tx);font-family:var(--mono)">Рандомная платформа</label>
+            <label class="toggle-sw"><input type="checkbox" id="fp-platform" checked onchange="saveFpConfig()"><span class="toggle-knob"></span></label>
+          </div>
+          <div class="color-row" style="border:none">
+            <label style="font-size:10.5px;color:var(--tx);font-family:var(--mono)">Рандомный Canvas noise</label>
+            <label class="toggle-sw"><input type="checkbox" id="fp-canvas" checked onchange="saveFpConfig()"><span class="toggle-knob"></span></label>
+          </div>
+        </div>
+        <div>
+          <div class="color-row">
+            <label style="font-size:10.5px;color:var(--tx);font-family:var(--mono)">Рандомное разрешение</label>
+            <label class="toggle-sw"><input type="checkbox" id="fp-resolution" onchange="saveFpConfig()"><span class="toggle-knob"></span></label>
+          </div>
+          <div class="color-row" style="border:none">
+            <label style="font-size:10.5px;color:var(--tx);font-family:var(--mono)">Рандомный User-Agent</label>
+            <label class="toggle-sw"><input type="checkbox" id="fp-ua" onchange="saveFpConfig()"><span class="toggle-knob"></span></label>
+          </div>
+          <div style="margin-top:10px">
+            <button class="btn btn-glow btn-full" onclick="previewFingerprint()">👁 Предпросмотр отпечатка</button>
+          </div>
+        </div>
+      </div>
+      <div id="fp-preview" style="display:none;margin-top:12px;background:rgba(0,0,0,.4);border:1px solid rgba(var(--acr),.1);border-radius:8px;padding:10px 12px;font-family:var(--mono);font-size:10px;line-height:2;color:var(--tx2)"></div>
+    </div>
+
+  </div>
+</div>
+</template>
+
+<!-- LOGS -->
+<template id="tpl-logs">
+<div class="tab-page">
+  <div class="page-title"><span class="page-title-accent">📋</span> Логи запусков <div class="page-title-line"></div></div>
+
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+    <select class="af-input" id="log-filter-browser" style="width:auto;padding:5px 10px;font-size:10px" onchange="renderLogs()">
+      <option value="">Все браузеры</option>
+      <option value="chrome">Chrome</option>
+      <option value="msedge">Edge</option>
+      <option value="firefox">Firefox</option>
+      <option value="yandex">Яндекс</option>
+    </select>
+    <select class="af-input" id="log-filter-level" style="width:auto;padding:5px 10px;font-size:10px" onchange="renderLogs()">
+      <option value="">Все сообщения</option>
+      <option value="error">Только ошибки</option>
+      <option value="engine">Только engine</option>
+    </select>
+    <button class="btn btn-secondary" style="padding:5px 14px;font-size:10px;margin-left:auto" onclick="clearLogs()">Очистить</button>
+    <button class="btn btn-secondary" style="padding:5px 14px;font-size:10px" onclick="renderLogs()">Обновить</button>
+  </div>
+
+  <div class="af-card" style="padding:0;overflow:hidden">
+    <div id="logs-wrap" style="font-family:var(--mono);font-size:10.5px;line-height:1.8;max-height:calc(100vh - 230px);overflow-y:auto;padding:12px 14px">
+      <div style="color:var(--tx2)">Нет записей. Запусти браузер — здесь появятся логи.</div>
+    </div>
+  </div>
+</div>
+</template>
+
+<!-- DIAG / КОМПОНЕНТЫ -->
+<template id="tpl-diag">
+<div class="tab-page">
+  <div class="page-title"><span class="page-title-accent">🔧</span> Компоненты <div class="page-title-line"></div></div>
+
+  <!-- Список компонентов -->
+  <div class="af-card" style="margin-bottom:14px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <div style="font-size:12px;font-weight:700;color:var(--tx);font-family:var(--mono)">Статус компонентов</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-secondary" style="padding:6px 14px;font-size:10px" onclick="diagCheck()" id="diag-check-btn">Проверить</button>
+        <button class="btn btn-primary" style="padding:6px 14px;font-size:10px" onclick="diagInstallAll()" id="diag-install-btn" disabled>Установить всё</button>
+      </div>
+    </div>
+    <div id="diag-list" style="display:flex;flex-direction:column;gap:6px">
+      <div class="diag-row-placeholder">Нажми «Проверить» для сканирования</div>
+    </div>
+  </div>
+
+  <!-- Лог -->
+  <div class="af-card" style="flex:1">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <div style="font-size:11px;font-weight:700;color:var(--tx2);font-family:var(--mono);letter-spacing:.5px">ЛОГ УСТАНОВКИ</div>
+      <button onclick="document.getElementById('diag-log').innerHTML=''" style="background:none;border:none;color:var(--tx2);cursor:pointer;font-size:10px;font-family:var(--mono)">очистить</button>
+    </div>
+    <div id="diag-log" style="background:rgba(0,0,0,.4);border:1px solid rgba(var(--acr),.08);border-radius:8px;padding:10px 12px;font-family:var(--mono);font-size:10.5px;line-height:1.9;min-height:180px;max-height:300px;overflow-y:auto">
+      <span style="color:var(--tx2)">// Здесь будет лог установки</span>
+    </div>
+  </div>
+
+  <!-- Прогресс -->
+  <div id="diag-progress-wrap" style="display:none;margin-top:12px">
+    <div style="display:flex;justify-content:space-between;margin-bottom:5px">
+      <span id="diag-progress-label" style="font-size:10px;font-family:var(--mono);color:var(--tx2)"></span>
+      <span id="diag-progress-pct" style="font-size:10px;font-family:var(--mono);color:var(--ac)">0%</span>
+    </div>
+    <div style="background:rgba(255,255,255,.05);border-radius:4px;height:5px;overflow:hidden">
+      <div id="diag-progress-bar" style="height:100%;width:0%;background:linear-gradient(90deg,var(--ac),var(--ac2));transition:width .4s ease;border-radius:4px"></div>
+    </div>
+  </div>
+</div>
+</template>
+
+<!-- CHEBURNET PROTECTION -->
+<template id="tpl-cheburnet">
+<div class="tab-page">
+  <div class="page-title"><span class="page-title-accent">🛡</span> Защита от Чебурнета <div class="page-title-line"></div></div>
+
+  <!-- Статус угрозы -->
+  <div class="af-card" style="margin-bottom:14px;border-color:rgba(var(--acr),.15)">
+    <div style="display:flex;align-items:center;gap:16px">
+      <div id="cbn-threat-icon" style="font-size:40px;line-height:1;filter:drop-shadow(0 0 12px rgba(var(--acr),.5))">🔍</div>
+      <div style="flex:1">
+        <div class="section-title" style="margin:0 0 4px">Статус угрозы</div>
+        <div id="cbn-threat-label" style="font-size:13px;font-weight:700;color:var(--tx2);font-family:var(--mono)">Нажми «Проверить» для анализа</div>
+        <div id="cbn-threat-sub"   style="font-size:10px;color:var(--tx2);font-family:var(--mono);margin-top:3px"></div>
+      </div>
+      <button class="btn btn-glow" onclick="cheburnetCheck()">🔍 Проверить</button>
+    </div>
+    <div style="margin-top:14px;background:rgba(0,0,0,.35);border-radius:8px;height:6px;overflow:hidden">
+      <div id="cbn-threat-bar" style="height:100%;width:0%;background:linear-gradient(90deg,var(--grn),var(--ac));border-radius:6px;transition:width 1s ease,background 1s ease"></div>
+    </div>
+    <div style="display:flex;justify-content:space-between;margin-top:4px;font-size:9px;font-family:var(--mono);color:var(--tx2)">
+      <span>БЕЗОПАСНО</span><span>ОПАСНО</span>
+    </div>
+  </div>
+
+  <div class="grid-2" style="margin-bottom:14px">
+    <!-- Автозапуск Zapret -->
+    <div class="af-card">
+      <div class="section-title">⚡ Автозащита</div>
+      <p style="font-size:10.5px;color:var(--tx2);font-family:var(--mono);line-height:1.7;margin-bottom:12px">
+        При обнаружении блокировок — автоматически запускает Zapret и переключает браузер в режим обхода.
+      </p>
+      <div class="color-row">
+        <label style="font-size:10.5px;color:var(--tx2);font-family:var(--mono)">Автозапуск при старте</label>
+        <label class="toggle-sw"><input type="checkbox" id="cbn-autostart" onchange="saveCbn()"><span class="toggle-knob"></span></label>
+      </div>
+      <div class="color-row">
+        <label style="font-size:10.5px;color:var(--tx2);font-family:var(--mono)">Мониторинг каждые N сек</label>
+        <span class="data-value" id="cbn-interval-v">30</span>
+      </div>
+      <div class="range-row"><label></label>
+        <input type="range" id="cbn-interval" min="10" max="120" step="5" value="30"
+               oninput="document.getElementById('cbn-interval-v').textContent=this.value; saveCbn()">
+      </div>
+      <div class="color-row" style="border:none">
+        <label style="font-size:10.5px;color:var(--tx2);font-family:var(--mono)">Авто-перезапуск Zapret</label>
+        <label class="toggle-sw"><input type="checkbox" id="cbn-autorestart" checked onchange="saveCbn()"><span class="toggle-knob"></span></label>
+      </div>
+    </div>
+
+    <!-- Тесты доступности -->
+    <div class="af-card">
+      <div class="section-title">🌐 Тесты доступности</div>
+      <div id="cbn-tests-list" style="display:flex;flex-direction:column;gap:6px"></div>
+      <button class="btn btn-secondary btn-full" style="margin-top:10px" onclick="cheburnetRunTests()">▶ Запустить тесты</button>
+    </div>
+  </div>
+
+  <!-- DNS защита -->
+  <div class="af-card" style="margin-bottom:14px">
+    <div class="section-title">🔒 DNS Защита — обход DPI через зашифрованный DNS</div>
+    <div class="grid-2">
+      <div>
+        <label class="field-label">Первичный DNS</label>
+        <select class="af-input" id="cbn-dns1" onchange="saveCbn()">
+          <option value="1.1.1.1">1.1.1.1 — Cloudflare</option>
+          <option value="8.8.8.8">8.8.8.8 — Google</option>
+          <option value="9.9.9.9">9.9.9.9 — Quad9</option>
+          <option value="77.88.8.8">77.88.8.8 — Яндекс</option>
+          <option value="94.140.14.14">94.140.14.14 — AdGuard</option>
+        </select>
+        <label class="field-label">Резервный DNS</label>
+        <select class="af-input" id="cbn-dns2" onchange="saveCbn()">
+          <option value="1.0.0.1">1.0.0.1 — Cloudflare Alt</option>
+          <option value="8.8.4.4">8.8.4.4 — Google Alt</option>
+          <option value="149.112.112.112">149.112.112.112 — Quad9 Alt</option>
+          <option value="94.140.15.15">94.140.15.15 — AdGuard Alt</option>
+        </select>
+      </div>
+      <div>
+        <label class="field-label">Режим DNS</label>
+        <select class="af-input" id="cbn-dns-mode" onchange="saveCbn()">
+          <option value="doh">DNS-over-HTTPS (DoH)</option>
+          <option value="dot">DNS-over-TLS (DoT)</option>
+          <option value="plain">Обычный DNS</option>
+        </select>
+        <div style="background:rgba(var(--acr),.06);border:1px solid rgba(var(--acr),.15);border-radius:8px;padding:10px;font-size:10px;font-family:var(--mono);color:var(--tx2);line-height:1.7;margin-top:2px">
+          DoH — шифрует DNS через HTTPS<br>
+          DoT — шифрует DNS через TLS<br>
+          Скрывает от провайдера что ты открываешь
+        </div>
+      </div>
+    </div>
+    <div class="grid-2" style="margin-top:8px">
+      <button class="btn btn-primary" onclick="cheburnetApplyDns()">🔒 Применить DNS</button>
+      <button class="btn btn-secondary" onclick="cheburnetResetDns()">↺ Сбросить DNS</button>
+    </div>
+    <div id="cbn-dns-status" style="font-size:10px;color:var(--tx2);font-family:var(--mono);margin-top:8px;min-height:16px"></div>
+  </div>
+
+  <!-- Аварийный режим -->
+  <div class="af-card" style="border-color:rgba(var(--redr),.2)">
+    <div class="section-title" style="color:var(--red)">☢️ Аварийный режим — если всё заблокировано</div>
+    <p style="font-size:10.5px;color:var(--tx2);font-family:var(--mono);line-height:1.7;margin-bottom:12px">
+      Полный Чебурнет? Запускает браузер напрямую через Zapret с максимальным обходом + смена DNS + anti-DPI заголовки.
+    </p>
+    <div class="grid-2">
+      <button class="btn btn-danger btn-full" onclick="cheburnetEmergency()">🆘 Аварийный режим</button>
+      <button class="btn btn-secondary btn-full" onclick="cheburnetFullCheck()">🔬 Полная диагностика</button>
+    </div>
+    <div id="cbn-emergency-log" style="display:none;background:rgba(0,0,0,.5);border:1px solid rgba(var(--redr),.2);border-radius:8px;padding:10px;margin-top:12px;font-family:var(--mono);font-size:10px;max-height:120px;overflow-y:auto;line-height:1.8"></div>
+  </div>
+</div>
+</template>
+
+<!-- ZAPRET UPDATE -->
+<template id="tpl-zapret-update">
+<div class="tab-page">
+  <div class="page-title"><span class="page-title-accent">🔄</span> Обновление Zapret <div class="page-title-line"></div></div>
+
+  <!-- Текущая версия и новая -->
+  <div class="grid-2" style="margin-bottom:13px">
+    <div class="af-card">
+      <div class="section-title">Установленная версия</div>
+      <div class="data-row" style="margin-top:8px">
+        <span class="data-label">Версия</span>
+        <span class="data-value" id="zu-current">Определяем...</span>
+      </div>
+      <div class="data-row">
+        <span class="data-label">Папка</span>
+        <span class="data-value" style="font-size:10px;font-family:var(--mono)" id="zu-path">—</span>
+      </div>
+      <button class="btn btn-secondary btn-full" style="margin-top:10px" onclick="ipc.send('open-folder','Zapret')">📂 Открыть папку</button>
+    </div>
+    <div class="af-card">
+      <div class="section-title">Последняя версия на GitHub</div>
+      <div class="data-row" style="margin-top:8px">
+        <span class="data-label">Версия</span>
+        <span class="data-value" id="zu-latest">—</span>
+      </div>
+      <div class="data-row">
+        <span class="data-label">Дата</span>
+        <span class="data-value" id="zu-date">—</span>
+      </div>
+      <div class="data-row">
+        <span class="data-label">Размер</span>
+        <span class="data-value" id="zu-size">—</span>
+      </div>
+      <button class="btn btn-secondary btn-full" style="margin-top:10px" id="zu-btn-check" onclick="zapretCheckUpdate()">🔍 Проверить обновление</button>
+    </div>
+  </div>
+
+  <!-- Статус / прогресс -->
+  <div class="af-card" style="margin-bottom:13px" id="zu-status-card" style="display:none">
+    <div class="section-title" id="zu-status-title">Статус</div>
+    <div style="margin-top:8px;margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;margin-bottom:5px">
+        <span style="font-size:11px;font-family:var(--mono);color:var(--tx2)" id="zu-status-label">Ожидание...</span>
+        <span style="font-size:11px;font-family:var(--mono);color:var(--ac)" id="zu-pct">0%</span>
+      </div>
+      <div style="background:rgba(255,255,255,.05);border:1px solid rgba(var(--acr),.15);border-radius:5px;height:8px;overflow:hidden">
+        <div id="zu-bar" style="height:100%;width:0%;background:linear-gradient(90deg,var(--ac),#7b2fff);box-shadow:0 0 8px rgba(var(--acr),.5);transition:width .4s ease;border-radius:5px"></div>
+      </div>
+    </div>
+    <div id="zu-log" style="background:rgba(0,0,0,.35);border:1px solid rgba(var(--acr),.1);border-radius:6px;padding:8px 10px;max-height:140px;overflow-y:auto;font-family:var(--mono);font-size:10.5px;line-height:1.8"></div>
+  </div>
+
+  <!-- Кнопка обновить -->
+  <div class="af-card" id="zu-update-card" style="display:none">
+    <div class="section-title" id="zu-update-title">🆕 Доступно обновление!</div>
+    <p style="font-size:12px;color:var(--tx2);margin:8px 0 14px;line-height:1.7" id="zu-update-desc"></p>
+    <div class="grid-2">
+      <button class="btn btn-primary" id="zu-btn-update" onclick="zapretDoUpdate()">⬇ Скачать и установить</button>
+      <button class="btn btn-secondary" onclick="document.getElementById('zu-update-card').style.display='none'">Позже</button>
+    </div>
+  </div>
+
+  <!-- Уже актуально -->
+  <div class="af-card" id="zu-ok-card" style="display:none">
+    <div style="color:var(--grn);font-family:var(--mono);font-size:13px;padding:8px 0">✓ Zapret актуален — обновление не требуется</div>
+  </div>
+
+  <!-- Changelog -->
+  <div class="af-card" id="zu-changelog-card" style="display:none">
+    <div class="section-title">Что нового</div>
+    <div id="zu-changelog" style="font-size:12px;color:var(--tx2);line-height:1.8;margin-top:8px;max-height:160px;overflow-y:auto;font-family:var(--mono)"></div>
+  </div>
+
+</div>
+</template>
+
+<!-- INFO -->
+<template id="tpl-info">
+<div class="tab-page">
+  <div class="page-title"><span class="page-title-accent">ℹ️</span> О программе <div class="page-title-line"></div></div>
+  <div class="grid-auto">
+    <div class="af-card">
+      <div class="section-title">Artofix 2.3</div>
+      <div class="data-row"><span class="data-label">Версия</span><span class="data-value">2.3</span></div>
+      <div class="data-row"><span class="data-label">Тип</span><span class="data-value">Freedom Tool</span></div>
+      <div class="data-row"><span class="data-label">Движок</span><span class="data-value">Electron</span></div>
+      <div class="data-row"><span class="data-label">Backend</span><span class="data-value">Python + Selenium</span></div>
+      <div class="data-row"><span class="data-label">Stealth</span><span class="data-value">selenium-stealth</span></div>
+    </div>
+    <div class="af-card">
+      <div class="section-title">Браузеры</div>
+      <div class="data-row"><span class="data-label">Chrome</span><span class="data-value">✓</span></div>
+      <div class="data-row"><span class="data-label">Edge</span><span class="data-value">✓</span></div>
+      <div class="data-row"><span class="data-label">Firefox</span><span class="data-value">✓</span></div>
+      <div class="data-row"><span class="data-label">Yandex</span><span class="data-value">✓</span></div>
+    </div>
+    <div class="af-card" style="grid-column:1/-1;border-color:rgba(var(--acr),.22);background:rgba(var(--acr),.03)">
+      <div class="section-title">📣 Поддержка и обновления</div>
+      <p style="font-size:13px;color:var(--tx);line-height:1.75;margin-bottom:14px">
+        Следи за обновлениями, сообщай о багах и получай новые версии в Telegram-канале автора:
+      </p>
+      <a onclick="openTG()" style="display:flex;align-items:center;gap:12px;padding:13px 16px;
+        background:rgba(var(--acr),.07);border:1px solid rgba(var(--acr),.2);border-radius:10px;
+        cursor:pointer;transition:.2s;text-decoration:none;"
+        onmouseover="this.style.background='rgba(var(--acr),.14)'" onmouseout="this.style.background='rgba(var(--acr),.07)'">
+        <span style="font-size:26px">📲</span>
+        <div>
+          <div style="font-size:13px;font-weight:700;color:var(--ac);font-family:'Orbitron',monospace;letter-spacing:1px">ARTOFIX CHANNEL</div>
+          <div style="font-size:10px;color:var(--tx2);font-family:var(--mono);margin-top:2px">t.me/+SLxGyEiRG7sxM2Ey</div>
+        </div>
+        <span style="margin-left:auto;color:rgba(var(--acr),.5);font-size:16px">→</span>
+      </a>
+    </div>
+  </div>
+</div>
+</template>
+
+<!-- ===========================
+     JAVASCRIPT
+     =========================== -->
+<script>
+'use strict';
+
+// ── ПЕРЕХВАТ ОШИБОК (убери после отладки) ──
+window.onerror = function(msg, src, line, col, err) {
+  var d = document.createElement('div');
+  d.style = 'position:fixed;top:50px;left:50%;transform:translateX(-50%);background:#ff1a4e;color:#fff;padding:14px 20px;border-radius:10px;z-index:99999;font-family:monospace;font-size:12px;max-width:80vw;word-break:break-all;box-shadow:0 4px 20px rgba(0,0,0,.8)';
+  d.textContent = '⚠ JS ERROR: ' + msg + '\nLine: ' + line + '\nFile: ' + (src||'').split('/').pop();
+  document.body.appendChild(d);
+  setTimeout(function(){ d.remove(); }, 15000);
+  return false;
+};
+window.addEventListener('unhandledrejection', function(e) {
+  window.onerror('Promise: ' + (e.reason && e.reason.message || e.reason), '', 0);
+});
+
+// ── IPC ──
+var ipc, shell;
+try {
+  var _electron = require('electron');
+  ipc   = _electron.ipcRenderer;
+  shell = _electron.shell;
+} catch(e) {
+  // Фолбэк для браузерного превью
+  ipc   = { invoke: function(){ return Promise.resolve({}); }, send: function(){}, on: function(){} };
+  shell = { openExternal: function(){}, openPath: function(){} };
+  console.warn('Electron IPC недоступен:', e.message);
+}
+
+// ── PARTICLE CANVAS (multi-mode) ──
+try { (function() {
+  var cv  = document.getElementById('bgcanvas');
+  var ctx = cv.getContext('2d');
+  var W, H, pts = [], mode = 'net', spd = 0.5;
+  var mouse = { x: -999, y: -999 };
+
+  window.CANVAS_API = {
+    setMode: function(m) { mode = m; resize(); },
+    setSpeed: function(s) { spd = parseFloat(s) || 0.5; },
+  };
+
+  document.addEventListener('mousemove', function(e) { mouse.x = e.clientX; mouse.y = e.clientY; });
+
+  function resize() {
+    W = cv.width  = window.innerWidth;
+    H = cv.height = window.innerHeight;
+    pts = [];
+    if (mode === 'stars') {
+      for (var i = 0; i < 160; i++) pts.push({
+        x: Math.random()*W, y: Math.random()*H,
+        r: Math.random()*1.8+.4, twinkle: Math.random()*Math.PI*2,
+        speed: (Math.random()-.5)*.4,
+      });
+    } else if (mode === 'dots') {
+      for (var i = 0; i < 70; i++) pts.push({
+        x: Math.random()*W, y: Math.random()*H,
+        vx: (Math.random()-.5)*spd, vy: (Math.random()-.5)*spd,
+        r: Math.random()*2+.8,
+      });
+    } else if (mode !== 'none') { // net
+      var cols = Math.ceil(W/55), rows = Math.ceil(H/55);
+      for (var i = 0; i < cols; i++) for (var j = 0; j < rows; j++) pts.push({
+        x: i*55+27, y: j*55+27, ox: i*55+27, oy: j*55+27,
+        vx: (Math.random()-.5)*spd, vy: (Math.random()-.5)*spd,
+      });
+    }
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  function draw() {
+    try {
+      ctx.clearRect(0, 0, W, H);
+      if (mode === 'none') { requestAnimationFrame(draw); return; }
+      var rgb = getComputedStyle(document.documentElement).getPropertyValue('--acr').trim() || '0,240,255';
+
+      if (mode === 'stars') {
+        var t = Date.now() / 1000;
+        pts.forEach(function(p) {
+          p.twinkle += .025 * spd;
+          var alpha = .4 + Math.sin(p.twinkle) * .35;
+          var dx = p.x - mouse.x, dy = p.y - mouse.y, dist = Math.sqrt(dx*dx+dy*dy);
+          if (dist < 100 && dist > 0) { p.x += dx/dist*1.5; p.y += dy/dist*1.5; }
+          p.x += Math.sin(t * Math.abs(p.speed) * .6 + p.twinkle) * .15 * spd;
+          p.y += Math.cos(t * Math.abs(p.speed) * .4 + p.twinkle) * .12 * spd;
+          if (p.x < 0) p.x = W; if (p.x > W) p.x = 0;
+          if (p.y < 0) p.y = H; if (p.y > H) p.y = 0;
+          ctx.fillStyle = 'rgba('+rgb+','+alpha.toFixed(2)+')';
+          ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI*2); ctx.fill();
+        });
+      } else if (mode === 'dots') {
+        pts.forEach(function(p) {
+          p.x += p.vx * spd; p.y += p.vy * spd;
+          if (p.x < 0 || p.x > W) p.vx *= -1;
+          if (p.y < 0 || p.y > H) p.vy *= -1;
+          var dx = p.x-mouse.x, dy=p.y-mouse.y, dist=Math.sqrt(dx*dx+dy*dy);
+          if (dist<80 && dist>0) { p.x += dx/dist*2; p.y += dy/dist*2; }
+          ctx.fillStyle = 'rgba('+rgb+',.35)';
+          ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI*2); ctx.fill();
+        });
+        ctx.lineWidth = .7;
+        for (var i=0; i<pts.length; i++) for (var j=i+1; j<pts.length; j++) {
+          var dx=pts[i].x-pts[j].x, dy=pts[i].y-pts[j].y, d=Math.sqrt(dx*dx+dy*dy);
+          if (d<120) { ctx.strokeStyle='rgba('+rgb+','+(1-d/120)*.18+')'; ctx.beginPath(); ctx.moveTo(pts[i].x,pts[i].y); ctx.lineTo(pts[j].x,pts[j].y); ctx.stroke(); }
+        }
+      } else { // net
+        for (var k=0; k<pts.length; k++) {
+          pts[k].x += pts[k].vx * spd; pts[k].y += pts[k].vy * spd;
+          if (Math.abs(pts[k].x-pts[k].ox)>9) pts[k].vx*=-1;
+          if (Math.abs(pts[k].y-pts[k].oy)>9) pts[k].vy*=-1;
+          var dx=pts[k].x-mouse.x, dy=pts[k].y-mouse.y, dist=Math.sqrt(dx*dx+dy*dy);
+          if (dist<70 && dist>0) { pts[k].x+=dx/dist*1.5; pts[k].y+=dy/dist*1.5; }
+        }
+        ctx.lineWidth = .8;
+        for (var i=0; i<pts.length; i++) for (var j=i+1; j<pts.length; j++) {
+          var dx=pts[i].x-pts[j].x, dy=pts[i].y-pts[j].y, d=Math.sqrt(dx*dx+dy*dy);
+          if (d<90) { ctx.strokeStyle='rgba('+rgb+','+(1-d/90)*.2+')'; ctx.beginPath(); ctx.moveTo(pts[i].x,pts[i].y); ctx.lineTo(pts[j].x,pts[j].y); ctx.stroke(); }
+        }
+        ctx.fillStyle='rgba('+rgb+',.18)';
+        pts.forEach(function(p){ ctx.beginPath(); ctx.arc(p.x,p.y,1.5,0,Math.PI*2); ctx.fill(); });
+      }
+    } catch(e) {}
+    requestAnimationFrame(draw);
+  }
+  draw();
+})(); } catch(e) { console.warn('[canvas]', e); }
+
+// ── TOAST ──
+function showToast(msg, type) {
+  var container = document.getElementById('toasts');
+  var el = document.createElement('div');
+  el.className = 'toast' + (type === 'err' ? ' toast-err' : type === 'ok' ? ' toast-ok' : '');
+  el.textContent = msg;
+  container.appendChild(el);
+  setTimeout(function() {
+    el.style.transition = '.28s';
+    el.style.opacity = '0';
+    el.style.transform = 'translateX(34px)';
+    setTimeout(function(){ el.remove(); }, 300);
+  }, 2800);
+}
+
+// ── TABS ──
+function goTab(tabName, btn) {
+  var area = document.getElementById('content-area');
+  var tpl  = document.getElementById('tpl-' + tabName);
+  if (!tpl) {
+    showToast('Шаблон не найден: tpl-' + tabName, 'err');
+    return;
+  }
+  area.innerHTML = '';
+  area.appendChild(tpl.content.cloneNode(true));
+
+  // update active nav button
+  var navBtns = document.querySelectorAll('.nav-btn');
+  for (var i = 0; i < navBtns.length; i++) {
+    navBtns[i].classList.remove('is-active');
+  }
+  if (btn) btn.classList.add('is-active');
+
+  // tab-specific init
+  if (tabName === 'profiles') renderProfiles();
+  if (tabName === 'settings') initSettingsTab();
+  if (tabName === 'config')   { loadConfig(); loadSpoofConfig(); }
+  if (tabName === 'binds')         renderBinds();
+  if (tabName === 'adblock')       initAdblock();
+  if (tabName === 'zapret-update') initZapretUpdate();
+  if (tabName === 'cheburnet')     initCheburnet();
+  if (tabName === 'logs')          initLogs();
+  if (tabName === 'diag')          initDiag();
+
+  syncZapretUI();
+}
+
+ipc.on('go-to', function(e, tab) {
+  var btn = document.querySelector('[data-tab="' + tab + '"]');
+  goTab(tab, btn);
+});
+
+// ── CMD ──
+function runCmd(cmd) {
+  ipc.send('cmd', cmd);
+}
+
+// ── OPEN TG ──
+function openTG() {
+  shell.openExternal('https://t.me/+SLxGyEiRG7sxM2Ey');
+}
+
+// ── BROWSER LAUNCH ──
+// bypass=true/false — запускать ли zapret перед открытием
+async function launchBrowser(url, profile, browser, bypass) {
+  if (browser === 'app') {
+    // запуск приложения/ярлыка напрямую
+    try {
+      shell.openPath(url);
+      showToast('▶ Приложение запущено', 'ok');
+    } catch(e) { showToast('Ошибка: ' + e.message, 'err'); }
+    return;
+  }
+  if (bypass && !zapretActive) {
+    showToast('⚠ Запрет не активен — запуск без обхода', '');
+  }
+  try {
+    var res = await ipc.invoke('launch-browser', { url: url, profile: profile, browser: browser });
+    if (res && res.ok) showToast('▶ ' + browser + ': ' + profile, 'ok');
+    else showToast('Ошибка: ' + (res ? res.msg : '?'), 'err');
+  } catch(e) {
+    showToast('IPC ошибка: ' + e.message, 'err');
+  }
+}
+
+function launchFromBinds() {
+  var urlEl    = document.getElementById('bind-url');
+  var profEl   = document.getElementById('bind-profile');
+  var broEl    = document.getElementById('bind-browser');
+  var bypassEl = document.getElementById('bind-bypass');
+  var url      = urlEl    ? urlEl.value.trim()    : '';
+  var prof     = profEl   ? profEl.value.trim()   : '';
+  var bro      = broEl    ? broEl.value            : 'chrome';
+  var bypass   = bypassEl ? bypassEl.value === '1' : true;
+  if (!url) { showToast('Заполни URL или путь', 'err'); return; }
+  if (bro !== 'app' && !prof) { showToast('Заполни имя профиля', 'err'); return; }
+  launchBrowser(url, prof || 'default', bro, bypass);
+}
+
+// ── ZAPRET ──
+var zapretActive = false;
+
+async function zapretStart() {
+  try {
+    var res = await ipc.invoke('zapret-start');
+    if (res && res.ok) { zapretActive = true; syncZapretUI(); showToast('Zapret запущен!', 'ok'); }
+    else showToast('Zapret: ' + (res ? res.msg : '?'), 'err');
+  } catch(e) { showToast('IPC ошибка', 'err'); }
+}
+
+async function zapretStop() {
+  try {
+    await ipc.invoke('zapret-stop');
+    zapretActive = false; syncZapretUI(); showToast('Zapret остановлен', 'err');
+  } catch(e) {}
+}
+
+ipc.on('zapret-status', function(e, s) {
+  zapretActive = s.on; syncZapretUI();
+  if (s.msg) showToast(s.msg, s.on ? 'ok' : 'err');
+});
+
+ipc.on('tray-act', function(e, a) {
+  if (a === 'run')    zapretStart();
+  if (a === 'stop')   zapretStop();
+  if (a === 'config') ipc.send('zapret-config');
+});
+
+function syncZapretUI() {
+  var dot    = document.getElementById('zapret-dot');
+  var lbl    = document.getElementById('zapret-label');
+  var hdot   = document.getElementById('home-zap-dot');
+  var hlbl   = document.getElementById('home-zap-label');
+  if (dot)  { dot.classList.toggle('is-on', zapretActive); }
+  if (lbl)  { lbl.textContent = zapretActive ? 'ZAPRET ONLINE' : 'ZAPRET OFFLINE'; lbl.classList.toggle('is-on', zapretActive); }
+  if (hdot) { hdot.style.background = zapretActive ? 'var(--grn)' : 'var(--red)'; hdot.style.boxShadow = zapretActive ? '0 0 8px rgba(var(--grnr),.8)' : 'none'; }
+  if (hlbl) { hlbl.textContent = zapretActive ? 'ВКЛ' : 'ВЫКЛ'; hlbl.style.color = zapretActive ? 'var(--grn)' : 'var(--red)'; }
+}
+
+// ── PROFILES ──
+var BROWSER_ICONS = {
+  chrome:  '<svg viewBox="0 0 32 32" width="28" height="28"><circle cx="16" cy="16" r="10" fill="#fff"/><path d="M16 6a10 10 0 0 1 8.66 5H16a5 5 0 0 0-5 5 5 5 0 0 0 .34 1.83L6.7 12.17A10 10 0 0 1 16 6z" fill="#EA4335"/><path d="M26 16a10 10 0 0 1-5 8.66l-4.33-7.5A5 5 0 0 0 21 16z" fill="#34A853"/><path d="M6 16a10 10 0 0 0 5 8.66l4.33-7.5A5 5 0 0 1 11 16z" fill="#FBBC05"/><circle cx="16" cy="16" r="5" fill="#4285F4"/></svg>',
+  msedge:  '<svg viewBox="0 0 32 32" width="28" height="28"><path d="M27 18c0 5-3.8 9-9 9a9 9 0 0 1-9-9c0-3.5 2-6.5 5-8 .5 1.2.8 2.6.8 4 0 3.9 3.1 7 7 7 2.1 0 4-.9 5.2-2.4V18z" fill="#0078D7"/><path d="M27 18v.6A9 9 0 0 1 18 27c2.5-1 4.5-3.3 5.2-6.1A5 5 0 0 0 27 18z" fill="#50E6FF"/><path d="M5 22.5A13 13 0 0 0 18 29c7.2 0 13-5.8 13-13 0-1-.1-2-.4-3H18c-3.9 0-7 3.1-7 7 0 1.4.4 2.7 1.1 3.8A8 8 0 0 1 5 22.5z" fill="#1EBBEE"/><path d="M5 10A13 13 0 0 1 18 3c4.4 0 8.3 2.2 10.7 5.5A13 13 0 0 0 18 7c-4.8 0-9 2.6-11.3 6.5A9.1 9.1 0 0 0 5 10z" fill="#0078D7"/></svg>',
+  firefox: '<svg viewBox="0 0 32 32" width="28" height="28"><circle cx="16" cy="16" r="13" fill="#FF9500"/><path d="M16 3C9 3 3 9 3 16s6 13 13 13 13-6 13-13S23 3 16 3zm0 2a11 11 0 0 1 9 4.7c-1.3-.5-2.8-.7-4-.5-2 .4-3.3 2-4.3 3.4-.7 1-1.4 2-2.6 2.4-.8.3-1.8.1-2.4-.5-.7-.6-.9-1.6-.6-2.5A11 11 0 0 1 16 5z" fill="#FF6611"/><path d="M25 23.3A11 11 0 0 1 8 25c1-.6 2.2-1 3.4-.8 1.8.3 3 1.8 4.1 3 .8.8 1.7 1.5 2.8 1.5 1.3 0 2.5-.9 3.2-2 .5-.8.7-1.8.5-2.7z" fill="#FF6611"/></svg>',
+  yandex:  '<svg viewBox="0 0 32 32" width="28" height="28"><circle cx="16" cy="16" r="13" fill="#FC3F1D"/><text x="16" y="21" text-anchor="middle" font-family="Arial Black,sans-serif" font-weight="900" font-size="16" fill="#fff">Я</text></svg>',
+  default: '🌐',
+};
+
+function getBrowserIcon(browser) {
+  return BROWSER_ICONS[browser] || BROWSER_ICONS.default;
+}
+
+// Читаем мета-данные профиля (браузер по умолчанию)
+async function getProfileMeta(name) {
+  try {
+    var r = await ipc.invoke('read-profile-meta', name);
+    return r || {};
+  } catch(e) { return {}; }
+}
+
+async function renderProfiles() {
+  var grid = document.getElementById('profiles-grid');
+  if (!grid) return;
+
+  var list = [];
+  try { list = await ipc.invoke('list-profiles'); } catch(e) {}
+
+  grid.innerHTML = '';
+
+  // Кнопка создания — первой
+  var addBtn = document.createElement('div');
+  addBtn.className = 'profile-add';
+  addBtn.innerHTML = '<span style="color:var(--ac);font-size:22px;line-height:1">＋</span><span style="font-size:12px;letter-spacing:.5px">Создать профиль</span>';
+  addBtn.addEventListener('click', openCreateProfileModal);
+  grid.appendChild(addBtn);
+
+  for (var i = 0; i < list.length; i++) {
+    (function(name) {
+      // читаем мету синхронно через кеш
+      var meta = PROFILE_META_CACHE[name] || {};
+      var browser = meta.browser || 'chrome';
+      var icon = BROWSER_ICONS[browser];
+      var isEmoji = !icon || !icon.startsWith('<');
+
+      var card = document.createElement('div');
+      card.className = 'profile-card';
+      card.innerHTML =
+        '<div class="profile-ava" style="display:flex;align-items:center;justify-content:center;font-size:' + (isEmoji ? '22px' : '0') + '">' +
+          (icon && icon.startsWith('<') ? icon : (icon || '🌐')) +
+        '</div>' +
+        '<div style="flex:1;min-width:0">' +
+          '<div class="profile-name">' + name + '</div>' +
+          '<div class="profile-meta">' + browser + ' · profiles\\' + name + '</div>' +
+        '</div>' +
+        '<div class="profile-del" title="Удалить">🗑</div>';
+
+      card.querySelector('.profile-del').addEventListener('click', function(e) {
+        e.stopPropagation(); deleteProfile(name);
+      });
+      card.addEventListener('click', function() {
+        launchBrowser('about:blank', name, browser, false);
+      });
+      grid.appendChild(card);
+    })(list[i]);
+  }
+}
+
+// Кеш мета данных профилей
+var PROFILE_META_CACHE = {};
+
+async function loadProfileMetas() {
+  try {
+    var list = await ipc.invoke('list-profiles');
+    for (var i = 0; i < list.length; i++) {
+      var r = await ipc.invoke('read-profile-meta', list[i]);
+      if (r) PROFILE_META_CACHE[list[i]] = r;
+    }
+  } catch(e) {}
+}
+
+function openCreateProfileModal() {
+  openModal(
+    '<div class="modal-title"><span>👤</span> Создать профиль <span class="modal-close" onclick="closeModal()">✕</span></div>' +
+    '<label class="field-label">Имя профиля <span style="color:var(--tx2);font-size:9px">(латиница, цифры, _ -)</span></label>' +
+    '<input class="af-input" id="mp-name" type="text" placeholder="my_account" style="margin-bottom:12px" autofocus>' +
+    '<label class="field-label">Браузер по умолчанию</label>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">' +
+      '<button class="btn btn-secondary mp-bro-btn" id="mpb-chrome"  onclick="selectBrowser(\'chrome\')"  style="display:flex;align-items:center;gap:8px;padding:10px 12px">' + BROWSER_ICONS.chrome  + '<span>Chrome</span></button>' +
+      '<button class="btn btn-secondary mp-bro-btn" id="mpb-msedge" onclick="selectBrowser(\'msedge\')" style="display:flex;align-items:center;gap:8px;padding:10px 12px">' + BROWSER_ICONS.msedge  + '<span>Edge</span></button>' +
+      '<button class="btn btn-secondary mp-bro-btn" id="mpb-firefox" onclick="selectBrowser(\'firefox\')" style="display:flex;align-items:center;gap:8px;padding:10px 12px">' + BROWSER_ICONS.firefox + '<span>Firefox</span></button>' +
+      '<button class="btn btn-secondary mp-bro-btn" id="mpb-yandex"  onclick="selectBrowser(\'yandex\')"  style="display:flex;align-items:center;gap:8px;padding:10px 12px">' + BROWSER_ICONS.yandex  + '<span>Яндекс</span></button>' +
+    '</div>' +
+    '<label class="field-label">Заметка (необязательно)</label>' +
+    '<input class="af-input" id="mp-note" type="text" placeholder="напр: основной акк YouTube" style="margin-bottom:16px">' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">' +
+      '<button class="btn btn-primary" onclick="submitCreateProfile()">✓ Создать</button>' +
+      '<button class="btn btn-secondary" onclick="closeModal()">Отмена</button>' +
+    '</div>'
+  );
+  selectBrowser('chrome');
+  // фокус на поле имени
+  setTimeout(function(){ var el = document.getElementById('mp-name'); if(el) el.focus(); }, 80);
+}
+
+var _selectedBrowser = 'chrome';
+function selectBrowser(b) {
+  _selectedBrowser = b;
+  var btns = document.querySelectorAll('.mp-bro-btn');
+  for (var i = 0; i < btns.length; i++) {
+    btns[i].classList.remove('btn-primary');
+    btns[i].classList.add('btn-secondary');
+    btns[i].style.border = '';
+  }
+  var active = document.getElementById('mpb-' + b);
+  if (active) {
+    active.classList.remove('btn-secondary');
+    active.classList.add('btn-primary');
+  }
+}
+
+async function submitCreateProfile() {
+  var nameEl = document.getElementById('mp-name');
+  var noteEl = document.getElementById('mp-note');
+  var name   = nameEl ? nameEl.value.trim() : '';
+  var note   = noteEl ? noteEl.value.trim() : '';
+  if (!name) { showToast('Введи имя профиля', 'err'); if(nameEl) nameEl.focus(); return; }
+  var safe = name.replace(/[^a-zA-Z0-9_\-]/g, '');
+  if (!safe) { showToast('Только латиница, цифры, _ или -', 'err'); return; }
+
+  try {
+    var res = await ipc.invoke('create-profile', safe);
+    if (res && res.ok) {
+      // сохраняем мета: браузер + заметка
+      await ipc.invoke('write-profile-meta', safe, { browser: _selectedBrowser, note: note, created: new Date().toISOString() });
+      PROFILE_META_CACHE[safe] = { browser: _selectedBrowser, note: note };
+      closeModal();
+      showToast('✅ Профиль "' + safe + '" создан (' + _selectedBrowser + ')', 'ok');
+      renderProfiles();
+    } else {
+      showToast('Ошибка: ' + (res ? res.msg : '?'), 'err');
+    }
+  } catch(e) { showToast('IPC ошибка: ' + e.message, 'err'); }
+}
+
+async function createProfile() {
+  openCreateProfileModal();
+}
+
+async function deleteProfile(name) {
+  if (!confirm('Удалить профиль "' + name + '"?\nВсе данные будут стёрты.')) return;
+  try {
+    var res = await ipc.invoke('delete-profile', name);
+    if (res && res.ok) {
+      delete PROFILE_META_CACHE[name];
+      showToast('"' + name + '" удалён', 'err');
+      renderProfiles();
+    }
+    else showToast('Ошибка: ' + (res ? res.msg : '?'), 'err');
+  } catch(e) { showToast('IPC ошибка', 'err'); }
+}
+
+// ── SPOOF CONFIG (обманка аккаунта) ──
+function setSpoof(field, val) {
+  var ids = { account_age:'spoof-age', history:'spoof-history', timezone:'spoof-tz', lang:'spoof-lang' };
+  var el = document.getElementById(ids[field]);
+  if (el) { el.value = val; showToast('✓ ' + val, 'ok'); }
+}
+
+async function saveSpoofConfig() {
+  var age  = (document.getElementById('spoof-age')     || {}).value || '';
+  var hist = (document.getElementById('spoof-history')  || {}).value || '';
+  var tz   = (document.getElementById('spoof-tz')       || {}).value || '';
+  var lang = (document.getElementById('spoof-lang')     || {}).value || '';
+  var spoof = { account_age: age, history: hist, timezone: tz, lang: lang };
+  // пишем в config.json вместе с UA/res
+  try {
+    var existing = await ipc.invoke('read-config');
+    existing.spoof = spoof;
+    var r = await ipc.invoke('write-config', existing);
+    if (r && r.ok) showToast('Обманка сохранена! Применится при след. запуске.', 'ok');
+    else showToast('Ошибка записи', 'err');
+  } catch(e) { showToast('IPC ошибка', 'err'); }
+}
+
+async function loadSpoofConfig() {
+  try {
+    var data = await ipc.invoke('read-config');
+    var s = data.spoof || {};
+    var ageEl  = document.getElementById('spoof-age');
+    var histEl = document.getElementById('spoof-history');
+    var tzEl   = document.getElementById('spoof-tz');
+    var langEl = document.getElementById('spoof-lang');
+    if (ageEl)  ageEl.value  = s.account_age || '';
+    if (histEl) histEl.value = s.history      || '';
+    if (tzEl)   tzEl.value   = s.timezone     || '';
+    if (langEl) langEl.value = s.lang         || '';
+  } catch(e) {}
+}
+var SAVED_BINDS = [];
+
+async function loadBinds() {
+  try {
+    var r = await ipc.invoke('read-binds');
+    if (r && Array.isArray(r)) SAVED_BINDS = r;
+  } catch(e) {}
+}
+
+async function saveBindsToFile() {
+  try { await ipc.invoke('write-binds', SAVED_BINDS); } catch(e) {}
+}
+
+function addBind() {
+  var urlEl    = document.getElementById('bind-url');
+  var profEl   = document.getElementById('bind-profile');
+  var broEl    = document.getElementById('bind-browser');
+  var bypassEl = document.getElementById('bind-bypass');
+  var nameEl   = document.getElementById('bind-name');
+  var url      = urlEl    ? urlEl.value.trim()    : '';
+  var prof     = profEl   ? profEl.value.trim()   : '';
+  var bro      = broEl    ? broEl.value            : 'chrome';
+  var bypass   = bypassEl ? bypassEl.value === '1' : true;
+  var label    = nameEl   ? nameEl.value.trim()    : '';
+  if (!url) { showToast('Введи URL или путь к приложению', 'err'); return; }
+  if (bro !== 'app' && !prof) { showToast('Введи имя профиля для браузера', 'err'); return; }
+  if (!label) label = url.replace(/https?:\/\//,'').split('/')[0] || url;
+  var bind = { id: Date.now(), label: label, url: url, profile: prof, browser: bro, bypass: bypass };
+  SAVED_BINDS.push(bind);
+  saveBindsToFile();
+  renderBinds();
+  // сброс формы
+  if (urlEl)    urlEl.value    = '';
+  if (profEl)   profEl.value   = '';
+  if (nameEl)   nameEl.value   = '';
+  showToast('Бинд "' + label + '" добавлен', 'ok');
+}
+
+function deleteBind(id) {
+  SAVED_BINDS = SAVED_BINDS.filter(function(b){ return b.id !== id; });
+  saveBindsToFile();
+  renderBinds();
+  showToast('Бинд удалён', 'err');
+}
+
+function renderBinds() {
+  var grid = document.getElementById('binds-grid');
+  if (!grid) return;
+  grid.innerHTML = '';
+  if (!SAVED_BINDS.length) {
+    grid.innerHTML = '<div style="color:var(--tx2);font-size:11px;font-family:var(--mono);padding:14px 0">Нет сохранённых биндов. Создай первый выше ↑</div>';
+    return;
+  }
+  SAVED_BINDS.forEach(function(b) {
+    var card = document.createElement('div');
+    card.className = 'af-card';
+    card.style.cssText = 'display:flex;align-items:center;gap:12px;padding:13px 15px;cursor:pointer;';
+    var icon = b.browser === 'app' ? '🖥️' : b.browser === 'msedge' ? '🌐' : b.browser === 'firefox' ? '🦊' : b.browser === 'yandex' ? '🟡' : '🔵';
+    var bypassBadge = b.bypass
+      ? '<span style="font-size:8px;background:rgba(var(--grnr),.15);color:var(--grn);border:1px solid rgba(var(--grnr),.3);border-radius:4px;padding:2px 5px;letter-spacing:.5px">BYPASS</span>'
+      : '<span style="font-size:8px;background:rgba(255,255,255,.06);color:var(--tx2);border:1px solid rgba(255,255,255,.1);border-radius:4px;padding:2px 5px;letter-spacing:.5px">DIRECT</span>';
+    card.innerHTML =
+      '<div style="font-size:22px;flex-shrink:0">' + icon + '</div>' +
+      '<div style="flex:1;min-width:0">' +
+        '<div style="font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + b.label + '</div>' +
+        '<div style="font-size:9px;color:var(--tx2);font-family:var(--mono);margin-top:2px;display:flex;align-items:center;gap:5px">' +
+          bypassBadge + ' ' + (b.browser !== 'app' ? b.browser + ' · ' + (b.profile || '—') : 'Приложение') +
+        '</div>' +
+      '</div>' +
+      '<button style="margin-left:auto;width:26px;height:26px;border-radius:7px;flex-shrink:0;background:rgba(255,26,78,.06);border:1px solid rgba(255,26,78,.18);color:rgba(255,26,78,.5);font-size:12px;display:flex;align-items:center;justify-content:center;transition:.18s;cursor:pointer" ' +
+        'onmouseover="this.style.background=\'rgba(255,26,78,.2)\';this.style.color=\'var(--red)\'" ' +
+        'onmouseout="this.style.background=\'rgba(255,26,78,.06)\';this.style.color=\'rgba(255,26,78,.5)\'" ' +
+        'onclick="event.stopPropagation();deleteBind(' + b.id + ')">🗑</button>';
+    card.addEventListener('click', function() {
+      launchBrowser(b.url, b.profile, b.browser, b.bypass);
+    });
+    grid.appendChild(card);
+  });
+}
+
+// ── THEMES & COLORS ──
+var APP_SETTINGS = { theme: '', colors: null };
+
+function previewColors() {
+  var ac  = document.getElementById('color-accent')?.value  || '#00f0ff';
+  var ac2 = document.getElementById('color-accent2')?.value || '#7b2fff';
+  var op  = document.getElementById('bg-opacity')?.value    || '0.97';
+  var disp = document.getElementById('opacity-display');
+  if (disp) disp.textContent = parseFloat(op).toFixed(2);
+  applyColors(ac, ac2, op);
+}
+
+async function saveColors() {
+  var ac  = document.getElementById('color-accent')?.value  || '#00f0ff';
+  var ac2 = document.getElementById('color-accent2')?.value || '#7b2fff';
+  var op  = document.getElementById('bg-opacity')?.value    || '0.97';
+  applyColors(ac, ac2, op);
+  APP_SETTINGS.colors = { ac, ac2, op };
+  await saveSettings();
+  showToast('✅ Цвета сохранены!', 'ok');
+}
+
+async function resetColors() {
+  var s = document.documentElement.style;
+  ['--ac','--acr','--ac2','--ac2r','--panelbg'].forEach(function(p){ s.removeProperty(p); });
+  var THEMES = ['th-cyber','th-hacker','th-blood','th-ocean','th-gold','th-matrix','th-rose','th-ice','th-toxic'];
+  THEMES.forEach(function(t){ document.body.classList.remove(t); });
+  APP_SETTINGS.theme  = '';
+  APP_SETTINGS.colors = null;
+  await saveSettings();
+  showToast('↺ Сброс выполнен');
+  var btn = document.querySelector('[data-tab="settings"]');
+  goTab('settings', btn);
+}
+
+function hexToRgb(hex) {
+  var r = parseInt(hex.slice(1,3), 16);
+  var g = parseInt(hex.slice(3,5), 16);
+  var b = parseInt(hex.slice(5,7), 16);
+  return r + ',' + g + ',' + b;
+}
+
+function applyColors(ac, ac2, opacity) {
+  var s = document.documentElement.style;
+  s.setProperty('--ac',   ac);
+  s.setProperty('--acr',  hexToRgb(ac));
+  s.setProperty('--ac2',  ac2);
+  s.setProperty('--ac2r', hexToRgb(ac2));
+  s.setProperty('--panelbg', 'rgba(5,7,18,' + opacity + ')');
+}
+
+// ── MATRIX CANVAS ──
+var matrixRAF = null, matrixCols = [];
+function initMatrixCanvas() {
+  var c = document.getElementById('matrix-canvas');
+  if (!c) return;
+  c.width = window.innerWidth; c.height = window.innerHeight;
+  var ctx = c.getContext('2d');
+  var colW = 16;
+  var cols = Math.floor(c.width / colW);
+  matrixCols = Array.from({length:cols}, () => Math.random() * c.height);
+  if (matrixRAF) cancelAnimationFrame(matrixRAF);
+  function draw() {
+    ctx.fillStyle = 'rgba(0,0,0,.05)';
+    ctx.fillRect(0,0,c.width,c.height);
+    var ac = getComputedStyle(document.body).getPropertyValue('--ac').trim() || '#00ff41';
+    ctx.fillStyle = ac; ctx.font = '14px Share Tech Mono';
+    matrixCols.forEach(function(y,i) {
+      ctx.fillText(String.fromCharCode(0x30A0 + Math.floor(Math.random()*96)), i*colW, y);
+      if (y > c.height && Math.random() > .975) matrixCols[i] = 0;
+      else matrixCols[i] = y + colW;
+    });
+    matrixRAF = requestAnimationFrame(draw);
+  }
+  draw();
+}
+function stopMatrixCanvas() {
+  if (matrixRAF) { cancelAnimationFrame(matrixRAF); matrixRAF = null; }
+  var c = document.getElementById('matrix-canvas');
+  if (c) { var ctx = c.getContext('2d'); ctx.clearRect(0,0,c.width,c.height); }
+}
+window.addEventListener('resize', function() {
+  var c = document.getElementById('matrix-canvas');
+  if (c) { c.width = window.innerWidth; c.height = window.innerHeight; }
+});
+
+// ── THEMES ──
+function setTheme(cls) {
+  var THEMES = ['th-cyber','th-hacker','th-blood','th-ocean','th-gold','th-matrix','th-rose','th-ice','th-toxic'];
+  // Сохраняем пользовательские CSS переменные
+  var s = document.documentElement.style;
+  var hadCustom = s.getPropertyValue('--ac');
+  THEMES.forEach(function(t){ document.body.classList.remove(t); });
+  if (cls) document.body.classList.add(cls);
+  APP_SETTINGS.theme = cls;
+  saveSettings();
+  // Matrix / Hacker — запускаем дождь
+  if (cls === 'th-matrix' || cls === 'th-hacker') initMatrixCanvas();
+  else stopMatrixCanvas();
+  // Подсветка карточки
+  document.querySelectorAll('.theme-card').forEach(function(el) {
+    el.classList.remove('is-active');
+    if (el.id === 'tc-' + cls) el.classList.add('is-active');
+  });
+  showToast('🎨 Тема: ' + (cls || 'Default'), 'ok');
+}
+
+function applyGlow(val) {
+  var i = val / 100;
+  document.documentElement.style.setProperty('--glow',
+    '0 0 ' + Math.round(20*i) + 'px rgba(var(--acr),' + (.35*i).toFixed(2) + '),' +
+    '0 0 ' + Math.round(60*i) + 'px rgba(var(--acr),' + (.1*i).toFixed(2) + ')'
+  );
+  APP_SETTINGS.glowIntensity = val;
+  saveSettings();
+}
+
+function applyFont(font) {
+  document.documentElement.style.setProperty('--font', font);
+  APP_SETTINGS.fxFont = font;
+}
+
+function applyScale(val) {
+  // zoom не работает в Electron — используем transform на #app
+  var app = document.getElementById('app');
+  if (app) {
+    var s = parseFloat(val);
+    app.style.transform = s === 1 ? '' : 'scale(' + s + ')';
+    app.style.transformOrigin = 'top left';
+    app.style.width  = s === 1 ? '' : Math.round(100/s) + 'vw';
+    app.style.height = s === 1 ? '' : Math.round(100/s) + 'vh';
+  }
+  APP_SETTINGS.uiScale = val;
+  saveSettings();
+}
+
+function saveFx() {
+  var get = function(id) { var el = document.getElementById(id); return el ? el.value : null; };
+  var particles = get('fx-particles');
+  var speed     = get('fx-speed');
+  var scanlines = get('fx-scanlines');
+  var font      = get('fx-font');
+  if (particles) { APP_SETTINGS.fxParticles = particles; if(window.CANVAS_API) CANVAS_API.setMode(particles); }
+  if (speed)     { APP_SETTINGS.fxSpeed = parseFloat(speed); if(window.CANVAS_API) CANVAS_API.setSpeed(speed); }
+  if (scanlines) APP_SETTINGS.fxScanlines = scanlines;
+  if (font)      { APP_SETTINGS.fxFont = font; applyFont(font); }
+  var scanEl = document.getElementById('scanlines');
+  if (scanEl) scanEl.style.opacity = (scanlines === 'off') ? '0' : '1';
+  saveSettings();
+}
+
+function initSettingsTab() {
+  var s = APP_SETTINGS;
+  // Цвета
+  if (s.colors) {
+    var acEl = document.getElementById('color-accent');
+    var ac2El= document.getElementById('color-accent2');
+    var opEl = document.getElementById('bg-opacity');
+    var opD  = document.getElementById('opacity-display');
+    if (acEl)  acEl.value  = s.colors.ac  || '#00f0ff';
+    if (ac2El) ac2El.value = s.colors.ac2 || '#7b2fff';
+    if (opEl)  { opEl.value = s.colors.op || '0.97'; if(opD) opD.textContent = parseFloat(s.colors.op||'0.97').toFixed(2); }
+  }
+  // FX
+  if (s.fxParticles) { var el=document.getElementById('fx-particles'); if(el) el.value=s.fxParticles; }
+  if (s.fxSpeed)     { var el=document.getElementById('fx-speed');     if(el){ el.value=s.fxSpeed; var d=document.getElementById('speed-display'); if(d) d.textContent=parseFloat(s.fxSpeed).toFixed(1); } }
+  if (s.fxScanlines) { var el=document.getElementById('fx-scanlines'); if(el) el.value=s.fxScanlines; }
+  // Активная тема
+  var cur = s.theme || '';
+  document.querySelectorAll('.theme-card').forEach(function(el) {
+    el.classList.remove('is-active');
+    if (el.id === 'tc-' + cur) el.classList.add('is-active');
+  });
+}
+
+async function saveSettings() {
+  try { await ipc.invoke('write-settings', APP_SETTINGS); } catch(e) {}
+}
+
+async function loadSettings() {
+  try {
+    var s = await ipc.invoke('read-settings');
+    if (s) APP_SETTINGS = s;
+    if (APP_SETTINGS.theme) {
+      var THEMES = ['th-cyber','th-hacker','th-blood','th-ocean','th-gold','th-matrix','th-rose','th-ice','th-toxic'];
+      THEMES.forEach(function(t){ document.body.classList.remove(t); });
+      if (APP_SETTINGS.theme) document.body.classList.add(APP_SETTINGS.theme);
+      if (APP_SETTINGS.theme === 'th-matrix' || APP_SETTINGS.theme === 'th-hacker') {
+        setTimeout(initMatrixCanvas, 800);
+      }
+    }
+    if (APP_SETTINGS.colors) applyColors(APP_SETTINGS.colors.ac, APP_SETTINGS.colors.ac2, APP_SETTINGS.colors.op);
+    if (APP_SETTINGS.fxScanlines === 'off') {
+      var sc = document.getElementById('scanlines'); if(sc) sc.style.opacity = '0';
+    }
+    if (APP_SETTINGS.fxParticles && window.CANVAS_API) CANVAS_API.setMode(APP_SETTINGS.fxParticles);
+    if (APP_SETTINGS.fxSpeed     && window.CANVAS_API) CANVAS_API.setSpeed(APP_SETTINGS.fxSpeed);
+  } catch(e) {}
+}
+
+// ── CONFIG ──
+var UA_PRESETS = {
+  chrome_win:    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  chrome_mac:    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  edge_win:      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0',
+  firefox_win:   'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0',
+  safari_mac:    'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15',
+  mobile_android:'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.6367.82 Mobile Safari/537.36',
+};
+
+function setUA(key) {
+  var el = document.getElementById('cfg-ua');
+  if (el && UA_PRESETS[key]) { el.value = UA_PRESETS[key]; showToast('UA: ' + key, 'ok'); }
+}
+function setRes(val) {
+  var el = document.getElementById('cfg-res');
+  if (el) { el.value = val; showToast('Разрешение: ' + val, 'ok'); }
+}
+
+async function loadConfig() {
+  try {
+    var data = await ipc.invoke('read-config');
+    var uaEl  = document.getElementById('cfg-ua');
+    var resEl = document.getElementById('cfg-res');
+    if (uaEl)  uaEl.value  = data.user_agent || '';
+    if (resEl) resEl.value = data.resolution || '1920,1080';
+  } catch(e) {}
+}
+
+async function saveConfig() {
+  var uaEl  = document.getElementById('cfg-ua');
+  var resEl = document.getElementById('cfg-res');
+  var ua  = uaEl  ? uaEl.value.trim()  : '';
+  var res = resEl ? resEl.value.trim() : '1920,1080';
+  // валидация формата разрешения
+  if (res && !/^\d{3,4},\d{3,4}$/.test(res)) {
+    showToast('Формат разрешения: 1920,1080', 'err'); return;
+  }
+  var data = {};
+  if (ua)  data.user_agent = ua;
+  if (res) data.resolution = res;
+  try {
+    var r = await ipc.invoke('write-config', data);
+    if (r && r.ok) showToast('config.json сохранён! Настройки применятся при следующем запуске браузера.', 'ok');
+    else showToast('Ошибка: ' + (r ? r.msg : '?'), 'err');
+  } catch(e) { showToast('IPC ошибка', 'err'); }
+}
+
+// =====================================================
+//   ADBLOCK
+// =====================================================
+var HOSTS_DOMAINS = [];
+
+var AD_PRESETS = {
+  google_ads: [
+    'pagead2.googlesyndication.com','adservice.google.com','googleadservices.com',
+    'doubleclick.net','ad.doubleclick.net','stats.g.doubleclick.net',
+    'googleads.g.doubleclick.net','tpc.googlesyndication.com','www.googletagservices.com',
+  ],
+  yandex_ads: [
+    'an.yandex.ru','mc.yandex.ru','yandex-team.ru','bs.serving-sys.com',
+    'awaps.yandex.ru','yabs.yandex.ru','banners.adfox.ru','ads.adfox.ru',
+    'yastatic.net','static-mon.yandex.net',
+  ],
+  meta_ads: [
+    'an.facebook.com','www.facebook.com','connect.facebook.net','graph.facebook.com',
+    'staticxx.facebook.com','xx.fbcdn.net','edge-atlas.facebook.com',
+    'atlas.facebook.com','advertising.facebook.com',
+  ],
+  trackers: [
+    'google-analytics.com','www.google-analytics.com','ssl.google-analytics.com',
+    'analytics.google.com','metrics.doubleclick.net','hotjar.com','static.hotjar.com',
+    'script.hotjar.com','mouseflow.com','fullstory.com','mixpanel.com',
+    'segment.io','cdn.segment.com','amplitude.com','api.amplitude.com',
+    'mc.yandex.ru','counter.yadro.ru',
+  ],
+  casino: [
+    '1xbet.com','betmaster.ru','pin-up.casino','mostbet.com','vulkan.com',
+    'volcano.ru','olimp.bet','leon.ru','888casino.com','pokerdom.com',
+    'joycasino.com','azino777.com','champion.ru','melbet.com','fonbet.ru',
+  ],
+  malware: [
+    'malware.com','phishing-site.com','trojan-download.net','virus-alert.ru',
+    'free-antivirus-download.com','update-flash-player.com','your-pc-infected.com',
+    'tracking.ru','spy-track.net','adware.ru',
+  ],
+};
+
+async function loadHostsDomains() {
+  var statusEl = document.getElementById('hosts-status');
+  if (statusEl) statusEl.textContent = 'Читаю hosts...';
+  try {
+    var r = await ipc.invoke('hosts-read');
+    if (r.ok) {
+      HOSTS_DOMAINS = r.domains || [];
+      renderHostsList();
+      if (statusEl) statusEl.textContent = '✓ Прочитано из hosts-файла';
+    } else {
+      if (statusEl) statusEl.style.color = 'var(--red)';
+      if (statusEl) statusEl.textContent = '✗ ' + r.msg;
+    }
+  } catch(e) {
+    if (statusEl) statusEl.textContent = 'IPC ошибка: ' + e.message;
+  }
+}
+
+function renderHostsList() {
+  var el = document.getElementById('hosts-list');
+  var cnt = document.getElementById('hosts-count');
+  if (!el) return;
+  if (cnt) cnt.textContent = HOSTS_DOMAINS.length;
+  if (!HOSTS_DOMAINS.length) {
+    el.innerHTML = '<span style="color:var(--tx2)">Список пуст — добавь домены выше</span>';
+    return;
+  }
+  el.innerHTML = '';
+  HOSTS_DOMAINS.forEach(function(d, i) {
+    var row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:3px 4px;border-radius:4px;transition:.15s';
+    row.onmouseover = function(){ this.style.background = 'rgba(255,255,255,.04)'; };
+    row.onmouseout  = function(){ this.style.background = ''; };
+    row.innerHTML =
+      '<span style="color:var(--tx)">0.0.0.0 <span style="color:var(--ac)">' + d + '</span></span>' +
+      '<span onclick="removeDomain(' + i + ')" style="cursor:pointer;color:rgba(255,26,78,.45);padding:0 4px;font-size:11px;transition:.15s" ' +
+        'onmouseover="this.style.color=\'var(--red)\'" onmouseout="this.style.color=\'rgba(255,26,78,.45)\'">✕</span>';
+    el.appendChild(row);
+  });
+}
+
+function removeDomain(idx) {
+  HOSTS_DOMAINS.splice(idx, 1);
+  renderHostsList();
+}
+
+function addHostsDomain() {
+  var inp = document.getElementById('hosts-new-domain');
+  if (!inp) return;
+  var val = inp.value.trim().toLowerCase().replace(/^https?:\/\//,'').replace(/\/.*/,'');
+  if (!val) { showToast('Введи домен', 'err'); return; }
+  if (HOSTS_DOMAINS.indexOf(val) !== -1) { showToast('Уже в списке', ''); return; }
+  HOSTS_DOMAINS.push(val);
+  inp.value = '';
+  renderHostsList();
+  showToast('+ ' + val, 'ok');
+}
+
+function addPreset(key) {
+  var list = AD_PRESETS[key] || [];
+  var added = 0;
+  list.forEach(function(d) {
+    if (HOSTS_DOMAINS.indexOf(d) === -1) { HOSTS_DOMAINS.push(d); added++; }
+  });
+  renderHostsList();
+  showToast('Добавлено ' + added + ' доменов: ' + key, 'ok');
+}
+
+function clearAllDomains() {
+  if (!confirm('Очистить весь список блокировок?')) return;
+  HOSTS_DOMAINS = [];
+  renderHostsList();
+  showToast('Список очищен', 'err');
+}
+
+async function applyHosts() {
+  var statusEl = document.getElementById('hosts-status');
+  if (statusEl) { statusEl.style.color = 'var(--tx2)'; statusEl.textContent = 'Применяю...'; }
+  try {
+    var r = await ipc.invoke('hosts-write', HOSTS_DOMAINS);
+    if (r.ok) {
+      if (statusEl) { statusEl.style.color = 'var(--grn)'; statusEl.textContent = '✓ Применено! ' + HOSTS_DOMAINS.length + ' доменов заблокировано.'; }
+      showToast('🛡️ Hosts обновлён! ' + HOSTS_DOMAINS.length + ' доменов', 'ok');
+    } else if (r.needAdmin) {
+      if (statusEl) statusEl.textContent = 'Нужны права администратора — запрашиваю UAC...';
+      var r2 = await ipc.invoke('hosts-write-admin', HOSTS_DOMAINS);
+      if (r2.ok) {
+        if (statusEl) { statusEl.style.color = 'var(--grn)'; statusEl.textContent = '✓ Применено через UAC! ' + HOSTS_DOMAINS.length + ' доменов.'; }
+        showToast('🛡️ Hosts обновлён (admin)!', 'ok');
+      } else {
+        if (statusEl) { statusEl.style.color = 'var(--red)'; statusEl.textContent = '✗ Ошибка UAC: ' + r2.msg; }
+        showToast('Ошибка: ' + r2.msg, 'err');
+      }
+    } else {
+      if (statusEl) { statusEl.style.color = 'var(--red)'; statusEl.textContent = '✗ ' + r.msg; }
+      showToast('Ошибка: ' + r.msg, 'err');
+    }
+  } catch(e) { showToast('IPC ошибка', 'err'); }
+}
+
+async function initAdblock() {
+  await loadHostsDomains();
+  // заполняем список профилей для uBlock
+  var sel = document.getElementById('ublock-profile');
+  if (sel) {
+    var list = [];
+    try { list = await ipc.invoke('list-profiles'); } catch(e) {}
+    sel.innerHTML = list.length
+      ? list.map(function(p){ return '<option value="' + p + '">' + p + '</option>'; }).join('')
+      : '<option value="">— Нет профилей —</option>';
+  }
+  // проверяем наличие assets/ublock
+  try {
+    var chk = await ipc.invoke('ublock-check');
+    var statusEl = document.getElementById('ublock-status');
+    if (chk.hasManifest) {
+      if (statusEl) { statusEl.style.color = 'var(--grn)'; statusEl.textContent = '✓ uBlock найден в assets/ublock/ — версия ' + (chk.version || '?'); }
+    } else if (chk.exists) {
+      if (statusEl) { statusEl.style.color = 'var(--red)'; statusEl.textContent = '✗ Папка assets/ublock/ есть, но внутри нет manifest.json — распакуй CRX внутрь папки'; }
+    } else {
+      if (statusEl) { statusEl.style.color = 'var(--tx2)'; statusEl.textContent = '⚠ Папка assets/ublock/ не найдена. Создай её и распакуй туда CRX файл'; }
+    }
+  } catch(e) {}
+}
+
+async function installUblock() {
+  var sel = document.getElementById('ublock-profile');
+  var statusEl = document.getElementById('ublock-status');
+  if (!sel || !sel.value) { showToast('Выбери профиль', 'err'); return; }
+  // сначала проверяем папку
+  try {
+    var chk = await ipc.invoke('ublock-check');
+    if (!chk.hasManifest) {
+      var msg = chk.exists
+        ? 'В assets\\ublock\\ нет manifest.json — распакуй CRX внутрь папки (не в подпапку!)'
+        : 'Создай папку assets\\ublock\\ рядом с программой и распакуй туда CRX';
+      if (statusEl) { statusEl.style.color = 'var(--red)'; statusEl.textContent = '✗ ' + msg; }
+      showToast(msg, 'err'); return;
+    }
+  } catch(e) {}
+  if (statusEl) { statusEl.style.color = 'var(--tx2)'; statusEl.textContent = 'Устанавливаю...'; }
+  try {
+    var r = await ipc.invoke('ublock-install', sel.value);
+    if (r.ok) {
+      if (statusEl) { statusEl.style.color = 'var(--grn)'; statusEl.textContent = '✓ uBlock v' + r.version + ' установлен в профиль "' + sel.value + '"\n→ ' + r.dst; }
+      showToast('🧩 uBlock установлен в ' + sel.value + '!', 'ok');
+    } else {
+      if (statusEl) { statusEl.style.color = 'var(--red)'; statusEl.textContent = '✗ ' + r.msg; }
+      showToast('Ошибка: ' + r.msg, 'err');
+    }
+  } catch(e) { showToast('IPC ошибка', 'err'); }
+}
+
+function openUblockLink() {
+  shell.openExternal('https://github.com/gorhill/uBlock/releases/latest');
+}
+function openUblockFolder() {
+  ipc.send('open-folder', 'assets');
+}
+
+// =====================================================
+//   ДИАГНОСТИКА КОМПОНЕНТОВ
+// =====================================================
+var DIAG_RUNNING = false;
+
+var DIAG_COMPONENTS = [
+  { id:'python',     icon:'🐍', name:'Python',           cmd:'diag-check-python'   },
+  { id:'pip',        icon:'📦', name:'pip',               cmd:'diag-check-pip'      },
+  { id:'selenium',   icon:'🤖', name:'selenium',          cmd:'diag-check-pkg',  pkg:'selenium'          },
+  { id:'stealth',    icon:'👻', name:'selenium-stealth',  cmd:'diag-check-pkg',  pkg:'selenium_stealth'  },
+  { id:'wdm',        icon:'🔩', name:'webdriver-manager', cmd:'diag-check-pkg',  pkg:'webdriver_manager' },
+  { id:'chrome',     icon:'🌐', name:'Google Chrome',     cmd:'diag-check-chrome'   },
+  { id:'chromedrv',  icon:'⚙',  name:'ChromeDriver',      cmd:'diag-check-chromedrv'},
+  { id:'edge',       icon:'🌀', name:'Microsoft Edge',    cmd:'diag-check-edge'     },
+  { id:'edgedrv',    icon:'⚙',  name:'EdgeDriver',        cmd:'diag-check-edgedrv'  },
+];
+
+var diagResults = {};
+
+function diagLog(msg, cls) {
+  var log = document.getElementById('diag-log');
+  if (!log) return;
+  if (log.querySelector('span')) log.innerHTML = '';
+  var d = document.createElement('div');
+  d.className = 'diag-log-' + (cls||'info');
+  d.textContent = msg;
+  log.appendChild(d);
+  log.scrollTop = log.scrollHeight;
+}
+
+function diagProgress(pct, label) {
+  var wrap = document.getElementById('diag-progress-wrap');
+  var bar  = document.getElementById('diag-progress-bar');
+  var lbl  = document.getElementById('diag-progress-label');
+  var pctEl= document.getElementById('diag-progress-pct');
+  if (!wrap) return;
+  wrap.style.display = '';
+  if (bar)  bar.style.width = pct + '%';
+  if (lbl)  lbl.textContent = label || '';
+  if (pctEl)pctEl.textContent = pct + '%';
+}
+
+function diagRenderList() {
+  var list = document.getElementById('diag-list');
+  if (!list) return;
+  list.innerHTML = '';
+  var needInstall = false;
+  DIAG_COMPONENTS.forEach(function(c) {
+    var r = diagResults[c.id] || { status:'unknown' };
+    var row = document.createElement('div');
+    row.className = 'diag-row';
+    var stCls  = r.status === 'ok' ? 'ok' : r.status === 'wait' ? 'wait' : r.status === 'warn' ? 'warn' : 'err';
+    var stText = r.status === 'ok' ? '✓ OK' : r.status === 'wait' ? '...' : r.status === 'warn' ? '⚠ обновить' : '✗ нет';
+    if (r.status === 'err' || r.status === 'warn') needInstall = true;
+    row.innerHTML =
+      '<div class="diag-icon">' + c.icon + '</div>' +
+      '<div class="diag-name">' + c.name + '</div>' +
+      '<div class="diag-ver">'  + (r.version || '') + '</div>' +
+      '<div class="diag-status ' + stCls + '">' + stText + '</div>';
+    list.appendChild(row);
+  });
+  var installBtn = document.getElementById('diag-install-btn');
+  if (installBtn) installBtn.disabled = !needInstall;
+}
+
+async function initDiag() {
+  // Восстанавливаем лог из буфера если установка шла в фоне
+  if (DIAG_LOG_BUFFER.length > 0) {
+    var log = document.getElementById('diag-log');
+    if (log) {
+      log.innerHTML = '';
+      DIAG_LOG_BUFFER.slice(-200).forEach(function(e) {
+        var d = document.createElement('div');
+        d.className = 'diag-log-' + (e.cls||'info');
+        d.textContent = e.msg;
+        log.appendChild(d);
+      });
+      log.scrollTop = log.scrollHeight;
+    }
+  }
+  // Восстанавливаем состояние кнопок
+  var installBtn = document.getElementById('diag-install-btn');
+  var checkBtn   = document.getElementById('diag-check-btn');
+  if (DIAG_RUNNING) {
+    if (installBtn) { installBtn.disabled = true; installBtn.textContent = '⏳ Установка...'; }
+    if (checkBtn)   checkBtn.disabled = true;
+    diagLogGlobal('⏳ Установка выполняется...', 'step');
+  } else {
+    diagRenderList();
+  }
+}
+
+async function diagCheck() {
+  if (DIAG_RUNNING) return;
+  DIAG_RUNNING = true;
+  var checkBtn = document.getElementById('diag-check-btn');
+  if (checkBtn) { checkBtn.disabled = true; checkBtn.textContent = '...'; }
+  diagLog('Сканирование компонентов...', 'step');
+  diagProgress(5, 'Проверка...');
+
+  var total = DIAG_COMPONENTS.length;
+  for (var i = 0; i < total; i++) {
+    var c = DIAG_COMPONENTS[i];
+    diagResults[c.id] = { status:'wait' };
+    diagRenderList();
+    diagProgress(Math.round((i/total)*80)+5, c.name + '...');
+    try {
+      var r = await ipc.invoke('diag-check', { component: c.id, pkg: c.pkg });
+      diagResults[c.id] = r;
+      diagLog((r.status==='ok'?'✓':'✗') + ' ' + c.name + (r.version?' — '+r.version:'') + (r.note?' ('+r.note+')':''), r.status==='ok'?'ok':r.status==='warn'?'warn':'err');
+    } catch(e) {
+      diagResults[c.id] = { status:'err', note: e.message };
+      diagLog('✗ ' + c.name + ': IPC ошибка', 'err');
+    }
+    diagRenderList();
+  }
+
+  diagProgress(100, 'Готово');
+  var errors = DIAG_COMPONENTS.filter(function(c){ return diagResults[c.id] && (diagResults[c.id].status==='err'||diagResults[c.id].status==='warn'); });
+  if (errors.length === 0) diagLog('Все компоненты в порядке!', 'ok');
+  else diagLog('Нужно установить: ' + errors.map(function(c){return c.name;}).join(', '), 'warn');
+
+  DIAG_RUNNING = false;
+  if (checkBtn) { checkBtn.disabled = false; checkBtn.textContent = 'Проверить'; }
+}
+
+// Глобальный лог установки — не зависит от DOM вкладки
+var DIAG_LOG_BUFFER = [];
+var DIAG_LISTENERS_ADDED = false;
+
+function diagLogGlobal(msg, cls) {
+  DIAG_LOG_BUFFER.push({ msg, cls });
+  // Пишем в DOM если вкладка открыта
+  var log = document.getElementById('diag-log');
+  if (log) {
+    if (log.querySelector('span')) log.innerHTML = '';
+    // Перерисовываем весь буфер
+    DIAG_LOG_BUFFER.slice(-200).forEach(function(e) {
+      var d = document.createElement('div');
+      d.className = 'diag-log-' + (e.cls||'info');
+      d.textContent = e.msg;
+      log.appendChild(d);
+    });
+    log.scrollTop = log.scrollHeight;
+  }
+}
+
+function diagProgressGlobal(pct, label) {
+  // Обновляем DOM если открыт
+  var wrap = document.getElementById('diag-progress-wrap');
+  var bar  = document.getElementById('diag-progress-bar');
+  var lbl  = document.getElementById('diag-progress-label');
+  var pctEl= document.getElementById('diag-progress-pct');
+  if (wrap) wrap.style.display = '';
+  if (bar)  bar.style.width = pct + '%';
+  if (lbl)  lbl.textContent = label || '';
+  if (pctEl)pctEl.textContent = pct + '%';
+  // Обновляем статус в навбаре
+  var navBtn = document.querySelector('[data-tab="diag"]');
+  if (navBtn && DIAG_RUNNING) {
+    navBtn.querySelector('.nav-icon').textContent = pct >= 100 ? '✓' : '⏳';
+  }
+}
+
+function diagLog(msg, cls) { diagLogGlobal(msg, cls); }
+function diagProgress(pct, label) { diagProgressGlobal(pct, label); }
+
+async function diagInstallAll() {
+  if (DIAG_RUNNING) return;
+  DIAG_RUNNING = true;
+  DIAG_LOG_BUFFER = [];
+
+  var installBtn = document.getElementById('diag-install-btn');
+  var checkBtn   = document.getElementById('diag-check-btn');
+  if (installBtn) { installBtn.disabled = true; installBtn.textContent = '⏳'; }
+  if (checkBtn)   checkBtn.disabled = true;
+
+  // Вешаем слушатели один раз глобально
+  if (!DIAG_LISTENERS_ADDED) {
+    DIAG_LISTENERS_ADDED = true;
+    ipc.on('diag-log',      function(_, d) { diagLogGlobal(d.msg, d.type||'info'); });
+    ipc.on('diag-progress', function(_, d) { diagProgressGlobal(d.pct, d.label); });
+  }
+
+  var toInstall = DIAG_COMPONENTS.filter(function(c){
+    return diagResults[c.id] && (diagResults[c.id].status==='err' || diagResults[c.id].status==='warn');
+  });
+
+  diagLogGlobal('Установка ' + toInstall.length + ' компонентов...', 'step');
+  diagProgressGlobal(5, 'Запуск...');
+
+  try {
+    var res = await ipc.invoke('diag-install', { components: toInstall.map(function(c){return c.id;}) });
+    diagLogGlobal(res.ok ? '✓ Готово!' : '✗ ' + res.msg, res.ok ? 'ok' : 'err');
+  } catch(e) {
+    diagLogGlobal('✗ ' + e.message, 'err');
+  }
+
+  DIAG_RUNNING = false;
+  var navBtn = document.querySelector('[data-tab="diag"]');
+  if (navBtn) navBtn.querySelector('.nav-icon').textContent = '🔧';
+  if (installBtn) { installBtn.textContent = 'Установить всё'; }
+  if (checkBtn)   checkBtn.disabled = false;
+  await diagCheck();
+}
+
+// =====================================================
+//   ЛОГИ ЗАПУСКОВ
+// =====================================================
+var ALL_LOGS = [];
+
+// Живые обновления — когда открыта вкладка логов
+ipc.on('log-entry', function(_, entries) {
+  if (!Array.isArray(entries)) return;
+  entries.forEach(function(e) {
+    // Не дублируем
+    if (!ALL_LOGS.find(function(x){ return x.ts === e.ts && x.msg === e.msg; })) {
+      ALL_LOGS.push(e);
+    }
+  });
+  if (ALL_LOGS.length > 500) ALL_LOGS = ALL_LOGS.slice(-500);
+  // Обновляем DOM если вкладка открыта
+  var wrap = document.getElementById('logs-wrap');
+  if (wrap) renderLogsDOM(wrap);
+  // Мигаем иконкой в навбаре
+  var ico = document.getElementById('logs-nav-icon');
+  if (ico && document.querySelector('[data-tab="logs"]') &&
+      !document.querySelector('[data-tab="logs"].is-active')) {
+    ico.textContent = '🔴';
+    setTimeout(function(){ ico.textContent = '📋'; }, 2000);
+  }
+});
+
+async function initLogs() {
+  // Загружаем все логи из main процесса
+  try {
+    var logs = await ipc.invoke('read-logs');
+    if (Array.isArray(logs)) ALL_LOGS = logs;
+  } catch(e) {}
+  var wrap = document.getElementById('logs-wrap');
+  if (wrap) renderLogsDOM(wrap);
+  // Сбрасываем иконку
+  var ico = document.getElementById('logs-nav-icon');
+  if (ico) ico.textContent = '📋';
+}
+
+function renderLogs() {
+  var wrap = document.getElementById('logs-wrap');
+  if (wrap) renderLogsDOM(wrap);
+}
+
+function renderLogsDOM(wrap) {
+  var filterBrowser = document.getElementById('log-filter-browser');
+  var filterLevel   = document.getElementById('log-filter-level');
+  var fb = filterBrowser ? filterBrowser.value : '';
+  var fl = filterLevel   ? filterLevel.value   : '';
+
+  var logs = ALL_LOGS.slice().reverse(); // новые сверху
+  if (fb) logs = logs.filter(function(l){ return l.browser === fb; });
+  if (fl === 'error') logs = logs.filter(function(l){ return l.msg.toLowerCase().includes('error') || l.msg.includes('[error]'); });
+  if (fl === 'engine') logs = logs.filter(function(l){ return l.msg.includes('[engine]') || l.msg.includes('[start]'); });
+
+  if (logs.length === 0) {
+    wrap.innerHTML = '<div style="color:var(--tx2)">Нет записей' + (fb||fl ? ' по фильтру' : '') + '.</div>';
+    return;
+  }
+
+  var BROWSER_COLORS = { chrome:'#4285F4', msedge:'#0078D7', firefox:'#FF9500', yandex:'#FC3F1D' };
+  var html = '';
+  logs.forEach(function(e) {
+    var time = new Date(e.ts).toLocaleTimeString('ru-RU');
+    var isErr  = e.msg.includes('error') || e.msg.includes('Error') || e.msg.includes('[error]');
+    var isOk   = e.msg.includes('[start]') || e.msg.includes('OK') || e.msg.includes('✓');
+    var color  = isErr ? 'var(--red)' : isOk ? 'var(--grn)' : 'var(--tx2)';
+    var bcolor = BROWSER_COLORS[e.browser] || 'var(--ac)';
+    html += '<div style="display:flex;gap:8px;align-items:baseline;padding:2px 0;border-bottom:1px solid rgba(255,255,255,.03)">' +
+      '<span style="color:rgba(255,255,255,.25);font-size:9px;flex-shrink:0;width:52px">' + time + '</span>' +
+      '<span style="color:' + bcolor + ';font-size:9px;flex-shrink:0;width:44px">' + (e.browser||'') + '</span>' +
+      '<span style="color:rgba(var(--acr),.5);font-size:9px;flex-shrink:0;width:72px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + (e.profile||'') + '">' + (e.profile||'') + '</span>' +
+      '<span style="color:' + color + ';flex:1;word-break:break-all">' + escHtml(e.msg) + '</span>' +
+      '</div>';
+  });
+  wrap.innerHTML = html;
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+async function clearLogs() {
+  try { await ipc.invoke('clear-logs'); } catch(e) {}
+  ALL_LOGS = [];
+  renderLogs();
+  showToast('Логи очищены');
+}
+
+// =====================================================
+//   FINGERPRINT РАНДОМИЗАЦИЯ
+// =====================================================
+
+// Банки данных для рандомизации
+var FP_WEBGL_VENDORS = [
+  { vendor: 'Google Inc. (NVIDIA)', renderer: 'ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)' },
+  { vendor: 'Google Inc. (AMD)',    renderer: 'ANGLE (AMD, AMD Radeon RX 6600 Direct3D11 vs_5_0 ps_5_0, D3D11)' },
+  { vendor: 'Google Inc. (Intel)',  renderer: 'ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11)' },
+  { vendor: 'Google Inc. (NVIDIA)', renderer: 'ANGLE (NVIDIA, NVIDIA GeForce GTX 1660 SUPER Direct3D11 vs_5_0 ps_5_0, D3D11)' },
+  { vendor: 'Google Inc. (AMD)',    renderer: 'ANGLE (AMD, AMD Radeon RX 580 Direct3D11 vs_5_0 ps_5_0, D3D11)' },
+  { vendor: 'Google Inc. (Intel)',  renderer: 'ANGLE (Intel, Intel(R) Iris(R) Xe Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)' },
+  { vendor: 'Google Inc. (NVIDIA)', renderer: 'ANGLE (NVIDIA, NVIDIA GeForce RTX 2070 Direct3D11 vs_5_0 ps_5_0, D3D11)' },
+  { vendor: 'Google Inc. (AMD)',    renderer: 'ANGLE (AMD, AMD Radeon RX 5700 XT Direct3D11 vs_5_0 ps_5_0, D3D11)' },
+];
+
+var FP_PLATFORMS = ['Win32', 'Win32', 'Win32', 'Win64']; // Win32 чаще — реалистичнее
+
+var FP_RESOLUTIONS = [
+  '1920,1080', '1920,1080', '1920,1080', // самые популярные чаще
+  '2560,1440', '1366,768', '1536,864',
+  '1440,900', '1280,800', '1600,900',
+];
+
+var FP_UA_CHROME_VERSIONS = ['122', '123', '124', '125', '126', '130', '131', '132'];
+
+function fpRandom(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+function generateFingerprint() {
+  var cfg = {};
+  try {
+    var s = JSON.parse(localStorage.getItem('artofix_fp_settings') || '{}');
+    cfg = s;
+  } catch(e) {}
+
+  var fp = {};
+
+  if (cfg.webgl !== false) {
+    var gpu = fpRandom(FP_WEBGL_VENDORS);
+    fp.webgl_vendor   = gpu.vendor;
+    fp.webgl_renderer = gpu.renderer;
+  }
+
+  if (cfg.platform !== false) {
+    fp.platform = fpRandom(FP_PLATFORMS);
+  }
+
+  if (cfg.canvas !== false) {
+    // Небольшой шум в canvas — уникальный для каждой сессии
+    fp.canvas_noise = Math.floor(Math.random() * 100);
+  }
+
+  if (cfg.resolution) {
+    var res = fpRandom(FP_RESOLUTIONS);
+    fp.resolution = res;
+  }
+
+  if (cfg.ua) {
+    var ver = fpRandom(FP_UA_CHROME_VERSIONS);
+    fp.user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/' + ver + '.0.0.0 Safari/537.36';
+  }
+
+  return fp;
+}
+
+function saveFpConfig() {
+  var cfg = {
+    webgl:      document.getElementById('fp-webgl')?.checked      !== false,
+    platform:   document.getElementById('fp-platform')?.checked   !== false,
+    canvas:     document.getElementById('fp-canvas')?.checked     !== false,
+    resolution: document.getElementById('fp-resolution')?.checked || false,
+    ua:         document.getElementById('fp-ua')?.checked         || false,
+  };
+  // Сохраняем в APP_SETTINGS
+  APP_SETTINGS.fingerprint = cfg;
+  saveSettings();
+  showToast('Fingerprint сохранён', 'ok');
+}
+
+function loadFpConfig() {
+  var cfg = APP_SETTINGS.fingerprint || {};
+  var set = function(id, val) { var el = document.getElementById(id); if (el) el.checked = val !== false; };
+  set('fp-webgl',      cfg.webgl      !== false);
+  set('fp-platform',   cfg.platform   !== false);
+  set('fp-canvas',     cfg.canvas     !== false);
+  set('fp-resolution', cfg.resolution === true);
+  set('fp-ua',         cfg.ua         === true);
+}
+
+function previewFingerprint() {
+  var fp = generateFingerprint();
+  var el = document.getElementById('fp-preview');
+  if (!el) return;
+  el.style.display = '';
+  el.innerHTML =
+    '<div><span style="color:var(--ac)">WebGL vendor:</span>   ' + (fp.webgl_vendor   || 'не меняется') + '</div>' +
+    '<div><span style="color:var(--ac)">WebGL renderer:</span> ' + (fp.webgl_renderer || 'не меняется') + '</div>' +
+    '<div><span style="color:var(--ac)">Platform:</span>       ' + (fp.platform       || 'не меняется') + '</div>' +
+    '<div><span style="color:var(--ac)">Canvas noise:</span>   ' + (fp.canvas_noise !== undefined ? fp.canvas_noise : 'не меняется') + '</div>' +
+    '<div><span style="color:var(--ac)">Resolution:</span>     ' + (fp.resolution    || 'из конфига') + '</div>' +
+    '<div><span style="color:var(--ac)">User-Agent:</span>     ' + (fp.user_agent    || 'из конфига') + '</div>';
+}
+
+// Хук — перед каждым запуском браузера генерируем fingerprint и пишем в config
+var _origLaunchBrowser = null;
+(function() {
+  var orig = launchBrowser;
+  launchBrowser = async function(url, profile, browser, bypass) {
+    // Генерируем fingerprint и сохраняем в config.json временно
+    try {
+      var fp = generateFingerprint();
+      if (Object.keys(fp).length > 0) {
+        var cfg = await ipc.invoke('read-config');
+        cfg = cfg || {};
+        cfg.fingerprint = fp;
+        // Если fp переопределяет разрешение — обновляем resolution
+        if (fp.resolution) cfg.resolution = fp.resolution;
+        if (fp.user_agent)  cfg.user_agent  = fp.user_agent;
+        await ipc.invoke('write-config', cfg);
+      }
+    } catch(e) {}
+    return orig.call(this, url, profile, browser, bypass);
+  };
+})();
+
+// =====================================================
+//   ЧЕБУРНЕТ — ЗАЩИТА
+// =====================================================
+var CBN_SETTINGS = {};
+var CBN_MONITOR_TIMER = null;
+
+// Цели для проверки — только те что реально блокируются в РФ.
+// Проверяем TCP connect на порт 443, а не HTTP — надёжно и без ложных срабатываний.
+// host — реальный хост, port — порт (443 по умолч.), retries — сколько раз пробуем
+var CBN_TARGETS = [
+  { name: 'YouTube',    host: 'www.youtube.com',    port: 443, icon: '▶' },
+  { name: 'Discord',    host: 'discord.com',         port: 443, icon: '💬' },
+  { name: 'Instagram',  host: 'www.instagram.com',   port: 443, icon: '📷' },
+  { name: 'X (Twitter)',host: 'x.com',               port: 443, icon: '✖' },
+  { name: 'Spotify',    host: 'open.spotify.com',    port: 443, icon: '🎵' },
+  { name: 'Telegram',   host: 'web.telegram.org',    port: 443, icon: '✈️' },
+  { name: 'Twitch',     host: 'www.twitch.tv',       port: 443, icon: '🟣' },
+  { name: 'Google',     host: 'www.google.com',      port: 443, icon: '🔍' },
+  { name: 'GitHub',     host: 'github.com',          port: 443, icon: '💻' },
+];
+
+async function initCheburnet() {
+  // Загружаем настройки
+  try {
+    var s = await ipc.invoke('read-settings');
+    if (s && s.cheburnet) CBN_SETTINGS = s.cheburnet;
+  } catch(e) {}
+  // Восстанавливаем UI
+  if (CBN_SETTINGS.autostart)   { var el=document.getElementById('cbn-autostart');   if(el) el.checked = CBN_SETTINGS.autostart; }
+  if (CBN_SETTINGS.autorestart) { var el=document.getElementById('cbn-autorestart'); if(el) el.checked = CBN_SETTINGS.autorestart; }
+  if (CBN_SETTINGS.interval)    { var el=document.getElementById('cbn-interval');    if(el) { el.value=CBN_SETTINGS.interval; document.getElementById('cbn-interval-v').textContent=CBN_SETTINGS.interval; } }
+  if (CBN_SETTINGS.dns1)        { var el=document.getElementById('cbn-dns1');        if(el) el.value=CBN_SETTINGS.dns1; }
+  if (CBN_SETTINGS.dns2)        { var el=document.getElementById('cbn-dns2');        if(el) el.value=CBN_SETTINGS.dns2; }
+  if (CBN_SETTINGS.dnsMode)     { var el=document.getElementById('cbn-dns-mode');    if(el) el.value=CBN_SETTINGS.dnsMode; }
+  // Рендерим список тестов
+  renderCbnTests([]);
+  // Если автостарт — запускаем мониторинг
+  if (CBN_SETTINGS.autostart) startCbnMonitor();
+}
+
+function saveCbn() {
+  CBN_SETTINGS.autostart   = document.getElementById('cbn-autostart')?.checked || false;
+  CBN_SETTINGS.autorestart = document.getElementById('cbn-autorestart')?.checked || true;
+  CBN_SETTINGS.interval    = parseInt(document.getElementById('cbn-interval')?.value || '30');
+  CBN_SETTINGS.dns1        = document.getElementById('cbn-dns1')?.value;
+  CBN_SETTINGS.dns2        = document.getElementById('cbn-dns2')?.value;
+  CBN_SETTINGS.dnsMode     = document.getElementById('cbn-dns-mode')?.value;
+  APP_SETTINGS.cheburnet = CBN_SETTINGS;
+  saveSettings();
+  if (CBN_SETTINGS.autostart) startCbnMonitor();
+  else stopCbnMonitor();
+}
+
+function renderCbnTests(results) {
+  var list = document.getElementById('cbn-tests-list');
+  if (!list) return;
+  list.innerHTML = '';
+  CBN_TARGETS.forEach(function(t, i) {
+    var r = results[i] || {};
+    var row = document.createElement('div');
+    row.className = 'cbn-test-row';
+    var dotCls = r.status === 'ok' ? 'ok' : r.status === 'err' ? 'err' : r.status === 'wait' ? 'wait' : '';
+    var ping = r.ping ? (' ' + r.ping + 'мс') : '';
+    row.innerHTML = '<div class="cbn-dot ' + dotCls + '" id="cbn-dot-' + i + '"></div>' +
+      '<span style="color:var(--ac)">' + t.icon + '</span>' +
+      '<span style="flex:1;color:var(--tx)">' + t.name + '</span>' +
+      '<span style="color:var(--tx2);font-size:9px" id="cbn-res-' + i + '">' + (r.msg || '—') + ping + '</span>';
+    list.appendChild(row);
+  });
+}
+
+async function cheburnetCheck() {
+  cheburnetRunTests();
+}
+
+async function cheburnetRunTests() {
+  var results = CBN_TARGETS.map(function() { return { status:'wait', msg:'проверка...' }; });
+  renderCbnTests(results);
+
+  // TCP ping с повторной попыткой при неудаче — убирает ложные срабатывания
+  async function tcpCheck(target) {
+    var r1 = await ipc.invoke('cbn-ping', { host: target.host, port: target.port || 443 }).catch(function(){ return { ok: false }; });
+    if (r1.ok) return r1;
+    // Первый раз не прошёл — ждём 800мс и пробуем ещё раз
+    await new Promise(function(r){ setTimeout(r, 800); });
+    var r2 = await ipc.invoke('cbn-ping', { host: target.host, port: target.port || 443 }).catch(function(){ return { ok: false }; });
+    return r2;
+  }
+
+  var blocked = 0;
+  for (var i = 0; i < CBN_TARGETS.length; i++) {
+    var t = CBN_TARGETS[i];
+    try {
+      var r = await tcpCheck(t);
+      results[i] = r.ok
+        ? { status: 'ok',  msg: 'доступен', ping: r.ping }
+        : { status: 'err', msg: r.err === 'TIMEOUT' ? 'таймаут' : 'заблокирован' };
+      if (!r.ok) blocked++;
+    } catch(e) {
+      results[i] = { status:'err', msg:'ошибка' };
+      blocked++;
+    }
+    var dot = document.getElementById('cbn-dot-' + i);
+    var res = document.getElementById('cbn-res-' + i);
+    if (dot) dot.className = 'cbn-dot ' + results[i].status;
+    if (res) res.textContent = results[i].msg + (results[i].ping ? ' ' + results[i].ping + 'мс' : '');
+  }
+
+  var pct   = Math.round(blocked / CBN_TARGETS.length * 100);
+  var icon  = document.getElementById('cbn-threat-icon');
+  var label = document.getElementById('cbn-threat-label');
+  var sub   = document.getElementById('cbn-threat-sub');
+  var bar   = document.getElementById('cbn-threat-bar');
+
+  if (bar) {
+    bar.style.width = pct + '%';
+    bar.style.background = pct === 0
+      ? 'linear-gradient(90deg,var(--grn),#00cc88)'
+      : pct < 50
+      ? 'linear-gradient(90deg,var(--ylw),#ff8800)'
+      : 'linear-gradient(90deg,var(--red),#ff6600)';
+  }
+  if (pct === 0) {
+    if (icon)  icon.textContent  = '✅';
+    if (label) { label.textContent = 'Всё доступно'; label.style.color = 'var(--grn)'; }
+    if (sub)   sub.textContent   = 'Блокировок не обнаружено.';
+  } else if (pct < 50) {
+    if (icon)  icon.textContent  = '⚠️';
+    if (label) { label.textContent = 'Частичная блокировка ' + blocked + '/' + CBN_TARGETS.length; label.style.color = 'var(--ylw)'; }
+    if (sub)   sub.textContent   = 'Некоторые сервисы недоступны. Запусти Zapret.';
+    if (CBN_SETTINGS.autorestart) { zapretStart(); showToast('Zapret запущен автоматически', 'ok'); }
+  } else {
+    if (icon)  icon.textContent  = '🚨';
+    if (label) { label.textContent = 'ЧЕБУРНЕТ ' + blocked + '/' + CBN_TARGETS.length; label.style.color = 'var(--red)'; }
+    if (sub)   sub.textContent   = 'Массовые блокировки. Аварийный режим...';
+    if (CBN_SETTINGS.autorestart) cheburnetEmergency();
+  }
+}
+
+function startCbnMonitor() {
+  if (CBN_MONITOR_TIMER) clearInterval(CBN_MONITOR_TIMER);
+  var interval = (CBN_SETTINGS.interval || 30) * 1000;
+  CBN_MONITOR_TIMER = setInterval(function() {
+    // Проверяем YouTube по TCP — надёжный индикатор
+    ipc.invoke('cbn-ping', { host: 'www.youtube.com', port: 443 }).then(function(r) {
+      if (!r.ok && CBN_SETTINGS.autorestart) {
+        zapretStart();
+        showToast('Чебурнет — Zapret запущен', 'ok');
+      }
+    }).catch(function(){});
+  }, interval);
+}
+
+function stopCbnMonitor() {
+  if (CBN_MONITOR_TIMER) { clearInterval(CBN_MONITOR_TIMER); CBN_MONITOR_TIMER = null; }
+}
+
+async function cheburnetApplyDns() {
+  var dns1 = document.getElementById('cbn-dns1')?.value;
+  var dns2 = document.getElementById('cbn-dns2')?.value;
+  var st = document.getElementById('cbn-dns-status');
+  if (st) { st.textContent = '⏳ Применяем DNS...'; st.style.color = 'var(--ac)'; }
+  try {
+    var r = await ipc.invoke('cbn-set-dns', { dns1, dns2 });
+    if (st) { st.textContent = r.ok ? '✓ DNS успешно изменён на ' + dns1 + ' / ' + dns2 : '✗ Ошибка: ' + r.msg; st.style.color = r.ok ? 'var(--grn)' : 'var(--red)'; }
+    if (r.ok) showToast('🔒 DNS изменён: ' + dns1, 'ok');
+  } catch(e) { if(st) { st.textContent = '✗ ' + e.message; st.style.color='var(--red)'; } }
+}
+
+async function cheburnetResetDns() {
+  var st = document.getElementById('cbn-dns-status');
+  if (st) { st.textContent = '⏳ Сбрасываем DNS...'; st.style.color='var(--ac)'; }
+  try {
+    var r = await ipc.invoke('cbn-reset-dns');
+    if (st) { st.textContent = r.ok ? '✓ DNS сброшен (автоматический от провайдера)' : '✗ ' + r.msg; st.style.color = r.ok ? 'var(--grn)' : 'var(--red)'; }
+  } catch(e) { if(st) { st.textContent='✗ '+e.message; st.style.color='var(--red)'; } }
+}
+
+async function cheburnetEmergency() {
+  var logEl = document.getElementById('cbn-emergency-log');
+  if (logEl) { logEl.style.display = ''; logEl.innerHTML = ''; }
+  function eLog(msg, color) {
+    if (!logEl) return;
+    var line = document.createElement('div');
+    line.style.color = color || 'var(--tx2)';
+    line.textContent = msg;
+    logEl.appendChild(line);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+  eLog('🆘 Аварийный режим активирован...', 'var(--red)');
+  eLog('■ Останавливаем текущий Zapret...', 'var(--tx2)');
+  await ipc.invoke('zapret-stop').catch(()=>{});
+  await new Promise(r => setTimeout(r, 500));
+  eLog('▶ Перезапускаем Zapret...', 'var(--ac)');
+  await ipc.invoke('zapret-start').catch(()=>{});
+  eLog('🔒 Меняем DNS на Cloudflare (1.1.1.1)...', 'var(--ac)');
+  var dnsR = await ipc.invoke('cbn-set-dns', { dns1:'1.1.1.1', dns2:'1.0.0.1' }).catch(()=>({ok:false}));
+  eLog(dnsR.ok ? '✓ DNS изменён' : '⚠ DNS не удалось изменить (нужны права)', dnsR.ok ? 'var(--grn)' : 'var(--ylw)');
+  await new Promise(r => setTimeout(r, 1000));
+  eLog('🌐 Проверяем доступность...', 'var(--tx2)');
+  var ping = await ipc.invoke('cbn-ping', { host:'www.google.com', port:443 }).catch(()=>({ok:false}));
+  eLog(ping.ok ? '✅ Соединение восстановлено!' : '⚠ Соединение всё ещё ограничено. Попробуй VPN.', ping.ok ? 'var(--grn)' : 'var(--ylw)');
+  showToast(ping.ok ? '✅ Аварийный режим — OK' : '⚠ Частичное восстановление', ping.ok ? 'ok' : '');
+}
+
+async function cheburnetFullCheck() {
+  showToast('🔬 Полная диагностика запущена...', 'ok');
+  await cheburnetRunTests();
+}
+
+// =====================================================
+//   ZAPRET AUTO-UPDATE
+// =====================================================
+var ZU_STATE = { checking: false, updating: false, latestTag: null, assetUrl: null, assetName: null };
+
+function zuLog(msg, type) {
+  var box = document.getElementById('zu-log');
+  if (!box) return;
+  var span = document.createElement('div');
+  span.style.color = type === 'ok' ? 'var(--grn)' : type === 'err' ? 'var(--red)' : type === 'warn' ? '#ffcc00' : 'var(--tx2)';
+  span.textContent = msg;
+  box.appendChild(span);
+  box.scrollTop = box.scrollHeight;
+}
+
+function zuProgress(pct, label) {
+  var bar = document.getElementById('zu-bar');
+  var pctEl = document.getElementById('zu-pct');
+  var lbl = document.getElementById('zu-status-label');
+  if (bar)   bar.style.width = pct + '%';
+  if (pctEl) pctEl.textContent = pct + '%';
+  if (lbl)   lbl.textContent = label || '';
+}
+
+function zuShow(cardId) {
+  ['zu-status-card','zu-update-card','zu-ok-card','zu-changelog-card'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.style.display = id === cardId ? '' : 'none';
+  });
+}
+
+async function initZapretUpdate() {
+  // Читаем текущую версию из version.txt внутри папки Zapret
+  try {
+    var r = await ipc.invoke('zapret-version');
+    var el = document.getElementById('zu-current');
+    var pe = document.getElementById('zu-path');
+    if (el) el.textContent = r.version || 'Не определена';
+    if (pe) pe.textContent = r.path || '—';
+  } catch(e) {}
+  zuShow(null);
+}
+
+async function zapretCheckUpdate() {
+  if (ZU_STATE.checking || ZU_STATE.updating) return;
+  ZU_STATE.checking = true;
+  var btn = document.getElementById('zu-btn-check');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Проверяем...'; }
+
+  // показываем прогресс-карту
+  zuShow('zu-status-card');
+  var logBox = document.getElementById('zu-log');
+  if (logBox) logBox.innerHTML = '';
+  zuProgress(10, 'Подключаемся к GitHub...');
+  zuLog('🔍 Запрос к GitHub API...', 'info');
+
+  try {
+    var res = await ipc.invoke('zapret-check-update');
+    if (!res.ok) {
+      zuLog('✗ Ошибка: ' + res.msg, 'err');
+      zuProgress(0, 'Ошибка');
+      ZU_STATE.checking = false;
+      if (btn) { btn.disabled = false; btn.textContent = '🔍 Проверить снова'; }
+      return;
+    }
+
+    zuProgress(60, 'Получен ответ...');
+    zuLog('✓ Последняя версия: ' + res.latestTag, 'ok');
+    zuLog('  Дата выхода: ' + res.publishedAt, 'info');
+    zuLog('  Файл: ' + res.assetName, 'info');
+
+    // Обновляем карточку "последняя версия"
+    var latEl  = document.getElementById('zu-latest');
+    var datEl  = document.getElementById('zu-date');
+    var sizEl  = document.getElementById('zu-size');
+    if (latEl) latEl.textContent = res.latestTag;
+    if (datEl) datEl.textContent = res.publishedAt;
+    if (sizEl) sizEl.textContent = res.assetSizeMb ? res.assetSizeMb + ' МБ' : '—';
+
+    ZU_STATE.latestTag  = res.latestTag;
+    ZU_STATE.assetUrl   = res.assetUrl;
+    ZU_STATE.assetName  = res.assetName;
+
+    zuProgress(100, 'Готово');
+
+    if (res.needsUpdate) {
+      zuLog('🆕 Доступно обновление! ' + res.currentVersion + ' → ' + res.latestTag, 'warn');
+      zuShow('zu-update-card');
+      var desc = document.getElementById('zu-update-desc');
+      var clog = document.getElementById('zu-changelog');
+      if (desc) desc.textContent = 'Текущая версия: ' + (res.currentVersion || '?') + '  →  Новая: ' + res.latestTag;
+      if (clog && res.body) {
+        // changelog — берём первые 20 строк
+        clog.textContent = res.body.split('\n').slice(0, 20).join('\n');
+        document.getElementById('zu-changelog-card').style.display = '';
+      }
+    } else {
+      zuLog('✓ Zapret актуален', 'ok');
+      zuShow('zu-ok-card');
+    }
+  } catch(e) {
+    zuLog('✗ IPC ошибка: ' + e.message, 'err');
+  }
+
+  ZU_STATE.checking = false;
+  if (btn) { btn.disabled = false; btn.textContent = '🔍 Проверить снова'; }
+}
+
+async function zapretDoUpdate() {
+  if (ZU_STATE.updating) return;
+  if (!ZU_STATE.assetUrl) { showToast('Сначала проверь обновление', 'err'); return; }
+  if (!confirm('Обновить Zapret до ' + ZU_STATE.latestTag + '?\n\nZapret будет остановлен на время обновления.')) return;
+
+  ZU_STATE.updating = true;
+  var btn = document.getElementById('zu-btn-update');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Обновляем...'; }
+
+  // Останавливаем Zapret
+  try { await ipc.invoke('zapret-stop'); } catch(e) {}
+
+  zuShow('zu-status-card');
+  var logBox = document.getElementById('zu-log');
+  if (logBox) logBox.innerHTML = '';
+  zuProgress(5, 'Начинаем обновление...');
+  zuLog('■ Zapret остановлен', 'info');
+
+  // Слушаем прогресс скачивания
+  ipc.removeAllListeners('zapret-dl-progress');
+  ipc.on('zapret-dl-progress', function(e, d) {
+    zuProgress(5 + Math.round(d.pct * 0.7), 'Скачиваем... ' + d.downloaded + ' / ' + d.total);
+    zuLog('↓ ' + d.downloaded + ' МБ / ' + d.total + ' МБ (' + Math.round(d.pct) + '%)', 'info');
+  });
+
+  try {
+    var res = await ipc.invoke('zapret-do-update', { url: ZU_STATE.assetUrl, name: ZU_STATE.assetName, tag: ZU_STATE.latestTag });
+    ipc.removeAllListeners('zapret-dl-progress');
+
+    if (!res.ok) {
+      zuLog('✗ Ошибка: ' + res.msg, 'err');
+      zuProgress(0, 'Ошибка');
+      ZU_STATE.updating = false;
+      if (btn) { btn.disabled = false; btn.textContent = '⬇ Попробовать снова'; }
+      return;
+    }
+
+    zuProgress(100, 'Готово!');
+    zuLog('✓ Zapret ' + ZU_STATE.latestTag + ' установлен!', 'ok');
+    zuLog('  Файлы обновлены в папке Zapret\\', 'info');
+    showToast('✅ Zapret обновлён до ' + ZU_STATE.latestTag + '!', 'ok');
+
+    // Обновляем текущую версию
+    var el = document.getElementById('zu-current');
+    if (el) el.textContent = ZU_STATE.latestTag;
+
+    document.getElementById('zu-update-card').style.display = 'none';
+    document.getElementById('zu-ok-card').style.display = '';
+  } catch(e) {
+    zuLog('✗ IPC ошибка: ' + e.message, 'err');
+    ipc.removeAllListeners('zapret-dl-progress');
+  }
+
+  ZU_STATE.updating = false;
+  if (btn) { btn.disabled = false; btn.textContent = '⬇ Скачать и установить'; }
+}
+
+// =====================================================
+//   MODAL SYSTEM
+// =====================================================
+function openModal(html) {
+  document.getElementById('modal-box').innerHTML = html;
+  document.getElementById('modal-overlay').classList.add('is-open');
+}
+function closeModal() {
+  document.getElementById('modal-overlay').classList.remove('is-open');
+  document.getElementById('modal-box').innerHTML = '';
+}
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') closeModal();
+});
+
+// ── INIT ──
+window.addEventListener('load', async function() {
+  // Иконка приложения через IPC — main процесс знает правильный путь
+  try {
+    var iconPath = await ipc.invoke('get-icon-path');
+    var img = document.getElementById('logo-img');
+    if (img && iconPath) img.src = 'file:///' + iconPath.replace(/\\/g, '/');
+  } catch(e) {}
+  await loadSettings();
+  await loadBinds();
+  await loadProfileMetas();
+  goTab('home', document.querySelector('[data-tab="home"]'));
+});
+</script>
+</body>
+</html>

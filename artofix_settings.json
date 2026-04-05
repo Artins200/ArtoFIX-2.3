@@ -1,0 +1,29 @@
+{
+  "colors": {
+    "ac": "#ffffff",
+    "ac2": "#000000",
+    "op": "0.7"
+  },
+  "theme": "th-cyber",
+  "cheburnet": {
+    "autostart": false,
+    "autorestart": true,
+    "interval": 10,
+    "dns1": "1.1.1.1",
+    "dns2": "1.0.0.1",
+    "dnsMode": "dot"
+  },
+  "fxParticles": "stars",
+  "fxSpeed": 1.8,
+  "fxScanlines": "on",
+  "fxFont": "Rajdhani",
+  "glowIntensity": "100",
+  "uiScale": "1",
+  "fingerprint": {
+    "webgl": true,
+    "platform": true,
+    "canvas": true,
+    "resolution": true,
+    "ua": true
+  }
+}
