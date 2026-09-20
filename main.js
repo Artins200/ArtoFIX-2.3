@@ -1,1308 +1,1944 @@
-const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, shell, dialog } = require('electron');
-const { exec, spawn } = require('child_process');
-const path = require('path');
+'use strict';
+/* =============================================================
+   ARTOFIX 2.3 — MAIN PROCESS
+   -------------------------------------------------------------
+   Модель безопасности (см. docs/SECURITY.md):
+     • renderer в песочнице: sandbox + contextIsolation, без Node;
+     • единственный мост — preload.js (фиксированный список методов);
+     • все IPC-каналы валидируют источник и аргументы;
+     • никаких shell-строк: только execFile/spawn с argv-массивами;
+     • сеть — только https + белый список хостов GitHub/драйверов;
+     • CSP + запрет навигации + запрет всех http(s) из окна;
+     • свободный exec() («cmd») удалён полностью.
+
+   Отпечаток браузера считает fingerprint-identity.js, применяет
+   engine.py (см. docs/ANTI-DETECT.md).
+   ============================================================= */
+
+const {
+  app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, shell, dialog,
+  session, clipboard,
+} = require('electron');
+const { execFile, spawn } = require('child_process');
 const fs = require('fs');
-const https = require('https');
+const path = require('path');
 const os = require('os');
+const net = require('net');
+const https = require('https');
+const crypto = require('crypto');
+const { fileURLToPath } = require('url');
 
-// ── Корневая папка программы ──
+const sec = require('./security');
+const fpEngine = require('./fingerprint-identity');
+const pkg = require('./package.json');
+
+const IS_WIN = process.platform === 'win32';
+const IS_MAC = process.platform === 'darwin';
+const DEV_MODE = process.argv.includes('--dev');
+const APP_VERSION = pkg.version || '2.3.0';
+
+// Песочница для всех рендереров — до первого окна
+app.enableSandbox();
+
+// ═══════════════════════════════════════════
+//  ПУТИ
+// ═══════════════════════════════════════════
 function getAppRoot() {
-    if (app.isPackaged) {
-        return path.dirname(process.execPath);
-    }
-    return __dirname;
+  return app.isPackaged ? path.dirname(process.execPath) : __dirname;
 }
-
-// Путь к файлу данных (профили, бинды, конфиг и т.д.)
 function dataPath(...parts) {
-    return path.join(getAppRoot(), ...parts);
+  return path.join(getAppRoot(), ...parts);
 }
-
-// Путь к ресурсам (engine.py, Zapret, assets) — в .exe они в extraResources
 function resPath(...parts) {
-    if (app.isPackaged) {
-        return path.join(path.dirname(process.execPath), 'resources', ...parts);
-    }
-    return path.join(__dirname, ...parts);
+  if (app.isPackaged) return path.join(path.dirname(process.execPath), 'resources', ...parts);
+  return path.join(__dirname, ...parts);
 }
 
-// ── Поиск Python ──
+/** Папка profiles с проверкой, что она внутри корня приложения. */
+function profilesRoot() {
+  const root = dataPath('profiles');
+  try { fs.mkdirSync(root, { recursive: true }); } catch (_) {}
+  return root;
+}
+/** Путь к конкретному профилю или null, если имя/путь небезопасны. */
+function profileDir(name) {
+  const safe = sec.sanitizeProfileName(name);
+  if (!safe) return null;
+  return sec.safeJoinInside(profilesRoot(), safe);
+}
+
 function findPython() {
-    const local = dataPath('python', 'python.exe');
-    if (fs.existsSync(local)) return local;
-    const res = resPath('python', 'python.exe');
-    if (fs.existsSync(res)) return res;
-    return 'python';
+  for (const candidate of [dataPath('python', 'python.exe'), resPath('python', 'python.exe')]) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return IS_WIN ? 'python' : 'python3';
 }
 
-// ── Проверка прав администратора при старте ──
+/** ID установки: используется как соль для отпечатков (стабилен между запусками). */
+function getInstallId() {
+  const f = dataPath('.artofix_install_id');
+  try {
+    const existing = fs.readFileSync(f, 'utf-8').trim();
+    if (/^[a-f0-9]{16,64}$/.test(existing)) return existing;
+  } catch (_) {}
+  const id = crypto.randomBytes(16).toString('hex');
+  try { sec.writeFileAtomic(f, id); } catch (_) {}
+  return id;
+}
+
+// ═══════════════════════════════════════════
+//  ПРАВА АДМИНИСТРАТОРА
+// ═══════════════════════════════════════════
 function isAdmin() {
-    try {
-        fs.accessSync('C:\\Windows\\System32\\drivers\\etc\\hosts', fs.constants.W_OK);
-        return true;
-    } catch (_) { return false; }
+  if (!IS_WIN) return typeof process.getuid === 'function' ? process.getuid() === 0 : false;
+  try {
+    fs.accessSync('C:\\Windows\\System32\\drivers\\etc\\hosts', fs.constants.W_OK);
+    return true;
+  } catch (_) { return false; }
 }
 
-// ── Перезапуск от имени администратора (ИСПРАВЛЕНО) ──
 function relaunchAsAdmin() {
-    const exe = process.execPath;
-    const args = process.argv.slice(1);
-    const cwd = app.isPackaged ? path.dirname(process.execPath) : __dirname;
+  if (!IS_WIN) return;
+  const exe = process.execPath;
+  const cwd = app.isPackaged ? path.dirname(process.execPath) : __dirname;
+  const args = process.argv.slice(1).filter((a) => a.length < 512);
+  // Каждый аргумент — отдельный литерал PowerShell: массива строк достаточно,
+  // чтобы не собрать инъекцию из кавычек в пути.
+  const psArgs = args.map((a) => "'" + a.replace(/'/g, "''") + "'").join(',');
+  const psCommand =
+    'Start-Process -FilePath ' + quotePs(exe) + ' ' +
+    (psArgs ? '-ArgumentList @(' + psArgs + ') ' : '') +
+    '-Verb RunAs -WorkingDirectory ' + quotePs(cwd);
 
-    // Аргументы передаём как PowerShell-массив строк, а не одной строкой —
-    // это убирает проблему "аргумент не может быть разделён"
-    const argListPs = args.length
-        ? args.map(a => `'${a.replace(/'/g, "''")}'`).join(',')
-        : '';
+  spawn('powershell', ['-NoProfile', '-NonInteractive', '-Command', psCommand], {
+    detached: true, windowsHide: true, stdio: 'ignore',
+  }).unref();
+  app.exit(0);
+}
+function quotePs(s) { return "'" + String(s).replace(/'/g, "''") + "'"; }
 
-    const psCommand =
-        `Start-Process -FilePath '${exe}' ` +
-        (argListPs ? `-ArgumentList @(${argListPs}) ` : '') +
-        `-Verb RunAs -WorkingDirectory '${cwd}'`;
-
-    spawn('powershell', [
-        '-NoProfile',
-        '-NonInteractive',
-        '-Command', psCommand
-    ], { detached: true, windowsHide: true });
-
-    app.exit(0);
+function checkAdmin() {
+  if (!IS_WIN) return;             // в остальных ОС hosts/DNS-фичи просто недоступны
+  if (isAdmin()) return;
+  const choice = dialog.showMessageBoxSync({
+    type: 'question',
+    title: 'Artofix — права администратора',
+    message: 'Для блокировки рекламы (файл hosts) и правки DNS нужны права администратора.',
+    detail: 'Перезапустить с правами администратора?\n\nЕсли откажешься — всё работает, но '
+          + 'блокировка через hosts и смена DNS будут недоступны.',
+    buttons: ['Перезапустить как администратор', 'Продолжить без прав'],
+    defaultId: 0, cancelId: 1,
+  });
+  if (choice === 0) relaunchAsAdmin();
 }
 
-let win, tray, zapretProcess, isQuiting = false;
+// ═══════════════════════════════════════════
+//  ОКНА + ЖЁСТКАЯ НАСТРОЙКА СЕССИИ
+// ═══════════════════════════════════════════
+const CSP = [
+  "default-src 'none'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",   // инлайновых скриптов нет; стили — только свои
+  "img-src 'self' data: blob:",
+  "font-src 'self' data:",
+  "connect-src 'none'",
+  "media-src 'none'",
+  "object-src 'none'",
+  "frame-src 'none'",
+  "child-src 'none'",
+  "worker-src 'none'",
+  "manifest-src 'none'",
+  "base-uri 'none'",
+  "form-action 'none'",
+  "frame-ancestors 'none'",
+].join('; ');
+
+/** Снимаем чужие CSP-заголовки и ставим свой; блокируем любой внешний трафик окна. */
+function hardenSession(ses) {
+  ses.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
+  ses.setPermissionCheckHandler(() => false);
+  if (ses.setDevicePermissionHandler) ses.setDevicePermissionHandler(() => false);
+
+  ses.webRequest.onHeadersReceived((details, callback) => {
+    const headers = {};
+    for (const key of Object.keys(details.responseHeaders || {})) {
+      const lower = key.toLowerCase();
+      if (lower === 'content-security-policy' || lower === 'content-security-policy-report-only') continue;
+      headers[key] = details.responseHeaders[key];
+    }
+    headers['Content-Security-Policy'] = [CSP];
+    headers['X-Content-Type-Options'] = ['nosniff'];
+    callback({ responseHeaders: headers, cancel: false });
+  });
+
+  // Оболочка приложения не имеет права ходить в сеть вообще:
+  // все сетевые операции (обновление Zapret, драйверы) идут из main.
+  ses.webRequest.onBeforeRequest((details, callback) => {
+    const scheme = (details.url || '').split(':')[0].toLowerCase();
+    const allowed = scheme === 'file' || scheme === 'devtools' || scheme === 'blob' || scheme === 'data';
+    if (!allowed) {
+      console.warn('[net-block] окно пыталось обратиться наружу: ' + details.url.slice(0, 200));
+      return callback({ cancel: true });
+    }
+    callback({ cancel: false });
+  });
+}
+
+const HARDENED_WEB_PREFS = {
+  nodeIntegration: false,
+  nodeIntegrationInWorker: false,
+  nodeIntegrationInSubFrames: false,
+  contextIsolation: true,
+  sandbox: true,
+  webSecurity: true,
+  allowRunningInsecureContent: false,
+  webviewTag: false,
+  spellcheck: false,
+  devTools: DEV_MODE,
+  preload: path.join(__dirname, 'preload.js'),
+};
+
+let win = null, tray = null, setupWin = null, isQuiting = false;
+let zapretProcess = null;
+let pendingUpdate = null;
+const runningProfiles = new Set();
+const RATE = new Map();
+
+function rateLimited(key, ms) {
+  const now = Date.now();
+  const last = RATE.get(key) || 0;
+  if (now - last < ms) return true;
+  RATE.set(key, now);
+  return false;
+}
 
 function createWindow() {
-    win = new BrowserWindow({
-        width: 1100, height: 680,
-        minWidth: 900, minHeight: 580,
-        frame: false, transparent: false,
-        backgroundColor: '#04050f',
-        show: false,
-        resizable: true,
-        webPreferences: { nodeIntegration: true, contextIsolation: false, webSecurity: false }
-    });
-    win.loadFile(path.join(__dirname, 'index.html'));
-    win.once('ready-to-show', () => { win.show(); });
-    if (process.argv.includes('--dev')) win.webContents.openDevTools({ mode: 'detach' });
-    win.on('close', e => { if (!isQuiting) { e.preventDefault(); win.hide(); } });
-}
-
-// ── ТРЕЙ ──
-function buildTrayMenu() {
-    let bindsItems = [];
-    try {
-        const p = dataPath('artofix_binds.json');
-        if (fs.existsSync(p)) {
-            const binds = JSON.parse(fs.readFileSync(p, 'utf-8'));
-            if (Array.isArray(binds) && binds.length > 0) {
-                bindsItems = binds.slice(0, 12).map(b => ({
-                    label: (b.label || b.url || '?').substring(0, 40),
-                    click: () => { launchBindFromTray(b); }
-                }));
-            }
-        }
-    } catch (_) {}
-
-    const template = [
-        { label: 'ARTOFIX 2.3', enabled: false },
-        { type: 'separator' },
-        { label: '▶ Запустить Zapret', click: () => { send('tray-act', 'run'); } },
-        { label: '■ Остановить Zapret', click: () => { send('tray-act', 'stop'); } },
-        { type: 'separator' },
-    ];
-
-    if (bindsItems.length > 0) {
-        template.push({ label: '🔗 Бинды', submenu: bindsItems });
-        template.push({ type: 'separator' });
-    }
-
-    template.push(
-        { label: '🪟 Показать окно', click: () => win.show() },
-        { label: '📋 Логи', click: () => { win.show(); send('go-to', 'logs'); } },
-        { label: '⚙️ Настройки', click: () => { win.show(); send('go-to', 'settings'); } },
-        { type: 'separator' },
-        { label: '❌ Выход', click: () => { isQuiting = true; app.quit(); } }
-    );
-
-    return Menu.buildFromTemplate(template);
-}
-
-function createTray() {
-    const iconPath = resPath('icon.png');
-    let icon = nativeImage.createFromPath(iconPath);
-    if (icon.isEmpty()) icon = nativeImage.createEmpty();
-    tray = new Tray(icon);
-    tray.setContextMenu(buildTrayMenu());
-    tray.setToolTip('Artofix 2.3');
-    tray.on('double-click', () => win.show());
-}
-
-ipcMain.on('tray-rebuild', () => {
-    if (tray) tray.setContextMenu(buildTrayMenu());
-});
-
-function launchBindFromTray(bind) {
-    const python = findPython();
-    const enginePy = resPath('engine.py');
-    const profile = bind.profile || 'default';
-    const browser = bind.browser || 'chrome';
-    const url = bind.url || 'about:blank';
-
-    if (browser === 'app') {
-        shell.openPath(url);
-        return;
-    }
-
-    try { fs.mkdirSync(dataPath('profiles', profile), { recursive: true }); } catch (_) {}
-
-    const py = spawn(python, [enginePy, url, profile, browser, '--profiles-dir', dataPath('profiles')], {
-        cwd: resPath(),
-        windowsHide: true,
-        env: {
-            ...process.env,
-            ARTOFIX_PROFILES: dataPath('profiles'),
-            ARTOFIX_CONFIG: dataPath('config.json'),
-            ARTOFIX_ROOT: getAppRoot(),
-        }
-    });
-    py.stdout.on('data', d => appendLog(profile, browser, d.toString()));
-    py.stderr.on('data', d => appendLog(profile, browser, d.toString()));
-    py.on('error', e => appendLog(profile, browser, '[error] ' + e.message));
-}
-
-function send(ch, d) { if (win && !win.isDestroyed()) win.webContents.send(ch, d); }
-
-// ── ЗАПРЕТ ──
-function openZapretCfg() {
-    shell.openPath(resPath('Zapret'));
-}
-
-function openZapretService() {
-    const zapDir = resPath('Zapret');
-    const p = path.join(zapDir, 'service.bat');
-    if (fs.existsSync(p)) {
-        spawn('cmd.exe', ['/c', `cd /d "${zapDir}" && "${p}"`], {
-            cwd: zapDir,
-            windowsHide: false,
-            shell: true,
-            detached: true,
-        });
-    } else {
-        dialog.showMessageBox(win, { type: 'warning', message: 'service.bat не найден в папке Zapret:\n' + zapDir });
-    }
-}
-
-ipcMain.handle('get-icon-path', () => {
-    const p = resPath('icon.png');
-    if (fs.existsSync(p)) return p;
-    const dev = path.join(__dirname, 'icon.png');
-    if (fs.existsSync(dev)) return dev;
-    return null;
-});
-
-ipcMain.on('win-act', (_, a) => {
-    if (a === 'close') { isQuiting = true; app.quit(); }
-    if (a === 'hide') win.hide();
-    if (a === 'min') win.minimize();
-    if (a === 'max') win.isMaximized() ? win.unmaximize() : win.maximize();
-});
-
-ipcMain.on('cmd', (_, command) => {
-    exec(command, { cwd: resPath('Zapret'), windowsHide: true }, (err) => {
-        if (err) console.error('[cmd]', err.message);
-    });
-});
-
-ipcMain.on('zapret-config', () => openZapretCfg());
-ipcMain.on('zapret-service', () => openZapretService());
-
-ipcMain.on('open-folder', (_, rel) => {
-    const dataDirs = ['profiles', 'artofix_binds.json'];
-    const isData = dataDirs.some(d => rel.startsWith(d));
-    shell.openPath(isData ? dataPath(rel) : resPath(rel));
-});
-
-ipcMain.handle('zapret-start', () => {
-    if (zapretProcess) return { ok: false, msg: 'Уже запущен' };
-    const zapDir = resPath('Zapret');
-
-    const candidates = [
-        'general.bat',
-        'general(ALT1).bat',
-        'general(ALT2).bat',
-        'discord.bat',
-        'run_zapret.bat',
-    ];
-
-    let bat = null;
-    for (const name of candidates) {
-        const p = path.join(zapDir, name);
-        if (fs.existsSync(p)) { bat = p; break; }
-    }
-
-    if (!bat) return { ok: false, msg: 'Не найден файл general.bat в папке Zapret.\nПроверь, что Zapret установлен.' };
-
-    zapretProcess = spawn('cmd.exe', ['/c', bat], {
-        cwd: zapDir,
-        windowsHide: true,
-        detached: false,
-    });
-    zapretProcess.on('error', e => {
-        zapretProcess = null;
-        send('zapret-status', { on: false, msg: 'Ошибка: ' + e.message });
-    });
-    zapretProcess.on('exit', () => {
-        zapretProcess = null;
-    });
-    return { ok: true };
-});
-
-ipcMain.handle('zapret-stop', () => {
-    exec('taskkill /f /im winws.exe /t', () => {});
-    exec('taskkill /f /im winws64.exe /t', () => {});
-    if (zapretProcess) {
-        try { process.kill(zapretProcess.pid, 'SIGTERM'); } catch (_) {}
-        zapretProcess = null;
-    }
-    return { ok: true };
-});
-
-// ── ЛОГИ ЗАПУСКОВ ──
-const LOG_MAX = 300;
-let launchLogs = [];
-
-function appendLog(profile, browser, text) {
-    const lines = text.split('\n').filter(l => l.trim());
-    for (const line of lines) {
-        launchLogs.push({
-            ts: Date.now(),
-            profile, browser,
-            msg: line.trim()
-        });
-    }
-    if (launchLogs.length > LOG_MAX) launchLogs = launchLogs.slice(-LOG_MAX);
-    send('log-entry', launchLogs.slice(-5));
-}
-
-ipcMain.handle('read-logs', () => launchLogs);
-ipcMain.handle('clear-logs', () => { launchLogs = []; return { ok: true }; });
-
-ipcMain.handle('launch-browser', (_, { url, profile, browser }) => {
-    return new Promise(resolve => {
-        const python = findPython();
-        const enginePy = resPath('engine.py');
-        const profDir = dataPath('profiles', profile);
-        try { fs.mkdirSync(profDir, { recursive: true }); } catch (_) {}
-
-        appendLog(profile, browser, `[start] ${browser} → ${url}`);
-
-        const py = spawn(python, [enginePy, url, profile, browser, '--profiles-dir', dataPath('profiles')], {
-            cwd: resPath(),
-            windowsHide: true,
-            env: {
-                ...process.env,
-                ARTOFIX_PROFILES: dataPath('profiles'),
-                ARTOFIX_CONFIG: dataPath('config.json'),
-                ARTOFIX_ROOT: getAppRoot(),
-            }
-        });
-        py.stdout.on('data', d => appendLog(profile, browser, d.toString()));
-        py.stderr.on('data', d => appendLog(profile, browser, d.toString()));
-        py.on('error', e => {
-            appendLog(profile, browser, '[error] ' + e.message);
-            resolve({ ok: false, msg: 'Python не найден: ' + e.message });
-        });
-        setTimeout(() => resolve({ ok: true }), 800);
-    });
-});
-
-ipcMain.handle('create-profile', (_, name) => {
-    try {
-        const safe = name.replace(/[^a-zA-Z0-9_\-]/g, '');
-        if (!safe) return { ok: false, msg: 'Недопустимое имя' };
-        const dir = dataPath('profiles', safe);
-        fs.mkdirSync(dir, { recursive: true });
-        const meta = path.join(dir, '_artofix_meta.json');
-        if (!fs.existsSync(meta)) {
-            fs.writeFileSync(meta, JSON.stringify({ name: safe, created: new Date().toISOString() }), 'utf-8');
-        }
-        return { ok: true, name: safe };
-    } catch (e) { return { ok: false, msg: e.message }; }
-});
-
-ipcMain.handle('list-profiles', () => {
-    const dir = dataPath('profiles');
-    try {
-        fs.mkdirSync(dir, { recursive: true });
-        return fs.readdirSync(dir, { withFileTypes: true }).filter(d => d.isDirectory()).map(d => d.name);
-    } catch (_) { return []; }
-});
-
-ipcMain.handle('delete-profile', (_, name) => {
-    const dir = dataPath('profiles', name);
-    try { fs.rmSync(dir, { recursive: true, force: true }); return { ok: true }; }
-    catch (e) { return { ok: false, msg: e.message }; }
-});
-
-ipcMain.handle('read-config', () => {
-    const p = dataPath('config.json');
-    try { if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, 'utf-8')); } catch (_) {}
-    return {};
-});
-ipcMain.handle('write-config', (_, data) => {
-    try { fs.writeFileSync(dataPath('config.json'), JSON.stringify(data, null, 2), 'utf-8'); return { ok: true }; }
-    catch (e) { return { ok: false, msg: e.message }; }
-});
-
-ipcMain.handle('read-settings', () => {
-    const p = dataPath('artofix_settings.json');
-    try { if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, 'utf-8')); } catch (_) {}
-    return {};
-});
-ipcMain.handle('write-settings', (_, data) => {
-    try { fs.writeFileSync(dataPath('artofix_settings.json'), JSON.stringify(data, null, 2), 'utf-8'); return { ok: true }; }
-    catch (e) { return { ok: false, msg: e.message }; }
-});
-
-ipcMain.handle('read-binds', () => {
-    const p = dataPath('artofix_binds.json');
-    try { if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, 'utf-8')); } catch (_) {}
-    return [];
-});
-ipcMain.handle('write-binds', (_, data) => {
-    try {
-        fs.writeFileSync(dataPath('artofix_binds.json'), JSON.stringify(data, null, 2), 'utf-8');
-        if (tray) tray.setContextMenu(buildTrayMenu());
-        return { ok: true };
-    } catch (e) { return { ok: false, msg: e.message }; }
-});
-
-ipcMain.handle('read-profile-meta', (_, name) => {
-    const p = dataPath('profiles', name, '_artofix_meta.json');
-    try { if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, 'utf-8')); } catch (_) {}
-    return {};
-});
-ipcMain.handle('write-profile-meta', (_, name, data) => {
-    try {
-        const dir = dataPath('profiles', name);
-        fs.mkdirSync(dir, { recursive: true });
-        const p = path.join(dir, '_artofix_meta.json');
-        const existing = (() => { try { if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, 'utf-8')); } catch (_) {} return {}; })();
-        fs.writeFileSync(p, JSON.stringify({ ...existing, ...data }, null, 2), 'utf-8');
-        return { ok: true };
-    } catch (e) { return { ok: false, msg: e.message }; }
-});
-
-// ── ADBLOCK: файл hosts ──
-const HOSTS_PATH = 'C:\\Windows\\System32\\drivers\\etc\\hosts';
-const ARTOFIX_MARKER_START = '# === ARTOFIX ADBLOCK START ===';
-const ARTOFIX_MARKER_END = '# === ARTOFIX ADBLOCK END ===';
-
-ipcMain.handle('hosts-read', () => {
-    try {
-        const raw = fs.readFileSync(HOSTS_PATH, 'utf-8');
-        const m = raw.match(/# === ARTOFIX ADBLOCK START ===([\s\S]*?)# === ARTOFIX ADBLOCK END ===/);
-        if (!m) return { ok: true, domains: [] };
-        const domains = m[1].split('\n')
-            .map(l => l.trim())
-            .filter(l => l.startsWith('0.0.0.0'))
-            .map(l => l.replace('0.0.0.0', '').trim());
-        return { ok: true, domains };
-    } catch (e) { return { ok: false, msg: e.message }; }
-});
-
-ipcMain.handle('hosts-write', (_, domains) => {
-    try {
-        let raw = fs.readFileSync(HOSTS_PATH, 'utf-8');
-        raw = raw.replace(/\n?# === ARTOFIX ADBLOCK START ===([\s\S]*?)# === ARTOFIX ADBLOCK END ===\n?/g, '');
-        raw = raw.trimEnd();
-        if (domains && domains.length > 0) {
-            const block = '\n' + ARTOFIX_MARKER_START + '\n' +
-                domains.map(d => '0.0.0.0 ' + d.trim()).join('\n') +
-                '\n' + ARTOFIX_MARKER_END + '\n';
-            raw += block;
-        }
-        fs.writeFileSync(HOSTS_PATH, raw, 'utf-8');
-        return { ok: true };
-    } catch (e) {
-        if (e.code === 'EACCES' || e.code === 'EPERM' || (e.message || '').includes('permission')) {
-            return { ok: false, needAdmin: true, msg: 'Нужны права администратора' };
-        }
-        return { ok: false, msg: e.message };
-    }
-});
-
-// ── hosts-write-admin (ИСПРАВЛЕНО) ──
-ipcMain.handle('hosts-write-admin', (_, domains) => {
-    return new Promise((resolve) => {
-        let raw = '';
-        try { raw = fs.readFileSync(HOSTS_PATH, 'utf-8'); } catch (_) {}
-        raw = raw.replace(/\n?# === ARTOFIX ADBLOCK START ===([\s\S]*?)# === ARTOFIX ADBLOCK END ===\n?/g, '').trimEnd();
-        if (domains && domains.length > 0) {
-            raw += '\n' + ARTOFIX_MARKER_START + '\n' +
-                domains.map(d => '0.0.0.0 ' + d.trim()).join('\n') +
-                '\n' + ARTOFIX_MARKER_END + '\n';
-        }
-
-        const tmpHosts = path.join(app.getPath('temp'), 'artofix_hosts_patch.txt');
-        const psScriptPath = path.join(app.getPath('temp'), 'artofix_hosts_patch.ps1');
-
-        try {
-            fs.writeFileSync(tmpHosts, raw, 'utf-8');
-            // Пишем реальный .ps1-файл — без вложенных кавычек и экранирования
-            fs.writeFileSync(
-                psScriptPath,
-                `Copy-Item -LiteralPath "${tmpHosts}" -Destination "${HOSTS_PATH}" -Force`,
-                'utf-8'
-            );
-        } catch (e) {
-            return resolve({ ok: false, msg: e.message });
-        }
-
-        // Запускаем через -File (массивом аргументов) — исключает разбор
-        // многослойных кавычек, из-за которого раньше падало создание патча
-        const elevate = spawn('powershell', [
-            '-NoProfile',
-            '-NonInteractive',
-            '-Command',
-            `Start-Process powershell -Verb RunAs -Wait -ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File','${psScriptPath}')`
-        ], { windowsHide: true });
-
-        elevate.on('error', e => resolve({ ok: false, msg: e.message }));
-        elevate.on('exit', code => {
-            try { fs.unlinkSync(tmpHosts); } catch (_) {}
-            try { fs.unlinkSync(psScriptPath); } catch (_) {}
-            resolve({ ok: code === 0 });
-        });
-    });
-});
-
-ipcMain.handle('ublock-install', (_, profileName) => {
-    const src = resPath('assets', 'ublock');
-    const manifest = path.join(src, 'manifest.json');
-    if (!fs.existsSync(src)) return { ok: false, msg: 'Папка assets\\ublock\\ не найдена' };
-    if (!fs.existsSync(manifest)) return { ok: false, msg: 'В assets\\ublock\\ нет manifest.json' };
-    let version = '1.0.0';
-    try { const m = JSON.parse(fs.readFileSync(manifest, 'utf-8')); if (m.version) version = m.version; } catch (_) {}
-    const EXT_ID = 'cjpalhdlnbpafiamejdnhcphjbkeiagm';
-    const profileBase = dataPath('profiles', profileName);
-    const dst = path.join(profileBase, 'Default', 'Extensions', EXT_ID, version + '_0');
-    try {
-        function copyDir(from, to) {
-            fs.mkdirSync(to, { recursive: true });
-            for (const e of fs.readdirSync(from, { withFileTypes: true })) {
-                const s = path.join(from, e.name), d = path.join(to, e.name);
-                if (e.isDirectory()) copyDir(s, d); else fs.copyFileSync(s, d);
-            }
-        }
-        copyDir(src, dst);
-        const prefsPath = path.join(profileBase, 'Default', 'Preferences');
-        if (!fs.existsSync(prefsPath)) {
-            fs.mkdirSync(path.join(profileBase, 'Default'), { recursive: true });
-            fs.writeFileSync(prefsPath, JSON.stringify({ extensions: { settings: { [EXT_ID]: { location: 4, path: dst, state: 1 } } } }, null, 2), 'utf-8');
-        }
-        return { ok: true, version, dst };
-    } catch (e) { return { ok: false, msg: e.message }; }
-});
-
-ipcMain.handle('ublock-check', () => {
-    const src = resPath('assets', 'ublock');
-    const manifest = path.join(src, 'manifest.json');
-    const exists = fs.existsSync(src);
-    const hasManifest = fs.existsSync(manifest);
-    let version = null;
-    if (hasManifest) { try { version = JSON.parse(fs.readFileSync(manifest, 'utf-8')).version; } catch (_) {} }
-    return { exists, hasManifest, version };
-});
-
-// =====================================================
-// АВТОМАТИЧЕСКОЕ ОБНОВЛЕНИЕ ZAPRET
-// =====================================================
-function getZapretVersion() {
-    const vFile = resPath('Zapret', 'version.txt');
-    if (fs.existsSync(vFile)) {
-        try { return fs.readFileSync(vFile, 'utf-8').trim(); } catch (_) {}
-    }
-    return 'Неизвестно';
-}
-
-ipcMain.handle('zapret-version', () => {
-    return {
-        version: getZapretVersion(),
-        path: resPath('Zapret'),
-    };
-});
-
-function httpsGet(url) {
-    return new Promise((resolve, reject) => {
-        const opts = new URL(url);
-        const req = https.get({
-            hostname: opts.hostname,
-            path: opts.pathname + opts.search,
-            headers: {
-                'User-Agent': 'Artofix/2.3',
-                'Accept': 'application/vnd.github+json',
-            },
-        }, (res) => {
-            if (res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 307) {
-                return httpsGet(res.headers.location).then(resolve).catch(reject);
-            }
-            let data = '';
-            res.on('data', d => data += d);
-            res.on('end', () => resolve({ statusCode: res.statusCode, body: data, headers: res.headers }));
-        });
-        req.on('error', reject);
-        req.setTimeout(12000, () => { req.destroy(); reject(new Error('Таймаут соединения с GitHub')); });
-    });
-}
-
-ipcMain.handle('zapret-check-update', async () => {
-    try {
-        const resp = await httpsGet('https://api.github.com/repos/Flowseal/zapret-discord-youtube/releases/latest');
-        if (resp.statusCode !== 200) return { ok: false, msg: 'GitHub ответил: ' + resp.statusCode };
-
-        const rel = JSON.parse(resp.body);
-        const tag = rel.tag_name;
-
-        const expectedName = `zapret-discord-youtube-${tag}.zip`;
-        let asset = (rel.assets || []).find(a => a.name === expectedName);
-        if (!asset) asset = (rel.assets || []).find(a => a.name && a.name.endsWith('.zip'));
-        if (!asset) {
-            asset = { name: expectedName, browser_download_url: rel.zipball_url, size: 0 };
-        }
-
-        const currentVersion = getZapretVersion();
-        const needsUpdate = currentVersion !== tag;
-
-        return {
-            ok: true,
-            latestTag: tag,
-            assetUrl: asset.browser_download_url,
-            assetName: asset.name,
-            assetSizeMb: asset.size ? (asset.size / 1024 / 1024).toFixed(1) : null,
-            publishedAt: rel.published_at ? rel.published_at.slice(0, 10) : '—',
-            body: rel.body || '',
-            currentVersion,
-            needsUpdate,
-        };
-    } catch (e) {
-        return { ok: false, msg: e.message };
-    }
-});
-
-function downloadFile(url, destPath) {
-    return new Promise((resolve, reject) => {
-        const file = fs.createWriteStream(destPath);
-        function doGet(u) {
-            https.get(u, { headers: { 'User-Agent': 'Artofix/2.3' } }, (res) => {
-                if (res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 307) {
-                    return doGet(res.headers.location);
-                }
-                if (res.statusCode !== 200) {
-                    file.close();
-                    return reject(new Error('HTTP ' + res.statusCode));
-                }
-                const total = parseInt(res.headers['content-length'] || '0', 10);
-                let received = 0;
-                let lastSent = 0;
-
-                res.on('data', (chunk) => {
-                    received += chunk.length;
-                    file.write(chunk);
-                    if (total > 0 && (received - lastSent) > 200000) {
-                        lastSent = received;
-                        const pct = (received / total * 100);
-                        const dlMb = (received / 1024 / 1024).toFixed(1);
-                        const totMb = (total / 1024 / 1024).toFixed(1);
-                        if (win && !win.isDestroyed()) win.webContents.send('zapret-dl-progress', { pct, downloaded: dlMb, total: totMb });
-                    }
-                });
-                res.on('end', () => { file.close(); resolve(destPath); });
-                res.on('error', (e) => { file.close(); reject(e); });
-            }).on('error', (e) => { file.close(); reject(e); });
-        }
-        doGet(url);
-        file.on('error', reject);
-    });
-}
-
-function unzipWithPowerShell(zipPath, destDir) {
-    return new Promise((resolve, reject) => {
-        const proc = spawn('powershell', [
-            '-NoProfile', '-NonInteractive', '-Command',
-            `Expand-Archive -LiteralPath '${zipPath}' -DestinationPath '${destDir}' -Force`
-        ], { windowsHide: true });
-        proc.on('error', reject);
-        proc.on('exit', (code) => {
-            if (code === 0) resolve();
-            else reject(new Error('Код завершения PowerShell: ' + code));
-        });
-    });
-}
-
-ipcMain.handle('zapret-do-update', async (_, { url, name, tag }) => {
-    const stamp = Date.now();
-    const tmpZip = path.join(os.tmpdir(), `zapret_update_${stamp}.zip`);
-    const tmpDir = path.join(os.tmpdir(), `zapret_update_${stamp}`);
-    const zapDir = resPath('Zapret');
-
-    try {
-        if (win) win.webContents.send('zapret-dl-progress', { pct: 0, downloaded: '0', total: '?' });
-        await downloadFile(url, tmpZip);
-
-        fs.mkdirSync(tmpDir, { recursive: true });
-        await unzipWithPowerShell(tmpZip, tmpDir);
-
-        const entries = fs.readdirSync(tmpDir, { withFileTypes: true });
-        let srcDir = tmpDir;
-        if (entries.length === 1 && entries[0].isDirectory()) {
-            srcDir = path.join(tmpDir, entries[0].name);
-        }
-
-        const SAVE_ROOT = ['config.bat', 'run_zapret.bat', 'blockcheck.bat'];
-        const SAVE_LISTS = ['ipset-exclude-user.txt', 'list-general-user.txt', 'list-exclude-user.txt'];
-
-        const savedRoot = {};
-        const savedLists = {};
-        for (const f of SAVE_ROOT) { const p = path.join(zapDir, f); if (fs.existsSync(p)) savedRoot[f] = fs.readFileSync(p); }
-        for (const f of SAVE_LISTS) { const p = path.join(zapDir, 'lists', f); if (fs.existsSync(p)) savedLists[f] = fs.readFileSync(p); }
-
-        if (fs.existsSync(zapDir)) fs.rmSync(zapDir, { recursive: true, force: true });
-
-        copyDirRecursive(srcDir, zapDir);
-
-        for (const [f, buf] of Object.entries(savedRoot)) fs.writeFileSync(path.join(zapDir, f), buf);
-        fs.mkdirSync(path.join(zapDir, 'lists'), { recursive: true });
-        for (const [f, buf] of Object.entries(savedLists)) fs.writeFileSync(path.join(zapDir, 'lists', f), buf);
-
-        fs.writeFileSync(path.join(zapDir, 'version.txt'), tag, 'utf-8');
-
-        try { fs.unlinkSync(tmpZip); } catch (_) {}
-        try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
-
-        return { ok: true };
-    } catch (e) {
-        try { fs.unlinkSync(tmpZip); } catch (_) {}
-        try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
-        return { ok: false, msg: e.message };
-    }
-});
-
-function copyDirRecursive(src, dst) {
-    fs.mkdirSync(dst, { recursive: true });
-    for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
-        const s = path.join(src, entry.name);
-        const d = path.join(dst, entry.name);
-        if (entry.isDirectory()) copyDirRecursive(s, d);
-        else fs.copyFileSync(s, d);
-    }
-}
-
-// =====================================================
-// ДИАГНОСТИКА КОМПОНЕНТОВ
-// =====================================================
-function getChromeVersion() {
-    return new Promise(resolve => {
-        const keys = [
-            'HKLM\\SOFTWARE\\Google\\Chrome\\BLBeacon',
-            'HKLM\\SOFTWARE\\WOW6432Node\\Google\\Chrome\\BLBeacon',
-            'HKCU\\SOFTWARE\\Google\\Chrome\\BLBeacon',
-        ];
-        let idx = 0;
-        const tryNext = () => {
-            if (idx >= keys.length) return resolve(null);
-            exec(`reg query "${keys[idx]}" /v version`, { windowsHide: true }, (err, out) => {
-                idx++;
-                if (!err && out) {
-                    const m = out.match(/version\s+REG_SZ\s+([\d.]+)/i);
-                    if (m) return resolve(m[1]);
-                }
-                tryNext();
-            });
-        };
-        tryNext();
-    });
-}
-
-function getEdgeVersion() {
-    return new Promise(resolve => {
-        const keys = [
-            'HKLM\\SOFTWARE\\Microsoft\\EdgeUpdate\\Clients\\{56EB18F8-B008-4CBD-B6D2-8C97FE7E9062}',
-            'HKCU\\SOFTWARE\\Microsoft\\EdgeUpdate\\Clients\\{56EB18F8-B008-4CBD-B6D2-8C97FE7E9062}',
-        ];
-        let idx = 0;
-        const tryNext = () => {
-            if (idx >= keys.length) return resolve(null);
-            exec(`reg query "${keys[idx]}" /v pv`, { windowsHide: true }, (err, out) => {
-                idx++;
-                if (!err && out) {
-                    const m = out.match(/pv\s+REG_SZ\s+([\d.]+)/i);
-                    if (m) return resolve(m[1]);
-                }
-                tryNext();
-            });
-        };
-        tryNext();
-    });
-}
-
-function majorVer(v) { return v ? parseInt(v.split('.')[0]) : 0; }
-
-ipcMain.handle('diag-check', async (_, { component, pkg }) => {
-    const python = findPython();
-    const run = (cmd) => new Promise(r => exec(cmd, { windowsHide: true }, (e, o, s) => r({ ok: !e, out: (o || '').trim(), err: (s || '').trim() })));
-
-    switch (component) {
-        case 'python': {
-            const r = await run(`${python} --version`);
-            const ver = (r.out || r.err).match(/Python ([\d.]+)/i);
-            if (ver) return { status: 'ok', version: ver[1] };
-            return { status: 'err', note: 'не найден' };
-        }
-        case 'pip': {
-            const r = await run(`${python} -m pip --version`);
-            const ver = r.out.match(/pip ([\d.]+)/i);
-            if (ver) return { status: 'ok', version: ver[1] };
-            return { status: 'err' };
-        }
-        case 'selenium':
-        case 'stealth':
-        case 'wdm': {
-            const modName = { selenium: 'selenium', stealth: 'selenium_stealth', wdm: 'webdriver_manager' }[component] || pkg;
-            const r = await run(`${python} -c "import importlib.metadata; print(importlib.metadata.version('${modName.replace(/_/g, '-')}'))"`);
-            if (r.ok && r.out) return { status: 'ok', version: r.out };
-            const r2 = await run(`${python} -c "import ${modName}; print(getattr(${modName},'__version__','?'))"`);
-            if (r2.ok) return { status: 'ok', version: r2.out };
-            return { status: 'err', note: 'не установлен' };
-        }
-        case 'chrome': {
-            const ver = await getChromeVersion();
-            if (ver) return { status: 'ok', version: ver };
-            const paths = [
-                'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-                'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-            ];
-            for (const p of paths) { if (fs.existsSync(p)) return { status: 'ok', version: 'установлен', note: p }; }
-            return { status: 'err', note: 'не найден' };
-        }
-        case 'chromedrv': {
-            const chromeVer = await getChromeVersion();
-            const chromeMajor = majorVer(chromeVer);
-            const r = await run(`${python} -c "from webdriver_manager.chrome import ChromeDriverManager; p=ChromeDriverManager().install(); print(p)"`);
-            if (r.ok && r.out && !r.out.includes('Error') && !r.out.includes('Traceback')) {
-                const vm = r.out.match(/[\\/]([\d.]+)[\\/]/);
-                const drvVer = vm ? vm[1] : 'ok';
-                const drvMajor = majorVer(drvVer);
-                if (chromeMajor && drvMajor && Math.abs(chromeMajor - drvMajor) > 3) {
-                    return { status: 'warn', version: drvVer, note: `Chrome ${chromeMajor} vs драйвер ${drvMajor}` };
-                }
-                return { status: 'ok', version: drvVer };
-            }
-            return { status: 'err', note: 'не скачан — нажми Установить' };
-        }
-        case 'edge': {
-            const ver = await getEdgeVersion();
-            if (ver) return { status: 'ok', version: ver };
-            const p = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
-            if (fs.existsSync(p)) return { status: 'ok', version: 'установлен' };
-            return { status: 'err', note: 'не найден' };
-        }
-        case 'edgedrv': {
-            const edgeVer = await getEdgeVersion();
-            const edgeMajor = majorVer(edgeVer);
-            const r = await run(`${python} -c "from webdriver_manager.microsoft import EdgeChromiumDriverManager; p=EdgeChromiumDriverManager().install(); print(p)"`);
-            if (r.ok && r.out && !r.out.includes('Error') && !r.out.includes('Traceback')) {
-                const vm = r.out.match(/[\\/]([\d.]+)[\\/]/);
-                const drvVer = vm ? vm[1] : 'ok';
-                const drvMajor = majorVer(drvVer);
-                if (edgeMajor && drvMajor && Math.abs(edgeMajor - drvMajor) > 3) {
-                    return { status: 'warn', version: drvVer, note: `Edge ${edgeMajor} vs драйвер ${drvMajor}` };
-                }
-                return { status: 'ok', version: drvVer };
-            }
-            return { status: 'err', note: 'не скачан — нажми Установить' };
-        }
-        default:
-            return { status: 'err', note: 'unknown component' };
-    }
-});
-
-ipcMain.handle('diag-install', async (event, { components }) => {
-    const python = findPython();
-    const log = (msg, type) => { try { event.sender.send('diag-log', { msg, type }); } catch (_) {} };
-    const prog = (pct, label) => { try { event.sender.send('diag-progress', { pct, label }); } catch (_) {} };
-
-    const runCmd = (cmd, opts) => new Promise(resolve => {
-        const proc = exec(cmd, { windowsHide: true, ...(opts || {}) }, (e, o, s) => resolve({ ok: !e, out: (o || '').trim(), err: (s || '').trim() }));
-        proc.stdout && proc.stdout.on('data', d => log(d.toString().trim(), 'info'));
-        proc.stderr && proc.stderr.on('data', d => {
-            const s = d.toString().trim();
-            if (s && !s.startsWith('WARNING')) log(s, 'warn');
-        });
-    });
-
-    const total = components.length;
-    let done = 0;
-
-    for (const cid of components) {
-        done++;
-        const pct = Math.round((done / (total + 1)) * 90);
-
-        switch (cid) {
-            case 'pip': {
-                prog(pct, 'Обновление pip...');
-                log('► Обновление pip...', 'step');
-                await runCmd(`${python} -m pip install --upgrade pip`, { timeout: 60000 });
-                log('✓ pip обновлён', 'ok');
-                break;
-            }
-            case 'selenium': {
-                prog(pct, 'selenium...');
-                log('► pip install selenium', 'step');
-                const r = await runCmd(`${python} -m pip install --upgrade selenium`, { timeout: 120000 });
-                log(r.ok ? '✓ selenium установлен' : '✗ selenium: ' + r.err, r.ok ? 'ok' : 'err');
-                break;
-            }
-            case 'stealth': {
-                prog(pct, 'selenium-stealth...');
-                log('► pip install selenium-stealth', 'step');
-                const r = await runCmd(`${python} -m pip install --upgrade selenium-stealth`, { timeout: 120000 });
-                log(r.ok ? '✓ selenium-stealth установлен' : '✗ selenium-stealth: ' + r.err, r.ok ? 'ok' : 'err');
-                break;
-            }
-            case 'wdm': {
-                prog(pct, 'webdriver-manager...');
-                log('► pip install webdriver-manager', 'step');
-                const r = await runCmd(`${python} -m pip install --upgrade webdriver-manager`, { timeout: 120000 });
-                log(r.ok ? '✓ webdriver-manager установлен' : '✗ webdriver-manager: ' + r.err, r.ok ? 'ok' : 'err');
-                break;
-            }
-            case 'chromedrv': {
-                prog(pct, 'ChromeDriver...');
-                log('► Определяю версию Chrome из реестра...', 'step');
-                const chromeVer = await getChromeVersion();
-                const cMajor = majorVer(chromeVer);
-                log(chromeVer ? `✓ Chrome ${chromeVer} (мажор: ${cMajor})` : '⚠ Версия Chrome не найдена', chromeVer ? 'ok' : 'warn');
-
-                log('► Очищаю старые кэши ChromeDriver...', 'step');
-                const wdmChrome = path.join(process.env.USERPROFILE || process.env.HOME || '', '.wdm', 'drivers', 'chromedriver');
-                if (fs.existsSync(wdmChrome)) {
-                    try {
-                        let removed = 0;
-                        for (const entry of fs.readdirSync(wdmChrome)) {
-                            if (cMajor && !entry.startsWith(String(cMajor))) {
-                                fs.rmSync(path.join(wdmChrome, entry), { recursive: true, force: true });
-                                removed++;
-                            }
-                        }
-                        if (removed > 0) log(`✓ Удалено старых кэшей: ${removed}`, 'ok');
-                        else log('✓ Старых кэшей нет', 'ok');
-                    } catch (e) { log('⚠ ' + e.message, 'warn'); }
-                }
-
-                log(`► Скачиваю ChromeDriver ${chromeVer || '(последний)'} ...`, 'step');
-                const tmpChrome = path.join(os.tmpdir(), 'artofix_chromedrv.py');
-                fs.writeFileSync(tmpChrome, [
-                    'import sys, os',
-                    'os.environ["WDM_LOG"] = "0"',
-                    'from webdriver_manager.chrome import ChromeDriverManager',
-                    chromeVer ? `driver_version = "${chromeVer}"` : 'driver_version = None',
-                    'try:',
-                    '    mgr = ChromeDriverManager(version=driver_version) if driver_version else ChromeDriverManager()',
-                    '    p = mgr.install()',
-                    '    print("OK:", p)',
-                    'except Exception as e:',
-                    '    try:',
-                    '        p = ChromeDriverManager().install()',
-                    '        print("OK:", p)',
-                    '    except Exception as e2:',
-                    '        print("ERR:", e2)',
-                    '        sys.exit(1)',
-                ].join('\n'));
-                const rc = await runCmd(`${python} "${tmpChrome}"`, { timeout: 180000 });
-                try { fs.unlinkSync(tmpChrome); } catch (_) {}
-                if (rc.ok && rc.out.includes('OK')) {
-                    log('✓ ChromeDriver установлен: ' + rc.out.replace('OK:', ''), 'ok');
-                } else {
-                    log('✗ ChromeDriver: ' + (rc.err || rc.out || 'неизвестная ошибка'), 'err');
-                }
-                break;
-            }
-            case 'edgedrv': {
-                prog(pct, 'EdgeDriver...');
-                log('► Читаю версию Edge из реестра...', 'step');
-                const edgeVer = await getEdgeVersion();
-                if (!edgeVer) {
-                    log('✗ Microsoft Edge не найден на компьютере', 'err');
-                    break;
-                }
-                const eMajor = majorVer(edgeVer);
-                log(`✓ Edge ${edgeVer} (мажор: ${eMajor})`, 'ok');
-
-                log('► Очищаю кэш старых EdgeDriver...', 'step');
-                const wdmEdgeDir = path.join(process.env.USERPROFILE || process.env.HOME || '', '.wdm', 'drivers', 'msedgedriver');
-                if (fs.existsSync(wdmEdgeDir)) {
-                    try {
-                        fs.rmSync(wdmEdgeDir, { recursive: true, force: true });
-                        log('✓ Старый кэш удалён', 'ok');
-                    } catch (e) { log('⚠ Кэш не удалось удалить: ' + e.message, 'warn'); }
-                } else {
-                    log('✓ Кэш пуст', 'ok');
-                }
-
-                log(`► Скачиваю msedgedriver ${edgeVer} от Microsoft...`, 'step');
-                const drvUrl = `https://msedgedriver.azureedge.net/${edgeVer}/edgedriver_win64.zip`;
-                const tmpZip = path.join(os.tmpdir(), `edgedriver_${edgeVer}.zip`);
-                const tmpDir = path.join(os.tmpdir(), `edgedriver_${edgeVer}`);
-                const drvDestDir = dataPath('drivers');
-                const drvDestExe = path.join(drvDestDir, 'msedgedriver.exe');
-
-                try { fs.mkdirSync(drvDestDir, { recursive: true }); } catch (_) {}
-
-                // Скачивание пишем во временный .ps1-файл (без вложенных кавычек)
-                const dlScriptPath = path.join(os.tmpdir(), `edgedriver_dl_${edgeVer}.ps1`);
-                const dlScript = [
-                    '$ProgressPreference = "SilentlyContinue"',
-                    'try {',
-                    `    Invoke-WebRequest -Uri "${drvUrl}" -OutFile "${tmpZip}" -UseBasicParsing`,
-                    '    Write-Output "DOWNLOADED"',
-                    '} catch {',
-                    '    Write-Error $_.Exception.Message',
-                    '    exit 1',
-                    '}',
-                ].join('\n');
-                fs.writeFileSync(dlScriptPath, dlScript, 'utf-8');
-
-                const dlRes = await runCmd(`powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${dlScriptPath}"`, { timeout: 120000 });
-                try { fs.unlinkSync(dlScriptPath); } catch (_) {}
-
-                if (!dlRes.ok || !dlRes.out.includes('DOWNLOADED')) {
-                    log('✗ Не удалось скачать: ' + (dlRes.err || dlRes.out), 'err');
-                    log('Пробуй вручную: ' + drvUrl, 'warn');
-                    break;
-                }
-                log('✓ Архив скачан', 'ok');
-
-                log('► Распаковываю архив...', 'step');
-                try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
-                await runCmd(
-                    `powershell -NoProfile -NonInteractive -Command "Expand-Archive -LiteralPath '${tmpZip}' -DestinationPath '${tmpDir}' -Force"`,
-                    { timeout: 30000 }
-                );
-
-                let foundExe = null;
-                const findExe = (dir) => {
-                    try {
-                        for (const f of fs.readdirSync(dir)) {
-                            const fp = path.join(dir, f);
-                            if (f.toLowerCase() === 'msedgedriver.exe') { foundExe = fp; return; }
-                            if (fs.statSync(fp).isDirectory()) findExe(fp);
-                        }
-                    } catch (_) {}
-                };
-                findExe(tmpDir);
-
-                if (!foundExe) {
-                    log('✗ msedgedriver.exe не найден в архиве', 'err');
-                    break;
-                }
-
-                try { fs.copyFileSync(foundExe, drvDestExe); } catch (e) {
-                    log('✗ Не удалось скопировать: ' + e.message, 'err');
-                    break;
-                }
-
-                try { fs.unlinkSync(tmpZip); } catch (_) {}
-                try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
-
-                log(`✓ msedgedriver ${edgeVer} установлен → ${drvDestExe}`, 'ok');
-
-                try {
-                    const cfgPath = dataPath('config.json');
-                    let cfg = {};
-                    try { cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8')); } catch (_) {}
-                    cfg.edgedriver_path = drvDestExe;
-                    fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2), 'utf-8');
-                    log('✓ Путь к драйверу сохранён в config.json', 'ok');
-                } catch (e) { log('⚠ Не удалось записать конфигурацию: ' + e.message, 'warn'); }
-
-                break;
-            }
-            default:
-                log('⚠ Пропускаем ' + cid + ' (ручная установка)', 'warn');
-        }
-    }
-
-    prog(100, 'Готово!');
-    return { ok: true };
-});
-
-// =====================================================
-// ЧЕБУРНЕТ
-// =====================================================
-ipcMain.handle('cbn-ping', async (_, { host, port }) => {
-    return new Promise((resolve) => {
-        const net = require('net');
-        const t0 = Date.now();
-        port = port || 443;
-
-        let settled = false;
-        const done = (ok, err) => {
-            if (settled) return;
-            settled = true;
-            resolve({ ok, ping: Date.now() - t0, err: err || null });
-        };
-
-        const sock = new net.Socket();
-        sock.setTimeout(5000);
-
-        sock.connect(port, host, () => {
-            sock.destroy();
-            done(true);
-        });
-        sock.on('error', (e) => done(false, e.code || e.message));
-        sock.on('timeout', () => { sock.destroy(); done(false, 'TIMEOUT'); });
-    });
-});
-
-ipcMain.handle('cbn-set-dns', (_, { dns1, dns2 }) => {
-    return new Promise((resolve) => {
-        const script = `
-$adapters = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' } | Select-Object -ExpandProperty InterfaceAlias
-foreach ($a in $adapters) {
-    try {
-        Set-DnsClientServerAddress -InterfaceAlias $a -ServerAddresses ('${dns1}','${dns2}') -ErrorAction SilentlyContinue
-    } catch {}
-}
-Write-Output 'done'
-        `.trim();
-        const proc = spawn('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true });
-        let out = '';
-        proc.stdout.on('data', d => out += d.toString());
-        proc.on('exit', code => resolve({ ok: code === 0, msg: out.trim() }));
-        proc.on('error', e => resolve({ ok: false, msg: e.message }));
-    });
-});
-
-ipcMain.handle('cbn-reset-dns', () => {
-    return new Promise((resolve) => {
-        const script = `
-$adapters = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' } | Select-Object -ExpandProperty InterfaceAlias
-foreach ($a in $adapters) {
-    try {
-        Set-DnsClientServerAddress -InterfaceAlias $a -ResetServerAddresses -ErrorAction SilentlyContinue
-    } catch {}
-}
-Write-Output 'done'
-        `.trim();
-        const proc = spawn('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true });
-        let out = '';
-        proc.stdout.on('data', d => out += d.toString());
-        proc.on('exit', code => resolve({ ok: code === 0, msg: out.trim() }));
-        proc.on('error', e => resolve({ ok: false, msg: e.message }));
-    });
-});
-
-// =====================================================
-// НАСТРОЙКА / УСТАНОВЩИК
-// =====================================================
-let setupWin = null;
-
-function needsSetup() {
-    const flag = dataPath('.artofix_setup_done');
-    return !fs.existsSync(flag);
-}
-function markSetupDone() {
-    fs.writeFileSync(dataPath('.artofix_setup_done'), new Date().toISOString(), 'utf-8');
-}
-
-function sendSetup(event, data) {
-    if (setupWin && !setupWin.isDestroyed()) setupWin.webContents.send(event, data);
+  win = new BrowserWindow(Object.assign({
+    width: 1100, height: 680,
+    minWidth: 900, minHeight: 580,
+    frame: false,
+    backgroundColor: '#04050f',
+    show: false,
+    resizable: true,
+  }, { webPreferences: HARDENED_WEB_PREFS }));
+
+  win.loadFile(path.join(__dirname, 'index.html'));
+  win.once('ready-to-show', () => {
+    win.show();
+    sendBootstrap();
+  });
+  if (DEV_MODE) win.webContents.openDevTools({ mode: 'detach' });
+  win.on('close', (e) => { if (!isQuiting) { e.preventDefault(); win.hide(); } });
+  win.on('closed', () => { win = null; });
 }
 
 function createSetupWindow() {
-    setupWin = new BrowserWindow({
-        width: 560, height: 540,
-        resizable: false, frame: false,
-        transparent: false, backgroundColor: '#04050f',
-        show: false,
-        webPreferences: { nodeIntegration: true, contextIsolation: false },
-        center: true,
-    });
-    setupWin.loadFile(path.join(__dirname, 'setup.html'));
+  setupWin = new BrowserWindow(Object.assign({
+    width: 560, height: 540,
+    resizable: false, frame: false,
+    backgroundColor: '#04050f',
+    show: false, center: true,
+  }, { webPreferences: HARDENED_WEB_PREFS }));
+  setupWin.loadFile(path.join(__dirname, 'setup.html'));
+  setupWin.on('closed', () => { setupWin = null; });
 }
 
-function runSetupCmd(cmd, opts) {
-    return new Promise((resolve) => {
-        const proc = exec(cmd, { windowsHide: true, ...opts }, (err, stdout, stderr) => {
-            resolve({ ok: !err, code: err ? err.code : 0, stdout, stderr });
-        });
-        proc.stdout && proc.stdout.on('data', d => sendSetup('setup-log', d.toString()));
-        proc.stderr && proc.stderr.on('data', d => sendSetup('setup-log', d.toString()));
+function send(channel, payload) {
+  if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
+}
+function sendToSetup(channel, payload) {
+  if (setupWin && !setupWin.isDestroyed()) setupWin.webContents.send(channel, payload);
+}
+
+function sendBootstrap() {
+  send('bootstrap', {
+    platform: process.platform,
+    version: APP_VERSION,
+    isAdmin: isAdmin(),
+    sandbox: true,
+    zapretRunning: !!zapretProcess,
+    hostsAvailable: IS_WIN,
+  });
+}
+
+// ── защита всех webContents приложения ──
+function stripAnsi(s) {
+  return String(s).replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
+}
+
+app.on('web-contents-created', (_e, contents) => {
+  contents.setWindowOpenHandler(({ url }) => {
+    console.warn('[blocked] попытка открыть новое окно: ' + stripAnsi(url).slice(0, 200));
+    return { action: 'deny' };
+  });
+
+  const blockNav = (event, url) => {
+    let local = false;
+    try {
+      const p = fileURLToPath(url);
+      local = sec.isInside(__dirname, p) || sec.isInside(getAppRoot(), p);
+    } catch (_) { local = false; }
+    if (!local) {
+      event.preventDefault();
+      console.warn('[blocked] попытка навигации: ' + stripAnsi(url).slice(0, 200));
+    }
+  };
+  contents.on('will-navigate', blockNav);
+  contents.on('will-redirect', (e, url) => blockNav(e, url));
+
+  contents.on('will-attach-webview', (e) => {
+    e.preventDefault();
+    console.warn('[blocked] попытка вставить webview');
+  });
+
+  contents.on('preload-error', (_e, preloadPath, error) => {
+    console.error('[preload-error] ' + preloadPath + ': ' + (error && error.message));
+  });
+
+  contents.on('render-process-gone', (_e, details) => {
+    console.error('[renderer-gone] ' + JSON.stringify({ reason: details.reason, exitCode: details.exitCode }));
+  });
+
+  contents.on('unresponsive', () => console.error('[renderer] окно перестало отвечать'));
+
+  // Все логи рендерера — в терминал (с обрезкой длины и снятием ANSI).
+  contents.on('console-message', (_e, level, message, line, sourceId) => {
+    const lvl = ['verbose', 'info', 'warning', 'error'][level] || 'log';
+    const src = sourceId ? path.basename(String(sourceId)) : 'renderer';
+    console.log('[renderer:' + lvl + '] ' + stripAnsi(message).slice(0, 2000) + '  (' + src + ':' + line + ')');
+  });
+
+  if (!DEV_MODE) contents.on('devtools-opened', () => contents.closeDevTools());
+});
+
+// ═══════════════════════════════════════════
+//  ТРЕЙ
+// ═══════════════════════════════════════════
+function readBinds() {
+  const raw = sec.readJsonSafe(dataPath('artofix_binds.json'));
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((b) => b && typeof b === 'object' && sec.sanitizeExternalUrl(b.url)).slice(0, 200);
+}
+
+function buildTrayMenu() {
+  const binds = readBinds().slice(0, 12).map((b) => ({
+    label: sec.sanitizeLabel(b.label || b.url || '?', 40) || '?',
+    click: () => launchBindFromTray(b),
+  }));
+
+  const template = [
+    { label: 'ARTOFIX ' + APP_VERSION, enabled: false },
+    { type: 'separator' },
+    { label: '▶ Запустить Zapret', click: () => send('tray-action', 'run') },
+    { label: '■ Остановить Zapret', click: () => send('tray-action', 'stop') },
+    { label: '📂 Папка Zapret', click: () => send('tray-action', 'config') },
+    { type: 'separator' },
+  ];
+  if (binds.length) {
+    template.push({ label: '🔗 Бинды', submenu: binds });
+    template.push({ type: 'separator' });
+  }
+  template.push(
+    { label: '🪟 Показать окно', click: () => { if (win) { win.show(); win.focus(); } } },
+    { label: '📋 Логи', click: () => { showTab('logs'); } },
+    { label: '⚙️ Настройки', click: () => { showTab('settings'); } },
+    { type: 'separator' },
+    { label: '❌ Выход', click: () => { isQuiting = true; app.quit(); } }
+  );
+  return Menu.buildFromTemplate(template);
+}
+
+function showTab(tab) {
+  if (!win) return;
+  win.show();
+  send('navigate', tab);
+}
+
+function createTray() {
+  let icon = nativeImage.createFromPath(resPath('icon.png'));
+  if (icon.isEmpty()) icon = nativeImage.createEmpty();
+  tray = new Tray(icon);
+  tray.setContextMenu(buildTrayMenu());
+  tray.setToolTip('Artofix ' + APP_VERSION);
+  tray.on('double-click', () => { if (win) { win.show(); win.focus(); } });
+}
+
+function launchBindFromTray(bind) {
+  const url = sec.sanitizeBrowseUrl(bind.url);
+  const browser = sec.sanitizeBrowser(bind.browser) || 'chrome';
+  if (!url) return;
+  if (browser === 'app') {
+    const ext = sec.sanitizeExternalUrl(bind.url);
+    if (ext) shell.openExternal(ext);
+    return;
+  }
+  launchBrowser({ url, profile: bind.profile || 'default', browser }).catch((e) => console.error('[tray] ' + e.message));
+}
+
+// ═══════════════════════════════════════════
+//  ЛОГИ ЗАПУСКОВ (буфер ограничен — зашита от утечки памяти)
+// ═══════════════════════════════════════════
+const LOG_MAX = 300;
+const LOG_LINE_MAX = 500;
+let launchLogs = [];
+
+function appendLog(profile, browser, text) {
+  const lines = String(text).split('\n');
+  for (const raw of lines) {
+    const line = stripAnsi(raw).trim().slice(0, LOG_LINE_MAX);
+    if (!line) continue;
+    launchLogs.push({ ts: Date.now(), profile: sec.sanitizeLabel(profile, 40), browser: sec.clampString(browser, 12), msg: line });
+  }
+  if (launchLogs.length > LOG_MAX) launchLogs = launchLogs.slice(-LOG_MAX);
+  send('log-entry', launchLogs.slice(-5));
+}
+
+let diagBuffer = { log: [], progress: null };
+function pushDiag(channel, payload) {
+  if (channel === 'diag-log') {
+    diagBuffer.log.push(payload);
+    if (diagBuffer.log.length > 300) diagBuffer.log = diagBuffer.log.slice(-300);
+  } else {
+    diagBuffer.progress = payload;
+  }
+  send(channel, payload);
+}
+
+// ═══════════════════════════════════════════
+//  КОНФИГ / НАСТРОЙКИ (санитизация при записи)
+// ═══════════════════════════════════════════
+const CONFIG_KEYS = ['user_agent', 'resolution', 'spoof', 'fingerprint', 'proxy',
+  'chromedriver_path', 'edgedriver_path', 'identity', 'vectors'];
+
+function sanitizePathField(v) {
+  if (typeof v !== 'string' || v.length > 512) return undefined;
+  if (/[\u0000-\u001f\u007f]/.test(v)) return undefined;
+  if (!/\.exe$/i.test(v)) return undefined;
+  const resolved = path.resolve(v);
+  const okRoot = sec.isInside(getAppRoot(), resolved) || sec.isInside(dataPath('drivers'), resolved);
+  return okRoot ? resolved : undefined;
+}
+
+function sanitizeConfig(input) {
+  const out = {};
+  if (!input || typeof input !== 'object') return out;
+
+  if (typeof input.user_agent === 'string' && input.user_agent.length <= 512 && !/[\u0000-\u001f\u007f]/.test(input.user_agent)) {
+    out.user_agent = input.user_agent;
+  }
+  if (typeof input.resolution === 'string' && /^\d{2,5},\d{2,5}$/.test(input.resolution)) {
+    out.resolution = input.resolution;
+  }
+  if (input.spoof && typeof input.spoof === 'object') {
+    const s = {};
+    if (typeof input.spoof.timezone === 'string' && /^[A-Za-z_+\-]{1,40}(\/[A-Za-z_+\-]{1,40}){0,2}$/.test(input.spoof.timezone)) s.timezone = input.spoof.timezone;
+    if (typeof input.spoof.lang === 'string' && /^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})?(,[A-Za-z\-0-9]{2,10}){0,3}$/.test(input.spoof.lang)) s.lang = input.spoof.lang;
+    if (typeof input.spoof.account_age === 'string') s.account_age = sec.sanitizeLabel(input.spoof.account_age, 32);
+    if (typeof input.spoof.history === 'string') s.history = sec.sanitizeLabel(input.spoof.history, 32);
+    out.spoof = s;
+  }
+  if (input.fingerprint && typeof input.fingerprint === 'object') {
+    const f = {};
+    for (const key of ['webgl', 'platform', 'canvas', 'resolution', 'ua', 'audio', 'fonts', 'media', 'hw']) {
+      if (typeof input.fingerprint[key] === 'boolean') f[key] = input.fingerprint[key];
+    }
+    if (typeof input.fingerprint.canvas_noise === 'number' && input.fingerprint.canvas_noise >= 0 && input.fingerprint.canvas_noise <= 255) {
+      f.canvas_noise = Math.floor(input.fingerprint.canvas_noise);
+    }
+    if (typeof input.fingerprint.webgl_renderer === 'string') f.webgl_renderer = sec.sanitizeLabel(input.fingerprint.webgl_renderer, 160);
+    if (typeof input.fingerprint.webgl_vendor === 'string') f.webgl_vendor = sec.sanitizeLabel(input.fingerprint.webgl_vendor, 80);
+    out.fingerprint = f;
+  }
+  if (input.proxy && typeof input.proxy === 'object') {
+    const p = {};
+    if (typeof input.proxy.server === 'string' && /^(socks5|socks4|http|https):\/\/[A-Za-z0-9._:\-]{1,120}$/.test(input.proxy.server)) p.server = input.proxy.server;
+    if (typeof input.proxy.username === 'string') p.username = sec.sanitizeLabel(input.proxy.username, 64);
+    out.proxy = p;
+  }
+  const cd = sanitizePathField(input.chromedriver_path);
+  if (cd) out.chromedriver_path = cd;
+  const ed = sanitizePathField(input.edgedriver_path);
+  if (ed) out.edgedriver_path = ed;
+  if (input.identity && typeof input.identity === 'object') out.identity = input.identity;   // пишет только main
+  return out;
+}
+
+function readConfig() {
+  const raw = sec.readJsonSafe(dataPath('config.json')) || {};
+  return Object.assign({}, sanitizeConfig(raw), { identity: raw.identity || null });
+}
+function writeConfig(cfg) {
+  sec.writeFileAtomic(dataPath('config.json'), JSON.stringify(cfg, null, 2));
+}
+
+const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
+function sanitizeSettings(input) {
+  const out = {};
+  if (!input || typeof input !== 'object') return out;
+  if (typeof input.theme === 'string' && /^[a-z0-9\-]{0,24}$/.test(input.theme)) out.theme = input.theme;
+  if (input.colors && typeof input.colors === 'object') {
+    const c = {};
+    if (HEX_COLOR.test(input.colors.ac || '')) c.ac = input.colors.ac;
+    if (HEX_COLOR.test(input.colors.ac2 || '')) c.ac2 = input.colors.ac2;
+    const op = Number(input.colors.op);
+    if (Number.isFinite(op) && op >= 0.1 && op <= 1) c.op = String(op);
+    out.colors = c;
+  }
+  if (input.cheburnet && typeof input.cheburnet === 'object') {
+    const cb = {};
+    cb.autostart = input.cheburnet.autostart === true;
+    cb.autorestart = input.cheburnet.autorestart !== false;
+    const iv = Number(input.cheburnet.interval);
+    cb.interval = Number.isFinite(iv) ? Math.min(3600, Math.max(5, Math.floor(iv))) : 30;
+    cb.dns1 = sec.sanitizeIpv4(input.cheburnet.dns1) || '1.1.1.1';
+    cb.dns2 = sec.sanitizeIpv4(input.cheburnet.dns2) || '1.0.0.1';
+    cb.dnsMode = ['dot', 'doh', 'plain'].includes(input.cheburnet.dnsMode) ? input.cheburnet.dnsMode : 'dot';
+    out.cheburnet = cb;
+  }
+  if (['stars', 'dots', 'net', 'none'].includes(input.fxParticles)) out.fxParticles = input.fxParticles;
+  const spd = Number(input.fxSpeed);
+  if (Number.isFinite(spd) && spd >= 0 && spd <= 10) out.fxSpeed = String(spd);
+  if (['on', 'off'].includes(input.fxScanlines)) out.fxScanlines = input.fxScanlines;
+  if (typeof input.fxFont === 'string' && /^[A-Za-z0-9 \-]{0,32}$/.test(input.fxFont)) out.fxFont = input.fxFont;
+  const glow = Number(input.glowIntensity);
+  if (Number.isFinite(glow) && glow >= 0 && glow <= 200) out.glowIntensity = String(Math.floor(glow));
+  const scale = Number(input.uiScale);
+  if (Number.isFinite(scale) && scale >= 0.5 && scale <= 2) out.uiScale = String(scale);
+  if (input.fingerprint && typeof input.fingerprint === 'object') {
+    const f = {};
+    for (const key of ['webgl', 'platform', 'canvas', 'resolution', 'ua', 'audio', 'fonts', 'media', 'hw']) {
+      if (typeof input.fingerprint[key] === 'boolean') f[key] = input.fingerprint[key];
+    }
+    out.fingerprint = f;
+  }
+  return out;
+}
+
+function readSettings() {
+  return sanitizeSettings(sec.readJsonSafe(dataPath('artofix_settings.json')) || {});
+}
+
+function sanitizeBinds(list) {
+  if (!Array.isArray(list)) return [];
+  return list.slice(0, 200).map((b) => {
+    const item = b && typeof b === 'object' ? b : {};
+    return {
+      id: Number.isFinite(Number(item.id)) ? Number(item.id) : Date.now() + Math.floor(Math.random() * 1000),
+      label: sec.sanitizeLabel(item.label || item.url || '', 64),
+      url: sec.sanitizeExternalUrl(item.url) || '',
+      profile: sec.sanitizeProfileName(item.profile) || '',
+      browser: sec.sanitizeBrowser(item.browser) || 'chrome',
+      bypass: item.bypass === true,
+    };
+  }).filter((b) => b.url || b.browser === 'app');
+}
+
+// ═══════════════════════════════════════════
+//  ОТПЕЧАТОК: генерация и хранение
+// ═══════════════════════════════════════════
+const versionCache = new Map();
+
+function readBrowserVersion(browser) {
+  return new Promise((resolve) => {
+    if (!IS_WIN) return resolve(null);
+    if (versionCache.has(browser)) return resolve(versionCache.get(browser));
+    const keys = browser === 'msedge'
+      ? ['HKLM\\SOFTWARE\\Microsoft\\EdgeUpdate\\Clients\\{56EB18F8-B008-4CBD-B6D2-8C97FE7E9062}',
+         'HKCU\\SOFTWARE\\Microsoft\\EdgeUpdate\\Clients\\{56EB18F8-B008-4CBD-B6D2-8C97FE7E9062}']
+      : ['HKLM\\SOFTWARE\\Google\\Chrome\\BLBeacon',
+         'HKLM\\SOFTWARE\\WOW6432Node\\Google\\Chrome\\BLBeacon',
+         'HKCU\\SOFTWARE\\Google\\Chrome\\BLBeacon'];
+    const valueName = browser === 'msedge' ? 'pv' : 'version';
+
+    let idx = 0;
+    const next = () => {
+      if (idx >= keys.length) { versionCache.set(browser, null); return resolve(null); }
+      const key = keys[idx++];
+      execFile('reg', ['query', key, '/v', valueName], { windowsHide: true, timeout: 5000 }, (err, stdout) => {
+        if (!err && stdout) {
+          const m = stdout.match(new RegExp(valueName + '\\s+REG_SZ\\s+([\\d.]+)', 'i'));
+          if (m) { versionCache.set(browser, m[1]); return resolve(m[1]); }
+        }
+        next();
+      });
+    };
+    next();
+  });
+}
+
+function profileMetaPath(dir) { return path.join(dir, '_artofix_meta.json'); }
+
+function readProfileMeta(name) {
+  const dir = profileDir(name);
+  if (!dir) return {};
+  const meta = sec.readJsonSafe(profileMetaPath(dir), 64 * 1024);
+  return meta && typeof meta === 'object' ? meta : {};
+}
+
+/** Прокси профиля (server/username из meta, пароль — только через env). */
+function profileProxy(meta) {
+  const p = meta && meta.proxy;
+  if (!p || typeof p !== 'object') return null;
+  const server = typeof p.server === 'string' ? p.server : '';
+  if (!/^(socks5|socks4|http|https):\/\/[A-Za-z0-9._:\-]{1,120}$/.test(server)) return null;
+  return {
+    server,
+    username: sec.sanitizeLabel(p.username || '', 64),
+    password: typeof p.password === 'string' ? p.password.slice(0, 128) : '',
+  };
+}
+
+/**
+ * Считает «личность» профиля и сохраняет её в config.json.
+ * Стабильность: seed = installId + profile, поэтому отпечаток не «прыгает»
+ * между запусками (прыгающий отпечаток — сам по себе признак автоматизации).
+ */
+async function rollIdentity(profile, browser, opts) {
+  opts = opts || {};
+  const cfg = readConfig();
+  const settings = readSettings();
+  const meta = readProfileMeta(profile);
+  const proxy = profileProxy(meta);
+  const fpSwitches = settings.fingerprint || {};
+
+  const realVersion = browser === 'msedge' ? await readBrowserVersion('msedge') : await readBrowserVersion('chrome');
+
+  const overrides = {};
+  if (!opts.ignoreUiOverrides) {
+    if (cfg.user_agent) overrides.user_agent = cfg.user_agent;
+    if (fpSwitches.resolution === true && cfg.resolution) overrides.resolution = cfg.resolution;
+    if (cfg.spoof && cfg.spoof.timezone) overrides.timezone = cfg.spoof.timezone;
+    if (cfg.spoof && cfg.spoof.lang) overrides.lang = cfg.spoof.lang;
+  }
+  if (proxy) {
+    overrides.proxy_server = proxy.server;
+    overrides.proxy_username = proxy.username;
+  }
+
+  const identity = fpEngine.generateIdentity(profile || 'default', getInstallId(), {
+    browser,
+    browserVersion: realVersion,
+    overrides,
+    identitySalt: typeof meta.fingerprint_refresh === 'string' ? meta.fingerprint_refresh : null,
+  });
+
+  // Флаги векторов: что именно разрешено подменять в UI
+  identity.vectors = {
+    webgl: fpSwitches.webgl !== false,
+    platform: fpSwitches.platform !== false,
+    canvas: fpSwitches.canvas !== false,
+    audio: fpSwitches.audio !== false,
+    screen: fpSwitches.resolution === true,
+    ua: fpSwitches.ua !== false,
+    tz: true,
+    lang: true,
+    hw: fpSwitches.hw !== false,
+    media: fpSwitches.media !== false,
+    fonts: fpSwitches.fonts !== false,
+  };
+  if (!identity.vectors.webgl) {
+    // Без подмены WebGL нельзя включать software-рендер: SwiftShader в
+    // renderer-строке — мгновенный флаг автоматизации.
+    identity.webgl = null;
+  }
+
+  cfg.identity = identity;
+  cfg.user_agent = identity.user_agent;
+  cfg.resolution = identity.resolution;
+  cfg.spoof = cfg.spoof || {};
+  cfg.spoof.timezone = identity.timezone;
+  cfg.spoof.lang = identity.lang;
+  writeConfig(cfg);
+
+  return { identity, proxy, meta };
+}
+
+// ═══════════════════════════════════════════
+//  ЗАПУСК БРАУЗЕРА
+// ═══════════════════════════════════════════
+const MAX_BROWSER_CHILDREN = 12;
+
+async function launchBrowser({ url, profile, browser }) {
+  const safeBrowser = sec.sanitizeBrowser(browser);
+  const safeUrl = sec.sanitizeBrowseUrl(url);
+  if (!safeBrowser || !safeUrl) return { ok: false, msg: 'Недопустимый URL или тип браузера' };
+  if (rateLimited('launch:' + safeBrowser, 1200)) return { ok: false, msg: 'Слишком часто — подожди секунду' };
+
+  // Запуск внешних приложений (steam://, tg://, discord://) — только по белому списку схем
+  if (safeBrowser === 'app') {
+    const ext = sec.sanitizeExternalUrl(url);
+    if (!ext) return { ok: false, msg: 'Схема ссылки не разрешена (только http/https/steam/tg/discord)' };
+    try { await shell.openExternal(ext); return { ok: true }; }
+    catch (e) { return { ok: false, msg: e.message }; }
+  }
+
+  const dir = profileDir(profile);
+  if (!dir) return { ok: false, msg: 'Недопустимое имя профиля' };
+  if (runningProfiles.size >= MAX_BROWSER_CHILDREN) return { ok: false, msg: 'Уже открыто много профилей' };
+
+  let rolled;
+  try {
+    rolled = await rollIdentity(profile, safeBrowser);
+  } catch (e) {
+    return { ok: false, msg: 'Не удалось собрать отпечаток: ' + e.message };
+  }
+
+  try { fs.mkdirSync(dir, { recursive: true }); } catch (_) {}
+
+  const enginePy = resPath('engine.py');
+  if (!fs.existsSync(enginePy)) return { ok: false, msg: 'engine.py не найден: ' + enginePy };
+
+  const python = findPython();
+  const env = Object.assign({}, process.env, {
+    ARTOFIX_PROFILES: profilesRoot(),
+    ARTOFIX_CONFIG: dataPath('config.json'),
+    ARTOFIX_ROOT: getAppRoot(),
+    ARTOFIX_BROWSER: safeBrowser,
+  });
+  if (rolled.proxy && rolled.proxy.password) env.ARTOFIX_PROXY_PASS = rolled.proxy.password;
+
+  appendLog(profile, safeBrowser, '[start] ' + safeBrowser + ' → ' + safeUrl
+    + (rolled.identity.webgl ? '  [fp: ' + rolled.identity.webgl.tier + ']' : '  [fp: без подмены GPU]')
+    + (rolled.proxy ? '  [proxy: ' + rolled.proxy.server + ']' : ''));
+
+  let child;
+  try {
+    child = spawn(python, [enginePy, safeUrl, profile, safeBrowser, '--profiles-dir', profilesRoot()], {
+      cwd: resPath(),
+      windowsHide: true,
+      env,
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
+  } catch (e) {
+    appendLog(profile, safeBrowser, '[error] ' + e.message);
+    return { ok: false, msg: 'Python не запустился: ' + e.message };
+  }
+
+  runningProfiles.add(profile);
+  child.stdout.on('data', (d) => appendLog(profile, safeBrowser, d.toString()));
+  child.stderr.on('data', (d) => appendLog(profile, safeBrowser, d.toString()));
+  child.on('error', (e) => {
+    runningProfiles.delete(profile);
+    appendLog(profile, safeBrowser, '[error] ' + e.message + ' — проверь, что Python установлен');
+  });
+  child.on('exit', (code) => {
+    runningProfiles.delete(profile);
+    appendLog(profile, safeBrowser, '[engine] завершён с кодом ' + code);
+  });
+
+  // Небольшое ожидание: если Python не установлен, spawn падает почти сразу
+  // и пользователь должен увидеть причину, а не «запущено».
+  const spawnError = await new Promise((resolve) => {
+    let settled = false;
+    const done = (v) => { if (!settled) { settled = true; clearTimeout(timer); resolve(v); } };
+    const timer = setTimeout(() => done(null), 1000);
+    child.once('error', (e) => done(e));
+    child.once('spawn', () => done(null));
+  });
+  if (spawnError) {
+    runningProfiles.delete(profile);
+    return { ok: false, msg: 'Python не найден: ' + spawnError.message + '\nУстанови Python 3 и перезапусти Artofix.' };
+  }
+
+  return { ok: true };
+}
+
+// ═══════════════════════════════════════════
+//  ZAPRET
+// ═══════════════════════════════════════════
+const ZAPRET_BATS = ['general.bat', 'general(ALT1).bat', 'general(ALT2).bat', 'discord.bat', 'run_zapret.bat'];
+const WINWS_IMAGES = ['winws.exe', 'winws64.exe', 'winws32.exe'];
+
+function zapretDir() { return resPath('Zapret'); }
+
+function isRunningWinws() {
+  return new Promise((resolve) => {
+    if (!IS_WIN) return resolve(false);
+    execFile('tasklist', ['/fi', 'imagename eq winws.exe', '/nh'], { windowsHide: true, timeout: 5000 }, (err, stdout) => {
+      if (err || !stdout) return resolve(false);
+      resolve(/winws\.exe/i.test(stdout));
+    });
+  });
+}
+
+function zapretStart() {
+  if (zapretProcess) return { ok: false, msg: 'Уже запущен' };
+  const dir = zapretDir();
+  let bat = null;
+  for (const name of ZAPRET_BATS) {
+    const candidate = sec.safeJoinInside(dir, name);
+    if (candidate && fs.existsSync(candidate) && fs.statSync(candidate).isFile()) { bat = candidate; break; }
+  }
+  if (!bat) return { ok: false, msg: 'Не найден general.bat в папке Zapret.\nПроверь, что Zapret установлен.' };
+
+  try {
+    zapretProcess = spawn('cmd.exe', ['/c', bat], {
+      cwd: dir, windowsHide: true, detached: false, stdio: 'ignore',
+    });
+  } catch (e) {
+    zapretProcess = null;
+    return { ok: false, msg: 'Не удалось запустить: ' + e.message };
+  }
+  zapretProcess.on('error', (e) => {
+    zapretProcess = null;
+    send('zapret-status', { on: false, msg: 'Ошибка: ' + e.message });
+  });
+  zapretProcess.on('exit', () => { zapretProcess = null; });
+  return { ok: true };
+}
+
+function zapretStop() {
+  if (IS_WIN) {
+    for (const image of WINWS_IMAGES) {
+      execFile('taskkill', ['/f', '/im', image, '/t'], { windowsHide: true }, () => {});
+    }
+  }
+  if (zapretProcess) {
+    try { process.kill(zapretProcess.pid); } catch (_) {}
+    zapretProcess = null;
+  }
+  return { ok: true };
+}
+
+function getZapretVersion() {
+  const f = sec.safeJoinInside(zapretDir(), 'version.txt');
+  try { if (f && fs.existsSync(f)) return fs.readFileSync(f, 'utf-8').trim().slice(0, 64); } catch (_) {}
+  return 'Неизвестно';
+}
+
+/** HTTPS с проверкой каждого хоста на редиректе (защита от подмены ответа). */
+function httpsGet(url, opts) {
+  opts = opts || {};
+  const maxHops = opts.maxHops === undefined ? 5 : opts.maxHops;
+  return new Promise((resolve, reject) => {
+    let hops = 0;
+    const go = (current) => {
+      const safe = sec.sanitizeUpdateUrl(current);
+      if (!safe) return reject(new Error('Хост не в белом списке: ' + String(current).slice(0, 120)));
+      const req = https.get({
+        hostname: new URL(safe).hostname,
+        path: new URL(safe).pathname + new URL(safe).search,
+        headers: { 'User-Agent': 'Artofix/' + APP_VERSION, Accept: 'application/vnd.github+json' },
+      }, (res) => {
+        if ([301, 302, 303, 307, 308].includes(res.statusCode)) {
+          res.resume();
+          if (++hops > maxHops) return reject(new Error('Слишком много редиректов'));
+          const loc = res.headers.location;
+          if (!loc) return reject(new Error('Редирект без Location'));
+          return go(new URL(loc, safe).toString());
+        }
+        const chunks = [];
+        let size = 0;
+        const limit = opts.maxBytes || 2 * 1024 * 1024;
+        res.on('data', (d) => {
+          size += d.length;
+          if (size > limit) { req.destroy(); reject(new Error('Ответ слишком большой')); return; }
+          chunks.push(d);
+        });
+        res.on('end', () => resolve({ statusCode: res.statusCode, body: Buffer.concat(chunks).toString('utf-8') }));
+      });
+      req.on('error', reject);
+      req.setTimeout(opts.timeout || 12000, () => { req.destroy(); reject(new Error('Таймаут соединения')); });
+    };
+    go(url);
+  });
+}
+
+async function zapretCheckUpdate() {
+  const resp = await httpsGet('https://api.github.com/repos/Flowseal/zapret-discord-youtube/releases/latest');
+  if (resp.statusCode !== 200) return { ok: false, msg: 'GitHub ответил: ' + resp.statusCode };
+
+  let rel;
+  try { rel = JSON.parse(resp.body); } catch (_) { return { ok: false, msg: 'Некорректный ответ GitHub' }; }
+
+  const tag = sec.sanitizeTag(rel.tag_name);
+  if (!tag) return { ok: false, msg: 'Подозрительный тег релиза' };
+
+  const assets = Array.isArray(rel.assets) ? rel.assets : [];
+  const expected = 'zapret-discord-youtube-' + tag + '.zip';
+  let asset = assets.find((a) => a && a.name === expected) || assets.find((a) => a && typeof a.name === 'string' && a.name.endsWith('.zip'));
+  let assetUrl = asset ? sec.sanitizeUpdateUrl(asset.browser_download_url) : null;
+  if (!assetUrl) assetUrl = sec.sanitizeUpdateUrl(rel.zipball_url);
+  if (!assetUrl) return { ok: false, msg: 'В релизе нет файла, который разрешено скачивать' };
+
+  const assetName = asset ? sec.sanitizeFileName(asset.name) || expected : expected;
+  const sizeBytes = asset && Number.isFinite(asset.size) ? asset.size : 0;
+
+  // URL и размер храним ТОЛЬКО в main: рендерер их подменить не может
+  pendingUpdate = { tag, assetUrl, assetName, sizeBytes, checkedAt: Date.now() };
+
+  const currentVersion = getZapretVersion();
+  return {
+    ok: true,
+    latestTag: tag,
+    assetName,
+    assetSizeMb: sizeBytes ? (sizeBytes / 1024 / 1024).toFixed(1) : null,
+    publishedAt: typeof rel.published_at === 'string' ? rel.published_at.slice(0, 10) : '—',
+    body: sec.sanitizeLabel(rel.body || '', 4000),
+    currentVersion,
+    needsUpdate: currentVersion !== tag,
+  };
+}
+
+function downloadFile(url, destPath, onProgress) {
+  return new Promise((resolve, reject) => {
+    const file = fs.createWriteStream(destPath);
+    let hops = 0;
+    let settled = false;
+    const fail = (e) => {
+      if (settled) return;
+      settled = true;
+      try { file.close(); } catch (_) {}
+      try { fs.unlinkSync(destPath); } catch (_) {}
+      reject(e);
+    };
+    const go = (current) => {
+      const safe = sec.sanitizeUpdateUrl(current);
+      if (!safe) return fail(new Error('Редирект на недоверенный хост'));
+      https.get(safe, { headers: { 'User-Agent': 'Artofix/' + APP_VERSION } }, (res) => {
+        if ([301, 302, 303, 307, 308].includes(res.statusCode)) {
+          res.resume();
+          if (++hops > 5) return fail(new Error('Слишком много редиректов'));
+          if (!res.headers.location) return fail(new Error('Редирект без Location'));
+          return go(new URL(res.headers.location, safe).toString());
+        }
+        if (res.statusCode !== 200) { res.resume(); return fail(new Error('HTTP ' + res.statusCode)); }
+
+        const total = parseInt(res.headers['content-length'] || '0', 10);
+        const MAX = 512 * 1024 * 1024;
+        let received = 0;
+        let lastSent = 0;
+        res.on('data', (chunk) => {
+          received += chunk.length;
+          if (received > MAX) { res.destroy(); return fail(new Error('Файл слишком большой')); }
+          file.write(chunk);
+          if (total > 0 && (received - lastSent) > 200000) {
+            lastSent = received;
+            if (onProgress) onProgress({
+              pct: received / total * 100,
+              downloaded: (received / 1024 / 1024).toFixed(1),
+              total: (total / 1024 / 1024).toFixed(1),
+            });
+          }
+        });
+        res.on('end', () => {
+          file.end(() => {
+            if (settled) return;
+            settled = true;
+            resolve(destPath);
+          });
+        });
+        res.on('error', fail);
+      }).on('error', fail);
+    };
+    file.on('error', fail);
+    go(url);
+  });
+}
+
+/** Копирование с проверкой: без симлинков, без выхода за пределы dstDir. */
+function copyDirRecursive(src, dst, state) {
+  state = state || { files: 0, bytes: 0 };
+  const MAX_FILES = 30000, MAX_BYTES = 1024 * 1024 * 1024;
+  fs.mkdirSync(dst, { recursive: true });
+  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    const from = path.join(src, entry.name);
+    const to = sec.safeJoinInside(dst, entry.name);
+    if (!to) throw new Error('Небезопасный путь в архиве: ' + entry.name);
+    const st = fs.lstatSync(from);
+    if (st.isSymbolicLink()) continue;                 // жёстко пропускаем ссылки
+    if (st.isDirectory()) { copyDirRecursive(from, to, state); continue; }
+    if (!st.isFile()) continue;                        // девайсы/сокеты не копируем
+    state.files++; state.bytes += st.size;
+    if (state.files > MAX_FILES || state.bytes > MAX_BYTES) throw new Error('Слишком большой архив');
+    fs.copyFileSync(from, to);
+  }
+  return state;
+}
+
+function runPowerShellFile(scriptPath, env) {
+  return new Promise((resolve) => {
+    const proc = spawn('powershell', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath], {
+      windowsHide: true,
+      env: Object.assign({}, process.env, env || {}),
+    });
+    proc.on('error', (e) => resolve({ ok: false, msg: e.message }));
+    proc.on('exit', (code) => resolve({ ok: code === 0, code }));
+  });
+}
+
+async function zapretDoUpdate({ tag, assetName }) {
+  if (!pendingUpdate) return { ok: false, msg: 'Сначала проверь обновление' };
+  const safeTag = sec.sanitizeTag(tag);
+  if (!safeTag || safeTag !== pendingUpdate.tag) return { ok: false, msg: 'Версия не совпадает с проверенной' };
+  if (assetName && sec.sanitizeFileName(assetName) !== pendingUpdate.assetName) {
+    return { ok: false, msg: 'Имя файла не совпадает с проверенным' };
+  }
+
+  const stamp = Date.now();
+  const tmpZip = path.join(os.tmpdir(), 'zapret_update_' + stamp + '.zip');
+  const tmpDir = path.join(os.tmpdir(), 'zapret_update_' + stamp);
+  const zapDir = zapretDir();
+
+  try {
+    send('zapret-dl-progress', { pct: 0, downloaded: '0', total: '?' });
+    await downloadFile(pendingUpdate.assetUrl, tmpZip, (p) => send('zapret-dl-progress', p));
+
+    fs.mkdirSync(tmpDir, { recursive: true });
+
+    // 1) Проверяем содержимое архива ДО распаковки (zip-slip / абсолютные пути)
+    const checkScript = path.join(os.tmpdir(), 'artofix_zipcheck_' + stamp + '.ps1');
+    fs.writeFileSync(checkScript, [
+      'Add-Type -AssemblyName System.IO.Compression.FileSystem',
+      '$z = [IO.Compression.ZipFile]::OpenRead($env:ARTOFIX_ZIP)',
+      '$bad = $z.Entries | Where-Object { $_.FullName -match "\\.\\." -or $_.FullName.StartsWith("/") -or $_.FullName -match "^[A-Za-z]:" }',
+      '$n = $z.Entries.Count',
+      '$z.Dispose()',
+      'if ($bad) { Write-Output "BAD"; exit 3 }',
+      'if ($n -gt 20000) { Write-Output "TOOMANY"; exit 4 }',
+      'Write-Output "OK"',
+    ].join('\n'), 'utf-8');
+    const check = await runPowerShellFile(checkScript, { ARTOFIX_ZIP: tmpZip });
+    try { fs.unlinkSync(checkScript); } catch (_) {}
+    if (!check.ok) throw new Error('Архив не прошёл проверку безопасности (код ' + check.code + ')');
+
+    // 2) Распаковка
+    const unzipScript = path.join(os.tmpdir(), 'artofix_unzip_' + stamp + '.ps1');
+    fs.writeFileSync(unzipScript, [
+      '$ErrorActionPreference = "Stop"',
+      'Expand-Archive -LiteralPath $env:ARTOFIX_ZIP -DestinationPath $env:ARTOFIX_DEST -Force',
+    ].join('\n'), 'utf-8');
+    const unzip = await runPowerShellFile(unzipScript, { ARTOFIX_ZIP: tmpZip, ARTOFIX_DEST: tmpDir });
+    try { fs.unlinkSync(unzipScript); } catch (_) {}
+    if (!unzip.ok) throw new Error('Распаковка не удалась (код ' + unzip.code + ')');
+
+    const entries = fs.readdirSync(tmpDir, { withFileTypes: true });
+    let srcDir = tmpDir;
+    if (entries.length === 1 && entries[0].isDirectory()) srcDir = path.join(tmpDir, entries[0].name);
+
+    // 3) Сохраняем пользовательские файлы
+    const SAVE_ROOT = ['config.bat', 'run_zapret.bat', 'blockcheck.bat'];
+    const SAVE_LISTS = ['ipset-exclude-user.txt', 'list-general-user.txt', 'list-exclude-user.txt'];
+    const savedRoot = {};
+    for (const f of SAVE_ROOT) {
+      const p = sec.safeJoinInside(zapDir, f);
+      if (p && fs.existsSync(p)) savedRoot[f] = fs.readFileSync(p);
+    }
+    const savedLists = {};
+    for (const f of SAVE_LISTS) {
+      const p = sec.safeJoinInside(zapDir, 'lists', f);
+      if (p && fs.existsSync(p)) savedLists[f] = fs.readFileSync(p);
+    }
+
+    // 4) Замена содержимого папки Zapret (только внутри корня приложения)
+    if (!sec.isInside(getAppRoot(), zapDir)) throw new Error('Недопустимый путь установки');
+    if (fs.existsSync(zapDir)) fs.rmSync(zapDir, { recursive: true, force: true });
+    copyDirRecursive(srcDir, zapDir);
+
+    for (const [f, buf] of Object.entries(savedRoot)) {
+      const p = sec.safeJoinInside(zapDir, f);
+      if (p) fs.writeFileSync(p, buf);
+    }
+    const listsDir = sec.safeJoinInside(zapDir, 'lists');
+    if (listsDir) {
+      fs.mkdirSync(listsDir, { recursive: true });
+      for (const [f, buf] of Object.entries(savedLists)) {
+        const p = sec.safeJoinInside(listsDir, f);
+        if (p) fs.writeFileSync(p, buf);
+      }
+    }
+    const versionFile = sec.safeJoinInside(zapDir, 'version.txt');
+    if (versionFile) fs.writeFileSync(versionFile, safeTag, 'utf-8');
+
+    pendingUpdate = null;
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, msg: e.message };
+  } finally {
+    try { fs.unlinkSync(tmpZip); } catch (_) {}
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+  }
+}
+
+// ═══════════════════════════════════════════
+//  HOSTS / ADBLOCK
+// ═══════════════════════════════════════════
+const HOSTS_PATH = IS_WIN ? 'C:\\Windows\\System32\\drivers\\etc\\hosts' : '/etc/hosts';
+const MARK_START = '# === ARTOFIX ADBLOCK START ===';
+const MARK_END = '# === ARTOFIX ADBLOCK END ===';
+const HOSTS_MAX_BYTES = 4 * 1024 * 1024;
+
+function hostsBuild(current, domains) {
+  let raw = String(current || '');
+  if (raw.length > HOSTS_MAX_BYTES) throw new Error('Файл hosts слишком большой');
+  raw = raw.replace(new RegExp('\\n?' + MARK_START.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '[\\s\\S]*?' + MARK_END.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\n?', 'g'), '');
+  raw = raw.replace(/\s+$/, '');
+  if (domains.length) {
+    raw += '\n' + MARK_START + '\n'
+        + domains.map((d) => '0.0.0.0 ' + d).join('\n')
+        + '\n' + MARK_END + '\n';
+  } else {
+    raw += '\n';
+  }
+  return raw;
+}
+
+function hostsRead() {
+  try {
+    const raw = fs.readFileSync(HOSTS_PATH, 'utf-8');
+    const m = raw.match(new RegExp(MARK_START.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '([\\s\\S]*?)' + MARK_END.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    if (!m) return { ok: true, domains: [] };
+    const domains = m[1].split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l.startsWith('0.0.0.0'))
+      .map((l) => sec.sanitizeDomain(l.slice(7).trim()))
+      .filter(Boolean);
+    return { ok: true, domains };
+  } catch (e) {
+    return { ok: false, msg: e.message, needAdmin: /EPERM|EACCES/.test(String(e.code)) };
+  }
+}
+
+function hostsWrite(domains) {
+  if (!IS_WIN) return { ok: false, msg: 'Правка hosts доступна только в Windows' };
+  const clean = sec.sanitizeDomainList(domains);
+  if (!clean.ok) return { ok: false, msg: clean.msg };
+  try {
+    const current = fs.existsSync(HOSTS_PATH) ? fs.readFileSync(HOSTS_PATH, 'utf-8') : '';
+    const next = hostsBuild(current, clean.domains);
+    sec.writeFileAtomic(HOSTS_PATH, next);
+    return { ok: true, count: clean.domains.length, rejected: clean.rejected };
+  } catch (e) {
+    if (e.code === 'EACCES' || e.code === 'EPERM') return { ok: false, needAdmin: true, msg: 'Нужны права администратора' };
+    return { ok: false, msg: e.message };
+  }
+}
+
+/** Запись hosts через UAC: elevation запускает PS-скрипт, внутри — только литеральные пути. */
+function hostsWriteAdmin(domains) {
+  if (!IS_WIN) return { ok: false, msg: 'Правка hosts доступна только в Windows' };
+  const clean = sec.sanitizeDomainList(domains);
+  if (!clean.ok) return { ok: false, msg: clean.msg };
+
+  let current = '';
+  try { current = fs.existsSync(HOSTS_PATH) ? fs.readFileSync(HOSTS_PATH, 'utf-8') : ''; } catch (_) {}
+  let next;
+  try { next = hostsBuild(current, clean.domains); } catch (e) { return { ok: false, msg: e.message }; }
+
+  const tmpHosts = path.join(app.getPath('temp'), 'artofix_hosts_patch.txt');
+  const tmpCopy = path.join(app.getPath('temp'), 'artofix_hosts_copy.txt');
+  const psScriptPath = path.join(app.getPath('temp'), 'artofix_hosts_patch.ps1');
+
+  try {
+    fs.writeFileSync(tmpHosts, next, 'utf-8');
+    fs.writeFileSync(psScriptPath, [
+      '$ErrorActionPreference = "Stop"',
+      'Copy-Item -LiteralPath $env:ARTOFIX_SRC -Destination $env:ARTOFIX_DST -Force',
+      'ipconfig /flushdns | Out-Null',
+    ].join('\n'), 'utf-8');
+    // запускаем от имени администратора ТОТ ЖЕ скрипт (без интерполяции значений)
+    const elevate = [
+      '$ErrorActionPreference = "Stop"',
+      '$p = Start-Process powershell -Verb RunAs -Wait -PassThru -ArgumentList ' +
+        "@('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File', $env:ARTOFIX_PS)",
+      'exit $p.ExitCode',
+    ].join('\n');
+    fs.writeFileSync(tmpCopy, elevate, 'utf-8');
+
+    return new Promise((resolve) => {
+      const proc = spawn('powershell', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', tmpCopy], {
+        windowsHide: true,
+        env: Object.assign({}, process.env, {
+          ARTOFIX_SRC: tmpHosts,
+          ARTOFIX_DST: HOSTS_PATH,
+          ARTOFIX_PS: psScriptPath,
+        }),
+      });
+      const done = (code, msg) => {
+        try { fs.unlinkSync(tmpHosts); } catch (_) {}
+        try { fs.unlinkSync(psScriptPath); } catch (_) {}
+        try { fs.unlinkSync(tmpCopy); } catch (_) {}
+        if (code === 0) resolve({ ok: true, count: clean.domains.length });
+        else resolve({ ok: false, msg: msg || 'Запись hosts отклонена (UAC или отказ пользователя)' });
+      };
+      proc.on('error', (e) => done(-1, e.message));
+      proc.on('exit', (code) => done(code));
+    });
+  } catch (e) {
+    return { ok: false, msg: e.message };
+  }
+}
+
+// ═══════════════════════════════════════════
+//  uBLOCK
+// ═══════════════════════════════════════════
+const UBLOCK_EXT_ID = 'cjpalhdlnbpafiamejdnhcphjbkeiagm';
+
+function ublockSource() {
+  const src = resPath('assets', 'ublock');
+  const manifest = path.join(src, 'manifest.json');
+  return { src, manifest, exists: fs.existsSync(src), hasManifest: fs.existsSync(manifest) };
+}
+
+function ublockCheck() {
+  const { exists, hasManifest, manifest } = ublockSource();
+  let version = null;
+  if (hasManifest) {
+    const m = sec.readJsonSafe(manifest, 256 * 1024);
+    if (m && typeof m.version === 'string') version = sec.sanitizeLabel(m.version, 24);
+  }
+  return { exists, hasManifest, version };
+}
+
+function ublockInstall(profile) {
+  const dir = profileDir(profile);
+  if (!dir) return { ok: false, msg: 'Недопустимое имя профиля' };
+  const { src, exists, hasManifest } = ublockSource();
+  if (!exists) return { ok: false, msg: 'Папка assets\\ublock\\ не найдена' };
+  if (!hasManifest) return { ok: false, msg: 'В assets\\ublock\\ нет manifest.json' };
+
+  const version = ublockCheck().version || '1.0.0';
+  const base = sec.safeJoinInside(dir, 'Default', 'Extensions', UBLOCK_EXT_ID, version + '_0');
+  if (!base) return { ok: false, msg: 'Небезопасный путь установки' };
+
+  try {
+    copyDirRecursive(src, base);
+    const prefsDir = sec.safeJoinInside(dir, 'Default');
+    if (!prefsDir) return { ok: false, msg: 'Небезопасный путь профиля' };
+    const prefsPath = path.join(prefsDir, 'Preferences');
+    if (!fs.existsSync(prefsPath)) {
+      fs.mkdirSync(prefsDir, { recursive: true });
+      const prefs = { extensions: { settings: { [UBLOCK_EXT_ID]: { location: 4, path: base, state: 1 } } } };
+      sec.writeFileAtomic(prefsPath, JSON.stringify(prefs, null, 2));
+    }
+    return { ok: true, version, dst: base };
+  } catch (e) {
+    return { ok: false, msg: e.message };
+  }
+}
+
+// ═══════════════════════════════════════════
+//  ДИАГНОСТИКА КОМПОНЕНТОВ
+// ═══════════════════════════════════════════
+const DIAG_COMPONENTS = {
+  python: { args: ['--version'] },
+  pip: { args: ['-m', 'pip', '--version'] },
+  selenium: { pkg: 'selenium', module: 'selenium' },
+  stealth: { pkg: 'selenium-stealth', module: 'selenium_stealth' },
+  wdm: { pkg: 'webdriver-manager', module: 'webdriver_manager' },
+  chrome: {},
+  chromedrv: { driver: 'chromedriver', module: 'webdriver_manager.chrome', cls: 'ChromeDriverManager' },
+  edge: {},
+  edgedrv: { driver: 'msedgedriver', module: 'webdriver_manager.microsoft', cls: 'EdgeChromiumDriverManager' },
+};
+
+function runPython(args, opts) {
+  opts = opts || {};
+  const python = findPython();
+  return new Promise((resolve) => {
+    execFile(python, args, { windowsHide: true, timeout: opts.timeout || 60000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
+      if (opts.onData) {
+        if (stdout) opts.onData(stdout, 'info');
+        if (stderr) opts.onData(stderr, 'warn');
+      }
+      resolve({ ok: !err, code: err ? err.code : 0, stdout: (stdout || '').trim(), stderr: (stderr || '').trim() });
+    });
+  });
+}
+
+function majorOf(v) { return v ? parseInt(String(v).split('.')[0], 10) : 0; }
+
+function chromeExePaths() {
+  return [
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+  ];
+}
+function edgeExePaths() {
+  return [
+    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+    'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+  ];
+}
+
+async function diagCheck({ component }) {
+  const spec = DIAG_COMPONENTS[component];
+  if (!spec) return { status: 'err', note: 'unknown component' };
+
+  switch (component) {
+    case 'python': {
+      const r = await runPython(['--version']);
+      const ver = (r.stdout || r.stderr).match(/Python ([\d.]+)/i);
+      return ver ? { status: 'ok', version: ver[1] } : { status: 'err', note: 'не найден' };
+    }
+    case 'pip': {
+      const r = await runPython(['-m', 'pip', '--version']);
+      const ver = r.stdout.match(/pip ([\d.]+)/i);
+      return ver ? { status: 'ok', version: ver[1] } : { status: 'err', note: 'не установлен' };
+    }
+    case 'selenium':
+    case 'stealth':
+    case 'wdm': {
+      // имя модуля берём из таблицы, а не из IPC — интерполяции нет
+      const code = 'import importlib.metadata as m; print(m.version(' + JSON.stringify(spec.pkg) + '))';
+      const r = await runPython(['-c', code]);
+      if (r.ok && r.stdout) return { status: 'ok', version: r.stdout };
+      return { status: 'err', note: 'не установлен' };
+    }
+    case 'chrome': {
+      const ver = await readBrowserVersion('chrome');
+      if (ver) return { status: 'ok', version: ver };
+      for (const p of chromeExePaths()) if (fs.existsSync(p)) return { status: 'ok', version: 'установлен', note: p };
+      return { status: 'err', note: 'не найден' };
+    }
+    case 'edge': {
+      const ver = await readBrowserVersion('msedge');
+      if (ver) return { status: 'ok', version: ver };
+      for (const p of edgeExePaths()) if (fs.existsSync(p)) return { status: 'ok', version: 'установлен', note: p };
+      return { status: 'err', note: 'не найден' };
+    }
+    case 'chromedrv':
+    case 'edgedrv': {
+      const browserVer = await readBrowserVersion(component === 'edgedrv' ? 'msedge' : 'chrome');
+      const bMajor = majorOf(browserVer);
+      const code = 'from ' + spec.module + ' import ' + spec.cls + ' as M; import os; os.environ["WDM_LOG"]="0"; print(M().install())';
+      const r = await runPython(['-c', code], { timeout: 120000 });
+      if (r.ok && r.stdout && !/Traceback|Error/.test(r.stdout)) {
+        const m = r.stdout.match(/[\\/]([\d.]+)[\\/]/);
+        const drvVer = m ? m[1] : 'ok';
+        const dMajor = majorOf(drvVer);
+        if (bMajor && dMajor && Math.abs(bMajor - dMajor) > 3) {
+          return { status: 'warn', version: drvVer, note: 'Браузер ' + bMajor + ' vs драйвер ' + dMajor };
+        }
+        return { status: 'ok', version: drvVer };
+      }
+      return { status: 'err', note: 'не скачан — нажми «Установить»' };
+    }
+    default:
+      return { status: 'err', note: 'unknown component' };
+  }
+}
+
+const PIP_PACKAGES = { pip: 'pip', selenium: 'selenium', stealth: 'selenium-stealth', wdm: 'webdriver-manager' };
+
+async function diagInstall(event, { components }) {
+  const list = Array.isArray(components) ? components.filter((c) => Object.prototype.hasOwnProperty.call(DIAG_COMPONENTS, c)) : [];
+  if (!list.length) return { ok: false, msg: 'Нет компонентов для установки' };
+
+  const log = (msg, type) => pushDiag('diag-log', { msg: sec.sanitizeLabel(msg, 500), type: type || 'info' });
+  const prog = (pct, label) => pushDiag('diag-progress', { pct, label: sec.sanitizeLabel(label, 120) });
+
+  const total = list.length;
+  let done = 0;
+
+  for (const cid of list) {
+    done++;
+    const pct = Math.round((done / (total + 1)) * 90);
+    try {
+      if (PIP_PACKAGES[cid]) {
+        const pkgName = PIP_PACKAGES[cid];
+        prog(pct, 'Установка ' + pkgName + '...');
+        log('► pip install --upgrade ' + pkgName, 'step');
+        const r = await runPython(['-m', 'pip', 'install', '--upgrade', pkgName], { timeout: 180000, onData: (t, k) => log(t, k) });
+        log(r.ok ? '✓ ' + pkgName + ' готов' : '✗ ' + pkgName + ': ' + (r.stderr || 'ошибка'), r.ok ? 'ok' : 'err');
+      } else if (cid === 'chromedrv' || cid === 'edgedrv') {
+        const spec = DIAG_COMPONENTS[cid];
+        prog(pct, cid === 'chromedrv' ? 'ChromeDriver...' : 'EdgeDriver...');
+        const browserVer = await readBrowserVersion(cid === 'chromedrv' ? 'chrome' : 'msedge');
+        log(browserVer ? '✓ Версия браузера: ' + browserVer : '⚠ Версия браузера не определена — возьмём последнюю', browserVer ? 'ok' : 'warn');
+
+        // чистим кэш старых драйверов
+        const cacheDir = path.join(process.env.USERPROFILE || process.env.HOME || '', '.wdm', 'drivers', spec.driver);
+        if (browserVer && fs.existsSync(cacheDir)) {
+          try {
+            const keep = String(majorOf(browserVer));
+            let removed = 0;
+            for (const entry of fs.readdirSync(cacheDir)) {
+              if (!entry.startsWith(keep)) { fs.rmSync(path.join(cacheDir, entry), { recursive: true, force: true }); removed++; }
+            }
+            if (removed) log('✓ Удалено старых кэшей: ' + removed, 'ok');
+          } catch (e) { log('⚠ ' + e.message, 'warn'); }
+        }
+
+        const code = [
+          'import os, sys',
+          'os.environ["WDM_LOG"] = "0"',
+          'from ' + spec.module + ' import ' + spec.cls + ' as M',
+          'ver = ' + (browserVer ? JSON.stringify(browserVer) : 'None'),
+          'try:',
+          '    print("OK", (M(version=ver) if ver else M()).install())',
+          'except TypeError:',
+          '    print("OK", M().install())',
+          'except Exception as e:',
+          '    print("ERR", e); sys.exit(1)',
+        ].join('\n');
+        const tmpScript = path.join(os.tmpdir(), 'artofix_drv_' + cid + '.py');
+        fs.writeFileSync(tmpScript, code, 'utf-8');
+        const r = await runPython([tmpScript], { timeout: 240000, onData: (t, k) => log(t, k) });
+        try { fs.unlinkSync(tmpScript); } catch (_) {}
+
+        const out = r.stdout || '';
+        if (r.ok && out.includes('OK')) {
+          log('✓ Драйвер установлен: ' + out.replace('OK', '').trim(), 'ok');
+          const drvPath = out.replace('OK', '').trim();
+          if (/\.exe$/i.test(drvPath) && fs.existsSync(drvPath)) {
+            const cfg = readConfig();
+            cfg[cid === 'chromedrv' ? 'chromedriver_path' : 'edgedriver_path'] = drvPath;
+            writeConfig(cfg);
+            log('✓ Путь сохранён в config.json', 'ok');
+          }
+        } else {
+          log('✗ Драйвер: ' + (r.stderr || out || 'неизвестная ошибка'), 'err');
+        }
+      } else {
+        log('⚠ ' + cid + ' ставится вручную', 'warn');
+      }
+    } catch (e) {
+      log('✗ ' + cid + ': ' + e.message, 'err');
+    }
+  }
+
+  prog(100, 'Готово!');
+  return { ok: true };
+}
+
+// ═══════════════════════════════════════════
+//  СЕТЕВЫЕ ПРОВЕРКИ (ЧЕБУРНЕТ) — через net.Socket, без exec
+// ═══════════════════════════════════════════
+function cbnPing({ host, port }) {
+  const safeHost = sec.sanitizeHost(host);
+  const safePort = sec.sanitizePort(port, 443);
+  if (!safeHost) return Promise.resolve({ ok: false, ping: 0, err: 'BAD_HOST' });
+
+  return new Promise((resolve) => {
+    const t0 = Date.now();
+    let settled = false;
+    const done = (ok, err) => {
+      if (settled) return;
+      settled = true;
+      resolve({ ok, ping: Date.now() - t0, err: err || null });
+    };
+    const sock = new net.Socket();
+    sock.setTimeout(5000);
+    sock.connect(safePort, safeHost, () => { sock.destroy(); done(true); });
+    sock.on('error', (e) => done(false, e.code || e.message));
+    sock.on('timeout', () => { sock.destroy(); done(false, 'TIMEOUT'); });
+  });
+}
+
+function cbnSetDns({ dns1, dns2 }) {
+  const d1 = sec.sanitizeIpv4(dns1);
+  const d2 = sec.sanitizeIpv4(dns2);
+  if (!d1 || !d2) return Promise.resolve({ ok: false, msg: 'Нужны корректные IPv4-адреса' });
+  if (!IS_WIN) return Promise.resolve({ ok: false, msg: 'Смена DNS доступна только в Windows' });
+
+  // Значения уходят через переменные окружения: интерполяции в скрипт нет вообще.
+  const script = [
+    "$ErrorActionPreference = 'SilentlyContinue'",
+    "$adapters = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' } | Select-Object -ExpandProperty InterfaceAlias",
+    'foreach ($a in $adapters) {',
+    '  try { Set-DnsClientServerAddress -InterfaceAlias $a -ServerAddresses ($env:ARTOFIX_DNS1, $env:ARTOFIX_DNS2) } catch {}',
+    '}',
+    "Write-Output 'done'",
+  ].join('\n');
+
+  return runPowerShellInline(script, { ARTOFIX_DNS1: d1, ARTOFIX_DNS2: d2 });
+}
+
+function cbnResetDns() {
+  if (!IS_WIN) return Promise.resolve({ ok: false, msg: 'Сброс DNS доступен только в Windows' });
+  const script = [
+    "$ErrorActionPreference = 'SilentlyContinue'",
+    "$adapters = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' } | Select-Object -ExpandProperty InterfaceAlias",
+    'foreach ($a in $adapters) {',
+    '  try { Set-DnsClientServerAddress -InterfaceAlias $a -ResetServerAddresses } catch {}',
+    '}',
+    "Write-Output 'done'",
+  ].join('\n');
+  return runPowerShellInline(script, {});
+}
+
+function runPowerShellInline(script, env) {
+  return new Promise((resolve) => {
+    const proc = spawn('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], {
+      windowsHide: true,
+      env: Object.assign({}, process.env, env || {}),
+    });
+    let out = '';
+    proc.stdout.on('data', (d) => { out += d.toString(); });
+    proc.on('error', (e) => resolve({ ok: false, msg: e.message }));
+    proc.on('exit', (code) => resolve({ ok: code === 0, msg: sec.sanitizeLabel(out.trim(), 300) }));
+  });
+}
+
+// ═══════════════════════════════════════════
+//  IPC: ВАЛИДАЦИЯ ИСТОЧНИКА + РЕГИСТРАЦИЯ КАНАЛОВ
+// ═══════════════════════════════════════════
+/** Какому окну разрешён вызов: 'main' (index.html), 'setup' (setup.html), 'any'. */
+function senderKind(event) {
+  const frame = event.senderFrame;
+  if (!frame || !frame.url) return null;
+  let p;
+  try { p = fileURLToPath(frame.url); } catch (_) { return null; }
+  if (!sec.isInside(__dirname, p) && !sec.isInside(getAppRoot(), p)) return null;
+  const base = path.basename(p);
+  if (base === 'index.html') return 'main';
+  if (base === 'setup.html') return 'setup';
+  return null;
+}
+
+function handle(channel, fn, allowed) {
+  allowed = allowed || 'main';
+  ipcMain.handle(channel, async (event, ...args) => {
+    const kind = senderKind(event);
+    if (!kind || (allowed !== 'any' && kind !== allowed)) {
+      console.error('[ipc] отклонён вызов ' + channel + ' от ' + (kind || 'неизвестного источника'));
+      return { ok: false, msg: 'Источник не разрешён' };
+    }
+    try {
+      return await fn(event, ...args);
+    } catch (e) {
+      console.error('[ipc] ' + channel + ': ' + (e && e.message));
+      return { ok: false, msg: (e && e.message) || 'Внутренняя ошибка' };
+    }
+  });
+}
+
+function handleSend(channel, fn, allowed) {
+  allowed = allowed || 'main';
+  ipcMain.on(channel, (event, ...args) => {
+    const kind = senderKind(event);
+    if (!kind || (allowed !== 'any' && kind !== allowed)) return;
+    try { fn(event, ...args); } catch (e) { console.error('[ipc] ' + channel + ': ' + (e && e.message)); }
+  });
+}
+
+// ── окно/приложение ──
+handleSend('api:win-act', (_e, act) => {
+  const map = {
+    minimize: () => win && win.minimize(),
+    maximize: () => win && (win.isMaximized() ? win.unmaximize() : win.maximize()),
+    hide: () => win && win.hide(),
+    restart: () => { app.relaunch(); app.exit(0); },
+  };
+  if (map[act]) map[act]();
+}, 'any');
+handleSend('api:toggle-maximize', () => { if (win) (win.isMaximized() ? win.unmaximize() : win.maximize()); });
+handleSend('api:refresh-tray', () => { if (tray) tray.setContextMenu(buildTrayMenu()); });
+
+handle('api:get-icon-url', () => {
+  for (const p of [resPath('icon.png'), path.join(__dirname, 'icon.png')]) {
+    try {
+      if (fs.existsSync(p) && fs.statSync(p).size < 8 * 1024 * 1024) {
+        return 'data:image/png;base64,' + fs.readFileSync(p).toString('base64');
+      }
+    } catch (_) {}
+  }
+  return null;
+});
+
+handle('api:open-folder', (_e, which) => {
+  const w = sec.sanitizeWhich(which);
+  if (!w) return { ok: false, msg: 'Папка не разрешена' };
+  const target = w === 'profiles' ? dataPath(w) : resPath(w);
+  const insideApp = sec.isInside(getAppRoot(), target) || sec.isInside(__dirname, target);
+  if (!insideApp) return { ok: false, msg: 'Путь вне каталога приложения' };
+  fs.mkdirSync(target, { recursive: true });
+  return shell.openPath(target).then((err) => (err ? { ok: false, msg: err } : { ok: true }));
+});
+
+handle('api:open-external', (_e, url) => {
+  const safe = sec.sanitizeExternalUrl(url);
+  if (!safe) return { ok: false, msg: 'Ссылка заблокирована: разрешены только http, https, steam, tg, discord' };
+  if (rateLimited('open-ext', 800)) return { ok: false, msg: 'Слишком часто' };
+  return shell.openExternal(safe).then(() => ({ ok: true })).catch((e) => ({ ok: false, msg: e.message }));
+});
+
+handle('api:zapret-service', () => {
+  const dir = zapretDir();
+  const bat = sec.safeJoinInside(dir, 'service.bat');
+  if (!bat || !fs.existsSync(bat)) {
+    if (win) dialog.showMessageBox(win, { type: 'warning', message: 'service.bat не найден в папке Zapret:\n' + dir });
+    return { ok: false, msg: 'service.bat не найден' };
+  }
+  try {
+    spawn('cmd.exe', ['/c', bat], { cwd: dir, windowsHide: false, detached: true, stdio: 'ignore' }).unref();
+    return { ok: true };
+  } catch (e) { return { ok: false, msg: e.message }; }
+});
+
+// ── процессы ──
+handle('api:close-browsers', () => {
+  const images = ['chrome.exe', 'msedge.exe', 'firefox.exe', 'browser.exe'];
+  if (!IS_WIN) return { ok: false, msg: 'Доступно только в Windows' };
+  if (rateLimited('close-browsers', 3000)) return { ok: false, msg: 'Слишком часто' };
+  for (const image of images) execFile('taskkill', ['/f', '/im', image, '/t'], { windowsHide: true }, () => {});
+  return { ok: true };
+});
+
+handle('api:kill-winws', () => {
+  if (!IS_WIN) return { ok: false, msg: 'Доступно только в Windows' };
+  if (rateLimited('kill-winws', 3000)) return { ok: false, msg: 'Слишком часто' };
+  for (const image of WINWS_IMAGES) execFile('taskkill', ['/f', '/im', image, '/t'], { windowsHide: true }, () => {});
+  zapretProcess = null;
+  return new Promise((resolve) => {
+    setTimeout(async () => resolve({ ok: await isRunningWinws() === false }), 900);
+  });
+});
+
+handle('api:launch-browser', (_e, payload) => {
+  const o = payload && typeof payload === 'object' ? payload : {};
+  return launchBrowser({ url: o.url, profile: o.profile, browser: o.browser });
+});
+
+// ── Zapret ──
+handle('api:zapret-start', () => zapretStart());
+handle('api:zapret-stop', () => zapretStop());
+handle('api:zapret-version', () => ({ version: getZapretVersion(), path: zapretDir() }));
+handle('api:zapret-check-update', async () => {
+  if (rateLimited('check-update', 4000)) return { ok: false, msg: 'Подожди пару секунд' };
+  return zapretCheckUpdate();
+});
+handle('api:zapret-do-update', (_e, payload) => {
+  const o = payload && typeof payload === 'object' ? payload : {};
+  return zapretDoUpdate({ tag: o.tag, assetName: o.assetName });
+});
+
+// ── профили ──
+handle('api:list-profiles', () => {
+  const root = profilesRoot();
+  try {
+    return fs.readdirSync(root, { withFileTypes: true })
+      .filter((d) => d.isDirectory() && !d.isSymbolicLink())
+      .map((d) => d.name)
+      .filter((n) => sec.sanitizeProfileName(n))
+      .sort((a, b) => a.localeCompare(b));
+  } catch (_) { return []; }
+});
+
+handle('api:create-profile', (_e, name) => {
+  const dir = profileDir(name);
+  if (!dir) return { ok: false, msg: 'Только латиница, цифры, _ и - (до 40 символов)' };
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const meta = path.join(dir, '_artofix_meta.json');
+    if (!fs.existsSync(meta)) {
+      sec.writeFileAtomic(meta, JSON.stringify({ name: sec.sanitizeProfileName(name), created: new Date().toISOString() }, null, 2));
+    }
+    return { ok: true, name: sec.sanitizeProfileName(name) };
+  } catch (e) { return { ok: false, msg: e.message }; }
+});
+
+handle('api:delete-profile', (_e, name) => {
+  const safe = sec.sanitizeProfileName(name);
+  const dir = profileDir(name);
+  if (!safe || !dir) return { ok: false, msg: 'Недопустимое имя профиля' };
+  if (path.resolve(dir) === path.resolve(profilesRoot())) return { ok: false, msg: 'Нельзя удалить корень профилей' };
+  if (runningProfiles.has(safe)) return { ok: false, msg: 'Профиль сейчас запущен — закрой браузер' };
+  if (rateLimited('delete-profile', 1500)) return { ok: false, msg: 'Слишком часто' };
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3 }); return { ok: true }; }
+  catch (e) { return { ok: false, msg: e.message }; }
+});
+
+handle('api:read-profile-meta', (_e, name) => {
+  const meta = readProfileMeta(name);
+  if (meta && meta.proxy && typeof meta.proxy === 'object') {
+    delete meta.proxy.password;                 // пароль в рендерер не отдаём
+  }
+  return meta || {};
+});
+
+handle('api:write-profile-meta', (_e, name, data) => {
+  const dir = profileDir(name);
+  if (!dir || !data || typeof data !== 'object') return { ok: false, msg: 'Недопустимые данные' };
+  try {
+    const file = profileMetaPath(dir);
+    const existing = sec.readJsonSafe(file, 64 * 1024) || {};
+    const merged = Object.assign({}, existing, {
+      browser: sec.sanitizeBrowser(data.browser) || existing.browser || 'chrome',
+      note: sec.sanitizeLabel(data.note || existing.note || '', 128),
+      created: typeof existing.created === 'string' ? existing.created : new Date().toISOString(),
+    });
+    if (data.proxy && typeof data.proxy === 'object') {
+      const server = typeof data.proxy.server === 'string' ? data.proxy.server : '';
+      if (/^(socks5|socks4|http|https):\/\/[A-Za-z0-9._:\-]{1,120}$/.test(server)) {
+        merged.proxy = {
+          server,
+          username: sec.sanitizeLabel(data.proxy.username || '', 64),
+          password: typeof data.proxy.password === 'string' ? data.proxy.password.slice(0, 128) : '',
+        };
+      } else if (data.proxy === null) {
+        delete merged.proxy;
+      }
+    }
+    fs.mkdirSync(dir, { recursive: true });
+    sec.writeFileAtomic(file, JSON.stringify(merged, null, 2));
+    return { ok: true };
+  } catch (e) { return { ok: false, msg: e.message }; }
+});
+
+// ── конфиг/настройки/бинды ──
+handle('api:read-config', () => {
+  const cfg = readConfig();
+  if (cfg.identity) delete cfg.identity;      // отпечаток рендереру не нужен
+  return cfg;
+});
+handle('api:write-config', (_e, data) => {
+  try {
+    const current = readConfig();
+    const next = Object.assign({}, sanitizeConfig(data));
+    next.identity = current.identity || null;  // отпечаток правит только main
+    writeConfig(next);
+    return { ok: true };
+  } catch (e) { return { ok: false, msg: e.message }; }
+});
+handle('api:read-settings', () => readSettings());
+handle('api:write-settings', (_e, data) => {
+  try { sec.writeFileAtomic(dataPath('artofix_settings.json'), JSON.stringify(sanitizeSettings(data), null, 2)); return { ok: true }; }
+  catch (e) { return { ok: false, msg: e.message }; }
+});
+handle('api:read-binds', () => readBinds());
+handle('api:write-binds', (_e, data) => {
+  try {
+    sec.writeFileAtomic(dataPath('artofix_binds.json'), JSON.stringify(sanitizeBinds(data), null, 2));
+    if (tray) tray.setContextMenu(buildTrayMenu());
+    return { ok: true };
+  } catch (e) { return { ok: false, msg: e.message }; }
+});
+
+// ── hosts / ublock ──
+handle('api:hosts-read', () => hostsRead());
+handle('api:hosts-write', (_e, domains) => hostsWrite(domains));
+handle('api:hosts-write-admin', (_e, domains) => hostsWriteAdmin(domains));
+handle('api:ublock-check', () => ublockCheck());
+handle('api:ublock-install', (_e, profile) => ublockInstall(profile));
+
+// ── диагностика ──
+handle('api:diag-check', (_e, payload) => diagCheck(payload && typeof payload === 'object' ? payload : {}));
+handle('api:diag-install', (event, payload) => diagInstall(event, payload && typeof payload === 'object' ? payload : { components: [] }));
+
+// ── сеть ──
+handle('api:cbn-ping', (_e, payload) => cbnPing(payload && typeof payload === 'object' ? payload : {}));
+handle('api:cbn-set-dns', (_e, payload) => cbnSetDns(payload && typeof payload === 'object' ? payload : {}));
+handle('api:cbn-reset-dns', () => cbnResetDns());
+
+// ── логи ──
+handle('api:read-logs', () => launchLogs.slice());
+handle('api:clear-logs', () => { launchLogs = []; diagBuffer = { log: [], progress: null }; return { ok: true }; });
+handle('api:copy-logs', () => {
+  clipboard.writeText(launchLogs.map((l) => new Date(l.ts).toISOString() + ' [' + l.browser + '/' + l.profile + '] ' + l.msg).join('\n'));
+  return { ok: true, count: launchLogs.length };
+});
+
+// ── отпечаток ──
+handle('api:preview-profile', async (_e, payload) => {
+  const o = payload && typeof payload === 'object' ? payload : {};
+  const profile = o.profile ? sec.sanitizeProfileName(o.profile) : null;
+  const cfg = readConfig();
+  const settings = readSettings();
+  const meta = profile ? readProfileMeta(profile) : {};
+  const browser = (meta && sec.sanitizeBrowser(meta.browser)) || 'chrome';
+  const installId = getInstallId();
+  const proxy = profileProxy(meta);
+  const overrides = {};
+  if (cfg.user_agent) overrides.user_agent = cfg.user_agent;
+  if (cfg.spoof && cfg.spoof.timezone) overrides.timezone = cfg.spoof.timezone;
+  if (cfg.spoof && cfg.spoof.lang) overrides.lang = cfg.spoof.lang;
+  if (proxy) { overrides.proxy_server = proxy.server; overrides.proxy_username = proxy.username; }
+
+  const name = profile || 'preview';
+  const identity = fpEngine.generateIdentity(name, installId, {
+    browser,
+    browserVersion: browser === 'msedge' ? await readBrowserVersion('msedge') : await readBrowserVersion('chrome'),
+    overrides,
+    identitySalt: typeof meta.fingerprint_refresh === 'string' ? meta.fingerprint_refresh : null,
+  });
+  const leak = fpEngine.validateIdentity(identity);
+
+  return {
+    ok: true,
+    profile: profile,
+    profileExists: profile ? fs.existsSync(profileDir(profile)) : false,
+    consistency: profile ? 'profile' : 'session',
+    fingerprint: {
+      webgl: identity.webgl ? identity.webgl.renderer : 'не меняется',
+      platform: identity.ua_platform,
+      canvas: 'noise ' + identity.canvas_noise + ' (стабилен для профиля)',
+      audio: 'сдвиг ' + identity.audio_freq_shift,
+      tz: identity.timezone,
+      lang: identity.languages.join(','),
+      ua: identity.user_agent,
+      screen: identity.resolution + ' @' + identity.screen.device_pixel_ratio + 'x',
+      hw: identity.hardware.cores + ' ядер / ' + identity.hardware.memory + ' ГБ',
+      fonts: identity.fonts.length + ' системных шрифтов',
+      media: 'H.264/Vorbis/Opus — согласованы',
+      rtc: identity.webrtc.mode === 'public_only' ? 'локальные IP скрыты' : 'по умолчанию',
+    },
+    leakCheck: leak.ok,
+    leakProblems: leak.problems,
+    webglRenderer: identity.webgl ? identity.webgl.renderer : null,
+    browser: browser,
+  };
+});
+
+handle('api:reroll-profile', (_e, payload) => {
+  const o = payload && typeof payload === 'object' ? payload : {};
+  const safe = sec.sanitizeProfileName(o.profile);
+  const dir = profileDir(o.profile);
+  if (!safe || !dir) return { ok: false, msg: 'Недопустимое имя профиля' };
+  if (!fs.existsSync(dir)) return { ok: false, msg: 'Профиль не найден' };
+  try {
+    // новый seed: уникальный «refresh», сохраняемый в meta — отпечаток сменится,
+    // но останется стабильным до следующей смены личности
+    const file = profileMetaPath(dir);
+    const meta = sec.readJsonSafe(file, 64 * 1024) || {};
+    Object.assign(meta, {
+      browser: sec.sanitizeBrowser(meta.browser) || 'chrome',
+      fingerprint_refresh: crypto.randomBytes(8).toString('hex'),
+      fingerprint_rotated_at: new Date().toISOString(),
+    });
+    sec.writeFileAtomic(file, JSON.stringify(meta, null, 2));
+    return { ok: true };
+  } catch (e) { return { ok: false, msg: e.message }; }
+});
+
+// ── ошибки рендерера ──
+handleSend('api:report-error', (_e, payload) => {
+  const o = payload && typeof payload === 'object' ? payload : {};
+  console.error('[renderer-report] ' + sec.sanitizeLabel(o.kind, 32) + ': ' + sec.sanitizeLabel(o.message, 512));
+});
+
+// ── установщик ──
+function markSetupDone() {
+  try { sec.writeFileAtomic(dataPath('.artofix_setup_done'), new Date().toISOString()); } catch (_) {}
+}
+function needsSetup() { return !fs.existsSync(dataPath('.artofix_setup_done')); }
+
+handleSend('api:setup-skip', () => { markSetupDone(); }, 'setup');
+handleSend('api:setup-open-main', () => {
+  if (setupWin && !setupWin.isDestroyed()) setupWin.close();
+  if (!win) { createWindow(); createTray(); checkAdmin(); }
+  else { win.show(); win.focus(); }
+}, 'setup');
+
+function runSetupCmd(args, opts) {
+  opts = opts || {};
+  return new Promise((resolve) => {
+    const proc = execFile(args[0], args.slice(1), { windowsHide: true, timeout: opts.timeout || 120000 }, (err, stdout, stderr) => {
+      resolve({ ok: !err, code: err ? err.code : 0, stdout: stdout || '', stderr: stderr || '' });
+    });
+    proc.stdout && proc.stdout.on('data', (d) => sendToSetup('setup-log', d.toString().slice(0, 400)));
+    proc.stderr && proc.stderr.on('data', (d) => sendToSetup('setup-log', d.toString().slice(0, 400)));
+  });
 }
 
 async function runSetup() {
-    const log = (msg, type) => sendSetup('setup-log', { msg, type: type || 'info' });
-    const step = (text, pct) => sendSetup('setup-step', { text, pct });
+  const log = (msg, type) => sendToSetup('setup-log', { msg: sec.sanitizeLabel(msg, 400), type: type || 'info' });
+  const step = (text, pct) => sendToSetup('setup-step', { text: sec.sanitizeLabel(text, 120), pct });
 
-    step('Проверка Python...', 5);
-    await new Promise(r => setTimeout(r, 300));
+  step('Проверка Python...', 5);
+  let pythonCmd = null;
+  for (const cmd of ['python', 'python3', 'py']) {
+    const r = await runSetupCmd([cmd, '--version'], { timeout: 15000 });
+    const out = ((r.stdout || '') + (r.stderr || '')).trim();
+    if (out.includes('Python 3')) { pythonCmd = cmd; log('✓ Python найден (' + cmd + '): ' + out, 'ok'); break; }
+  }
 
-    let pythonCmd = null;
-    for (const cmd of ['python', 'python3', 'py']) {
-        const r = await runSetupCmd(`${cmd} --version`);
-        const out = (r.stdout || r.stderr || '').trim();
-        if (out.includes('Python 3')) {
-            pythonCmd = cmd;
-            log(`✓ Python найден (${cmd}): ${out}`, 'ok');
-            break;
-        }
+  if (!pythonCmd) {
+    const installer = sec.safeJoinInside(resPath('install'), 'python-3.13.1-amd64.exe');
+    if (!installer || !fs.existsSync(installer)) {
+      sendToSetup('setup-error', 'Python не найден. Положи python-3.13.1-amd64.exe в папку install/');
+      return;
     }
+    step('Установка Python 3.13...', 15);
+    const r = await runSetupCmd([installer, '/quiet', 'InstallAllUsers=1', 'PrependPath=1', 'Include_test=0'], { timeout: 300000 });
+    if (!r.ok) { sendToSetup('setup-error', 'Не удалось установить Python'); return; }
+    sendToSetup('setup-restart', 'Python установлен. Перезапусти Artofix.');
+    return;
+  }
 
-    if (!pythonCmd) {
-        const installer = resPath('install', 'python-3.13.1-amd64.exe');
-        if (!fs.existsSync(installer)) {
-            sendSetup('setup-error', 'Python не найден. Положи python-3.13.1-amd64.exe в папку install/');
-            return;
-        }
-        step('Установка Python 3.13...', 15);
-        log('Устанавливаю Python...', 'info');
-        const r = await runSetupCmd(`"${installer}" /quiet InstallAllUsers=1 PrependPath=1 Include_test=0`, { timeout: 180000 });
-        if (!r.ok) { sendSetup('setup-error', 'Не удалось установить Python'); return; }
-        log('✓ Python установлен — нужен перезапуск', 'ok');
-        sendSetup('setup-need-restart', 'Python установлен. Перезапусти Artofix.');
-        return;
-    }
+  step('Обновление pip...', 20);
+  await runSetupCmd([pythonCmd, '-m', 'pip', 'install', '--upgrade', 'pip', '-q'], { timeout: 120000 });
 
-    step('Обновление pip...', 20);
-    await runSetupCmd(`${pythonCmd} -m pip install --upgrade pip -q`, { timeout: 60000 });
-    log('✓ pip обновлён', 'ok');
+  const pkgs = [['selenium', 35], ['selenium-stealth', 50], ['webdriver-manager', 65]];
+  for (const [name, pct] of pkgs) {
+    step('Установка ' + name + '...', pct);
+    log('pip install ' + name + '...', 'info');
+    const r = await runSetupCmd([pythonCmd, '-m', 'pip', 'install', '--upgrade', name, '-q'], { timeout: 180000 });
+    log(r.ok ? '✓ ' + name + ' установлен' : '✗ ' + name + ': ' + (r.stderr || '').trim().slice(0, 120), r.ok ? 'ok' : 'err');
+  }
 
-    step('Установка selenium...', 35);
-    log('pip install selenium...', 'info');
-    const r3 = await runSetupCmd(`${pythonCmd} -m pip install --upgrade selenium -q`, { timeout: 120000 });
-    log(r3.ok ? '✓ selenium установлен' : '✗ selenium: ' + r3.stderr, r3.ok ? 'ok' : 'err');
+  step('Загрузка драйверов...', 80);
+  const drvCode = [
+    'import os, sys',
+    'os.environ["WDM_LOG"] = "0"',
+    'def get(cls, ver):',
+    '    try:',
+    '        return (cls(version=ver) if ver else cls()).install()',
+    '    except TypeError:',
+    '        return cls().install()',
+    'try:',
+    '    from webdriver_manager.chrome import ChromeDriverManager',
+    '    print("OK chrome", get(ChromeDriverManager, None))',
+    'except Exception as e:',
+    '    print("ERR chrome", e)',
+    'try:',
+    '    from webdriver_manager.microsoft import EdgeChromiumDriverManager',
+    '    print("OK edge", get(EdgeChromiumDriverManager, None))',
+    'except Exception as e:',
+    '    print("ERR edge", e)',
+  ].join('\n');
+  const tmp = path.join(os.tmpdir(), 'artofix_setup_drivers.py');
+  fs.writeFileSync(tmp, drvCode, 'utf-8');
+  const r = await runSetupCmd([pythonCmd, tmp], { timeout: 240000 });
+  try { fs.unlinkSync(tmp); } catch (_) {}
+  log(/OK chrome/.test(r.stdout) ? '✓ ChromeDriver готов' : '⚠ ChromeDriver не скачался', /OK chrome/.test(r.stdout) ? 'ok' : 'warn');
+  log(/OK edge/.test(r.stdout) ? '✓ EdgeDriver готов' : '⚠ EdgeDriver не скачался', /OK edge/.test(r.stdout) ? 'ok' : 'warn');
 
-    step('Установка selenium-stealth...', 50);
-    log('pip install selenium-stealth...', 'info');
-    const r4 = await runSetupCmd(`${pythonCmd} -m pip install --upgrade selenium-stealth -q`, { timeout: 120000 });
-    log(r4.ok ? '✓ selenium-stealth установлен' : '✗ selenium-stealth: ' + r4.stderr, r4.ok ? 'ok' : 'err');
-
-    step('Установка webdriver-manager...', 65);
-    log('pip install webdriver-manager...', 'info');
-    const r5 = await runSetupCmd(`${pythonCmd} -m pip install --upgrade webdriver-manager -q`, { timeout: 120000 });
-    log(r5.ok ? '✓ webdriver-manager установлен' : '✗ webdriver-manager: ' + r5.stderr, r5.ok ? 'ok' : 'err');
-
-    step('Загрузка ChromeDriver...', 78);
-    log('Определяю версию Chrome...', 'info');
-    const chromeVerSetup = await getChromeVersion();
-    log(chromeVerSetup ? `Chrome ${chromeVerSetup}` : 'Версия Chrome не найдена — скачаю последний', chromeVerSetup ? 'ok' : 'info');
-    const tmpC = path.join(os.tmpdir(), 'artofix_setup_chrome.py');
-    fs.writeFileSync(tmpC, [
-        'import sys, os',
-        'os.environ["WDM_LOG"] = "0"',
-        'from webdriver_manager.chrome import ChromeDriverManager',
-        chromeVerSetup ? `v = "${chromeVerSetup}"` : 'v = None',
-        'try:',
-        '    p = (ChromeDriverManager(version=v) if v else ChromeDriverManager()).install()',
-        '    print("OK", p)',
-        'except Exception as e:',
-        '    try:',
-        '        p = ChromeDriverManager().install()',
-        '        print("OK", p)',
-        '    except Exception as e2:',
-        '        print("ERR", e2)',
-        '        sys.exit(1)',
-    ].join('\n'));
-    const r6 = await runSetupCmd(`${pythonCmd} "${tmpC}"`, { timeout: 120000 });
-    try { fs.unlinkSync(tmpC); } catch (_) {}
-    log(r6.ok && r6.stdout.includes('OK') ? '✓ ChromeDriver готов' : '⚠ ChromeDriver: ' + (r6.stderr || r6.stdout || '').trim().slice(0, 100), r6.ok ? 'ok' : 'warn');
-
-    step('Загрузка EdgeDriver...', 90);
-    log('Определяю версию Edge...', 'info');
-    const edgeVerSetup = await getEdgeVersion();
-    const eMajorSetup = majorVer(edgeVerSetup);
-    log(edgeVerSetup ? `Edge ${edgeVerSetup}` : 'Edge не найден — скачаю последний', edgeVerSetup ? 'ok' : 'info');
-
-    const wdmEdgeDir = path.join(process.env.USERPROFILE || '', '.wdm', 'drivers', 'msedgedriver');
-    if (fs.existsSync(wdmEdgeDir)) {
-        try {
-            let removed = 0;
-            for (const e of fs.readdirSync(wdmEdgeDir)) {
-                if (eMajorSetup && !e.startsWith(String(eMajorSetup))) {
-                    fs.rmSync(path.join(wdmEdgeDir, e), { recursive: true, force: true });
-                    removed++;
-                }
-            }
-            if (removed) log(`Очищено старых кэшей Edge: ${removed}`, 'info');
-        } catch (_) {}
-    }
-    const tmpE = path.join(os.tmpdir(), 'artofix_setup_edge.py');
-    fs.writeFileSync(tmpE, [
-        'import sys, os',
-        'os.environ["WDM_LOG"] = "0"',
-        'from webdriver_manager.microsoft import EdgeChromiumDriverManager',
-        edgeVerSetup ? `v = "${edgeVerSetup}"` : 'v = None',
-        'try:',
-        '    p = (EdgeChromiumDriverManager(version=v) if v else EdgeChromiumDriverManager()).install()',
-        '    print("OK", p)',
-        'except Exception as e:',
-        '    try:',
-        '        p = EdgeChromiumDriverManager().install()',
-        '        print("OK", p)',
-        '    except Exception as e2:',
-        '        print("ERR", e2)',
-        '        sys.exit(1)',
-    ].join('\n'));
-    const r7 = await runSetupCmd(`${pythonCmd} "${tmpE}"`, { timeout: 120000 });
-    try { fs.unlinkSync(tmpE); } catch (_) {}
-    log(r7.ok && r7.stdout.includes('OK') ? '✓ EdgeDriver готов' : '⚠ EdgeDriver: ' + (r7.stderr || r7.stdout || '').trim().slice(0, 100), r7.ok ? 'ok' : 'warn');
-
-    step('Установка завершена!', 100);
-    log('✅ Все компоненты установлены!', 'ok');
-    markSetupDone();
-    await new Promise(r => setTimeout(r, 1200));
-    sendSetup('setup-done', true);
+  step('Установка завершена!', 100);
+  markSetupDone();
+  await new Promise((r2) => setTimeout(r2, 800));
+  sendToSetup('setup-done', true);
 }
 
-ipcMain.on('setup-start', () => runSetup());
-ipcMain.on('setup-skip', () => { markSetupDone(); sendSetup('setup-done', true); });
+// ═══════════════════════════════════════════
+//  ЖИЗНЕННЫЙ ЦИКЛ
+// ═══════════════════════════════════════════
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => { if (win) { win.show(); win.focus(); } });
+}
 
 app.whenReady().then(() => {
-    if (needsSetup()) {
-        createSetupWindow();
-        setupWin.once('ready-to-show', () => {
-            setupWin.show();
-            setTimeout(() => runSetup(), 1000);
-        });
-        ipcMain.once('open-main', () => {
-            if (setupWin && !setupWin.isDestroyed()) setupWin.close();
-            createWindow();
-            createTray();
-            checkAdmin();
-        });
-    } else {
-        createWindow();
-        createTray();
-        checkAdmin();
-    }
+  hardenSession(session.defaultSession);
+
+  if (needsSetup()) {
+    createSetupWindow();
+    setupWin.once('ready-to-show', () => {
+      setupWin.show();
+      setTimeout(() => runSetup(), 900);
+    });
+  } else {
+    createWindow();
+    createTray();
+    checkAdmin();
+  }
 });
 
-function checkAdmin() {
-    if (!isAdmin()) {
-        const choice = dialog.showMessageBoxSync({
-            type: 'question',
-            title: 'Artofix — Права администратора',
-            message: 'Для блокировки рекламы (hosts-file) нужны права администратора.',
-            detail: 'Перезапустить с правами администратора?\n\nЕсли откажешься — всё работает, но блокировка хостов будет недоступна.',
-            buttons: ['Перезапустить как администратор', 'Продолжить без прав'],
-            defaultId: 0, cancelId: 1,
-        });
-        if (choice === 0) relaunchAsAdmin();
-    }
-}
+app.on('window-all-closed', () => { if (!IS_MAC) app.quit(); });
 
-app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
-app.on('before-quit', () => { isQuiting = true; if (zapretProcess) { try { process.kill(zapretProcess.pid); } catch (_) {} } });
+app.on('before-quit', () => {
+  isQuiting = true;
+  zapretStop();
+});
+
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+
+process.on('uncaughtException', (e) => {
+  console.error('[main] необработанное исключение: ' + (e && e.stack ? e.stack : e));
+});
+process.on('unhandledRejection', (e) => {
+  console.error('[main] необработанный reject: ' + (e && e.message ? e.message : e));
+});

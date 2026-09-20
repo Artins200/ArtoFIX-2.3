@@ -1,60 +1,95 @@
 {
   "name": "artofix",
-  "version": "2.3.0",
-  "description": "Artofix Freedom Tool",
+  "version": "2.3.1",
+  "description": "Artofix Freedom Tool — anti-detect browser profiles with hardened Electron shell",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "start:dev": "electron . --dev",
     "build": "electron-builder --win --x64",
-    "build:dir": "electron-builder --win --x64 --dir"
+    "build:dir": "electron-builder --win --x64 --dir",
+    "test": "node tests/run-all.js",
+    "test:security": "node tests/security.test.js",
+    "test:wiring": "node tests/wiring.test.js",
+    "test:pageinit": "node tests/pageinit.test.js",
+    "test:engine": "python3 tests/engine_test.py"
   },
   "build": {
     "appId": "com.artofix.app",
     "productName": "Artofix",
     "copyright": "Artofix 2024",
     "asar": true,
-
     "win": {
       "target": [
-        { "target": "nsis", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "icon": "icon.png",
       "requestedExecutionLevel": "requireAdministrator"
     },
-
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "installerLanguages": ["Russian"],
+      "installerLanguages": [
+        "Russian"
+      ],
       "shortcutName": "Artofix",
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "deleteAppDataOnUninstall": false,
       "runAfterFinish": true
     },
-
     "extraResources": [
-      { "from": "engine.py",  "to": "engine.py"  },
-      { "from": "icon.png",   "to": "icon.png"   },
-      { "from": "Zapret/",    "to": "Zapret/",    "filter": ["**/*"] },
-      { "from": "assets/",    "to": "assets/",    "filter": ["**/*"] },
-      { "from": "install/",   "to": "install/",   "filter": ["**/*"] }
+      {
+        "from": "engine.py",
+        "to": "engine.py"
+      },
+      {
+        "from": "icon.png",
+        "to": "icon.png"
+      },
+      {
+        "from": "Zapret/",
+        "to": "Zapret/",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "assets/",
+        "to": "assets/",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "install/",
+        "to": "install/",
+        "filter": [
+          "**/*"
+        ]
+      }
     ],
-
     "files": [
       "main.js",
+      "preload.js",
+      "security.js",
+      "fingerprint-identity.js",
+      "app.js",
+      "setup.js",
       "index.html",
       "setup.html",
       "package.json"
     ],
-
     "directories": {
       "output": "dist",
       "buildResources": "build"
     }
   },
-
   "devDependencies": {
     "electron": "^29.0.0",
     "electron-builder": "^24.0.0"

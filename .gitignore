@@ -1,5 +1,21 @@
+# Сборка
 win-unpacked/
+dist/
+out/
+build/
 *.7z
 *.nsis
 *.lnk
 .icon-ico/
+
+# Зависимости и кэши
+node_modules/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Локальное состояние приложения (не должно попадать в репозиторий)
+.artofix_install_id
+profiles/
+drivers/
+logs/

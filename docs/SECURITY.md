@@ -1,0 +1,109 @@
+# Artofix 2.3.1 — модель безопасности
+
+Документ описывает, что именно было закрыто относительно 2.3 и какие правила
+нельзя нарушать при доработке. Все пункты покрыты автотестами
+(`npm test` → `tests/security.test.js`, `tests/wiring.test.js`).
+
+---
+
+## 1. Что было уязвимо в 2.3
+
+| № | Проблема | Последствие |
+|---|----------|-------------|
+| 1 | `webPreferences: { nodeIntegration: true, contextIsolation: false, webSecurity: false }` | любой XSS в рендерере = выполнение кода на машине пользователя (RCE) |
+| 2 | `ipcMain.on('cmd', cmd => exec(cmd))` + вызовы из разметки (`taskkill … & …`) | инъекция команд: `&`, `|`, `$(…)` исполнялись от имени админа |
+| 3 | 160 inline-обработчиков `onclick="…"` | любой внедрённый HTML исполнялся как код; невозможен строгий CSP |
+| 4 | Данные → `innerHTML` без экранирования: бинды (`b.label`, `b.id`), имена профилей, лог браузера, домены hosts | stored XSS из `artofix_binds.json`, из имени профиля на диске, из stdout Chrome |
+| 5 | `open-folder` принимал любой относительный путь | открытие любых папок, `path traversal` |
+| 6 | `launch-browser` с `shell.openPath(url)` / `shell.openExternal(url)` без проверки схемы | запуск `file:///…exe`, `javascript:`, `data:`, `ms-msdt:` (Follina-подобные цепочки) |
+| 7 | `domain.trim()` в hosts-write, `dns1/dns2` прямо в PowerShell-скрипт | инъекция в текст hosts и в PowerShell |
+| 8 | Кэш `cbn-ping`/`reg query` — `exec('ping ' + host)`-стиль | инъекция через параметры |
+| 9 | `httpsGet`/`downloadFile` без проверки хоста на редиректах | загрузка и распаковка произвольного архива из чужого источника в папку программы |
+| 10 | `Expand-Archive` + рекурсивное копирование без проверок | zip-slip, симлинки, zip-бомба |
+| 11 | До 3 МБ внешних шрифтов с `fonts.googleapis.com` при каждом запуске | утечка IP/метаданных, offline-сборка не работала |
+| 12 | `delete-profile` / `create-profile` с несанитизированным именем | удаление/создание папок за пределами `profiles/` |
+| 13 | Отпечаток генерировался на каждом запуске заново и целиком из `Math.random()` | «прыгающий» отпечаток — сам по себе признак автоматизации |
+
+## 2. Что сделано сейчас
+
+### 2.1 Изоляция рендерера
+* `app.enableSandbox()` + `sandbox: true`, `contextIsolation: true`, `nodeIntegration: false`, `webSecurity: true`, `webviewTag: false`, `nodeIntegrationInSubFrames: false`.
+* `preload.js` — единственный мост. Наружу отдаётся **объект с фиксированным списком методов**, а не `ipcRenderer`. `contextBridge.exposeInMainWorld('api', Object.freeze(api))`.
+* Все аргументы валидируются **дважды**: в preload (тип/длина/whitelist) и в main (домен-специфичные проверки).
+* Запрещены: новые окна (`setWindowOpenHandler` → `deny`), навигация (`will-navigate`/`will-redirect`), `webview`, DevTools в релизной сборке.
+
+### 2.2 CSP и офлайн-режим
+Заголовок ставится в `onHeadersReceived` (чужие CSP снимаются):
+```
+default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline';
+img-src 'self' data: blob:; font-src 'self' data:; connect-src 'none';
+media-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'
+```
+Дополнительно `onBeforeRequest` **отменяет любой http(s)/ws-запрос из окна** — оболочка
+приложения физически не может никуда «позвонить». Всё сетевое (обновление Zapret,
+драйверы) идёт из main-процесса через `https` с белым списком хостов.
+Шрифты Google убраны, интерфейс использует системные шрифты (`--font`, `--mono`).
+
+### 2.3 Убраны inline-скрипты (нужно для CSP)
+* `index.html` → `app.js`, `setup.html` → `setup.js`.
+* 160+ `onclick="…"` заменены на `data-af-on` / `data-af-action` / `data-af-args`
+  и делегированный диспетчер `AF_ACTIONS` (без `eval`, `new Function`).
+* В тестах: «в HTML не осталось `on*=` и инлайновых `<script>`».
+
+### 2.4 Никаких shell-строк
+* `exec()` удалён полностью; остались `execFile`/`spawn` с **argv-массивами**.
+* Имена компонентов диагностики берутся из таблицы `DIAG_COMPONENTS`, а не из IPC.
+* PowerShell-скрипты не интерполируют данные: значения передаются через
+  переменные окружения (`$env:ARTOFIX_DNS1`, `$env:ARTOFIX_ZIP`, …).
+* `taskkill` вызывается только с фиксированными именами образов.
+
+### 2.5 Пути и имена
+* `sanitizeProfileName`: `[A-Za-z0-9][A-Za-z0-9_-]{0,39}`, блокировка `..`, `/`, `\`, `:`, `*`, `?`, `"`, `<`, `>`, `|`, управляющих символов и зарезервированных имён Windows (`con`, `nul`, `lpt1`…).
+* `safeJoinInside(base, …)`: нормализация + проверка вложенности + разворот симлинков до ближайшего существующего родителя.
+* `open-folder` — только `profiles`, `Zapret`, `assets`, `drivers`, `install` и только внутри каталога приложения.
+* `delete-profile` не сработает для корня `profiles/` и для запущенного профиля.
+
+### 2.6 Валидация содержимого
+* Домены для hosts: строгий regex, запрет пробелов/переводов строк/`#`/`;`/`/` и любых не-ASCII, дедуп, лимит 5000 записей, лимит размера файла 4 МБ.
+* IPv4: октеты без ведущих нулей (`01.1.1.1` отклоняется), регексп с диапазонами.
+* Хост для TCP-проверки: домен или IP-литерал, без пробелов и управляющих символов.
+* URL: `sanitizeExternalUrl` (только `https`, схемы `steam`/`tg`/`discord`; `http` — лишь на `localhost`/приватные адреса) и `sanitizeBrowseUrl` (для Selenium: `http(s)`/`about:blank`).
+* `bindings`: массив ≤ 200, каждое поле санитизируется, `url` проходит проверку схемы, `label` обрезается до 64 символов — stored-XSS из `artofix_binds.json` больше невозможен.
+* `settings`/`config`: whitelist ключей и типов при записи (цвета — `#rrggbb`, интервалы, IPv4 DNS, перечисления). Пути к драйверам — только `.exe` внутри каталога приложения.
+
+### 2.7 Сеть обновлений
+* Белый список хостов: `github.com`, `api.github.com`, `codeload.github.com`, `objects.githubusercontent.com`, `release-assets.githubusercontent.com`, `raw.githubusercontent.com`.
+* Проверка **каждого** редиректа, максимум 5 переходов, только `https`, таймаут 12 с, лимит размера ответа и файла (512 МБ).
+* URL ассета живёт только в main (`pendingUpdate`): рендерер передаёт тег, main сверяет его с уже проверенным релизом — подменить ссылку из UI нельзя.
+* Перед распаковкой архив проверяется на `..`, абсолютные пути и `C:`-префиксы и на количество записей; при копировании пропускаются симлинки и не-файлы, каждая цель проверяется `safeJoinInside`, есть лимиты по числу файлов/байтам.
+
+### 2.8 IPC
+* Все каналы — `api:*` через `ipcMain.handle`, с проверкой **источника** (`senderKind`: `index.html` или `setup.html` внутри каталога приложения).
+* Рендерер больше не может: запускать произвольные команды, открывать произвольные папки/ссылки, писать в `config.json` поле `identity`, читать пароль прокси из `meta`, подменять URL обновления.
+* Rate-limit на запуск браузеров, `open-external`, `taskkill`, удаление профилей.
+* Ошибки рендерера и `preload-error` печатаются в терминал main-процесса; `console-message` рендерера выводится с обрезкой ANSI-последовательностей (нельзя подделать вывод терминала escape-кодами).
+
+### 2.9 Устойчивость
+* Буфер логов — 300 записей, строка ≤ 500 символов, ANSI вырезается.
+* Заглушка `window.api` (inert) + баннер, если preload не загрузился: интерфейс не падает.
+* `uncaughtException`/`unhandledRejection` в main и ловля ошибок в рендерере с отправкой в терминал.
+* Атомарная запись файлов (`writeFileAtomic`) — не остаётся полусломанных `config.json`/`settings`.
+* Ограничения на размер JSON при чтении (`readJsonSafe`).
+
+## 3. Что осталось намеренно разрешённым
+
+* `style-src 'unsafe-inline'` — интерфейс построен на инлайновых `style="…"`.
+  Скрипты при этом запрещены (`script-src 'self'`), внешний контент не грузится.
+  Перевод стилей в классы — отдельная задача, на безопасность почти не влияет.
+* `openModal()` принимает HTML-шаблоны — но только статические, собранные в `app.js`;
+  есть проверка на `<script>`, `<iframe>`, `<object>`, `<embed>` и `on*=` внутри строки,
+  а данные пользователя туда не передаются (для них — `afEl()`/`textContent`).
+
+## 4. Правила для доработок
+
+1. Никогда не добавлять `nodeIntegration: true`, `contextIsolation: false`, `webSecurity: false`.
+2. Новый IPC — только через `preload.js` + `handle()` в main с проверкой источника.
+3. Данные в DOM — только `textContent`/`afEl()`. Если очень нужен `innerHTML`, пометить строку комментарием `// af-allow-innerhtml` и обосновать.
+4. Никаких строк в командах: только `execFile`/`spawn` + argv.
+5. Любое значение из UI перед подстановкой в файл/скрипт проходит через `security.js`.
+6. Запускать `npm test` перед сборкой.
