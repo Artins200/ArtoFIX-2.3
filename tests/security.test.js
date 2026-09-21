@@ -107,6 +107,28 @@ test('URL для Selenium — только http(s) и about:blank', () => {
   assert.strictEqual(sec.sanitizeBrowseUrl('file:///etc/passwd'), null);
 });
 
+test('бинды приложений: steam/tg/discord проходят внешний белый список', () => {
+  ['steam://rungameid/431960', 'tg://resolve?domain=x', 'discord://-/users/1',
+    'https://youtube.com'].forEach((u) =>
+    assert.ok(sec.sanitizeExternalUrl(u), u + ' должен проходить'));
+  ['file:///C:/Windows/system32', 'javascript:alert(1)', 'ms-msdt:/id/1',
+    'search-ms:query=x'].forEach((u) =>
+    assert.strictEqual(sec.sanitizeExternalUrl(u), null, u + ' должен отбиваться'));
+});
+
+test('путь к приложению: только абсолютные .exe/.lnk/.url, без метасимволов и traversal', () => {
+  assert.ok(sec.sanitizeAppPath('C:\\Games\\game.exe'));
+  assert.ok(sec.sanitizeAppPath('C:\\Users\\user\\Desktop\\Steam.lnk'));
+  assert.ok(sec.sanitizeAppPath('\\\\share\\apps\\tool.exe'));
+  assert.ok(sec.sanitizeAppPath('/opt/apps/tool.exe'));
+  assert.strictEqual(sec.sanitizeAppPath('"C:\\Games\\game.exe"'), 'C:\\Games\\game.exe',
+    'кавычки вокруг пути должны срезаться');
+  ['..\\evil.exe', 'C:\\..\\evil.exe', 'game.exe', 'C:\\x.bat', 'C:\\x.cmd', 'C:\\x.ps1',
+    'file:///C:/x.exe', 'C:\\x.exe & calc.exe', 'C:\\x.exe; del /f /q C:\\',
+    'javascript:alert(1)', 'https://site.com/app.exe', 'C:\\x\ny.exe'].forEach((p) =>
+    assert.strictEqual(sec.sanitizeAppPath(p), null, JSON.stringify(p) + ' должно быть отклонено'));
+});
+
 // ─────────────────────────────────────────────
 //  СЕТЬ ОБНОВЛЕНИЙ
 // ─────────────────────────────────────────────

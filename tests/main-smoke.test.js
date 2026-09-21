@@ -172,6 +172,55 @@ test('обработчики отклоняют вызов из недовере
   assert.ok(/не разрешён/i.test(res.msg || ''));
 });
 
+// ── регрессии 2.5.x: app-бинды, окно, настройки ──
+test('app-бинды валидируются ДО браузерной проверки URL (регрессия steam://)', () => {
+  const fn = /async function launchBrowser\([\s\S]*?\n\}/.exec(mainSrc);
+  assert.ok(fn, 'launchBrowser не найден');
+  const appIdx = fn[0].indexOf("safeBrowser === 'app'");
+  // ищем реальный вызов, а не упоминание в комментарии
+  const browseIdx = fn[0].indexOf('sec.sanitizeBrowseUrl');
+  assert.ok(appIdx !== -1, 'ветка browser=app исчезла');
+  assert.ok(browseIdx !== -1, 'ветка браузерного URL исчезла');
+  assert.ok(appIdx < browseIdx,
+    'sec.sanitizeBrowseUrl(http/https) выполняется раньше app-ветки — steam://-бинды снова отобьются');
+  const tray = /function launchBindFromTray\([\s\S]*?\n\}/.exec(mainSrc);
+  assert.ok(tray, 'launchBindFromTray не найден');
+  assert.ok(tray[0].indexOf("browser === 'app'") < tray[0].indexOf('sec.sanitizeBrowseUrl'),
+    'в tray-запуске биндов app-ветка снова после браузерной проверки');
+});
+
+test('sanitizeBinds сохраняет steam:// и пути .exe/.lnk, отбивает javascript:', () => {
+  const out = ctx.sanitizeBinds([
+    { id: 1, label: 'Steam', url: 'steam://rungameid/431960', browser: 'app', bypass: true },
+    { id: 2, label: 'Game', url: 'C:\\Games\\game.exe', browser: 'app' },
+    { id: 3, label: 'bad', url: 'javascript:alert(1)', browser: 'chrome' },
+    { id: 4, label: 'bad2', url: 'C:\\Windows\\evil.bat', browser: 'app' },
+  ]);
+  assert.strictEqual(out.length, 2, 'ожидали 2 валидных бинда, получили ' + out.length);
+  assert.strictEqual(out[0].url, 'steam://rungameid/431960');
+  assert.strictEqual(out[0].bypass, true);
+  assert.strictEqual(out[1].url, 'C:\\Games\\game.exe');
+});
+
+test('sanitizeSettings хранит скругление/прозрачность окна и авто-обход', () => {
+  const s = ctx.sanitizeSettings({
+    theme: 'th-mint', uiScale: '1.2', winOpacity: '0.75', winRadius: '14', autoBypass: false,
+  });
+  assert.strictEqual(s.winOpacity, '0.75');
+  assert.strictEqual(s.winRadius, '14');
+  assert.strictEqual(s.autoBypass, false);
+  const junk = ctx.sanitizeSettings({ winOpacity: '5', winRadius: '999', autoBypass: 'yes' });
+  assert.strictEqual(junk.winOpacity, undefined);
+  assert.strictEqual(junk.winRadius, undefined);
+  assert.strictEqual(junk.autoBypass, undefined);
+});
+
+test('главное окно прозрачное, а состояние maximize уходит в рендерер', () => {
+  assert.ok(/transparent:\s*true/.test(mainSrc), 'окно не прозрачное — скругления CSS не будут видны');
+  assert.ok(/hasShadow:\s*false/.test(mainSrc), 'у прозрачного окна должна быть отключена системная тень');
+  assert.ok(mainSrc.includes("'win-maximized'"), 'main не сообщает рендереру о maximize/unmaximize');
+});
+
 test('в main нет ссылок на удалённые функции (свободный exec)', () => {
   const code = mainSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   assert.strictEqual(/\bexec\b\s*\(/.test(code), false);

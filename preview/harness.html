@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ArtoFIX 2.5 — превью интерфейса</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { width:100%; height:100%; overflow:hidden; font-family:'Segoe UI',system-ui,sans-serif; }
+  body {
+    /* «рабочий стол» — на его фоне видно скругления и прозрачность окна */
+    background:
+      radial-gradient(1200px 700px at 15% 20%, #3b5bdb 0%, transparent 55%),
+      radial-gradient(1000px 800px at 85% 75%, #9c36b5 0%, transparent 55%),
+      radial-gradient(900px 600px at 70% 15%, #1098ad 0%, transparent 50%),
+      linear-gradient(135deg, #141a2e 0%, #1d2440 50%, #131a2c 100%);
+    display:flex; align-items:center; justify-content:center;
+  }
+  #stage { position:relative; }
+  #app-frame {
+    width:1100px; height:680px; max-width:96vw; max-height:88vh;
+    border:0; display:block; background:transparent;
+    transition:width .18s ease, height .18s ease;
+  }
+  body.is-max #app-frame { width:100vw; height:100vh; max-width:100vw; max-height:100vh; }
+  #hint {
+    position:fixed; left:50%; transform:translateX(-50%); bottom:10px;
+    color:rgba(255,255,255,.75); font-size:12px; text-align:center;
+    background:rgba(10,14,26,.45); border:1px solid rgba(255,255,255,.14);
+    padding:7px 14px; border-radius:999px; backdrop-filter:blur(6px);
+    pointer-events:none; max-width:94vw;
+  }
+  #restore-chip {
+    position:fixed; left:50%; top:50%; transform:translate(-50%,-50%);
+    display:none; padding:14px 22px; border-radius:14px; cursor:pointer;
+    background:rgba(16,22,40,.85); color:#e7ecf5; border:1px solid rgba(255,255,255,.2);
+    font-size:14px; box-shadow:0 20px 60px rgba(0,0,0,.4);
+  }
+  body.is-hidden #restore-chip { display:block; }
+  body.is-hidden #app-frame { visibility:hidden; }
+</style>
+</head>
+<body>
+  <div id="stage">
+    <iframe id="app-frame" src="app.html" title="ArtoFIX 2.5"></iframe>
+  </div>
+  <div id="restore-chip">🪟 ArtoFIX скрыт — нажмите, чтобы показать окно</div>
+  <div id="hint">
+    Превью интерфейса ArtoFIX 2.5 в браузере: окно полностью скруглено и полупрозрачно —
+    регулируйте «Внешний вид → Окно», темы и цвета работают вместе. Кнопка □ в заголовке — развернуть.
+  </div>
+<script>
+  var chip = document.getElementById('restore-chip');
+  chip.addEventListener('click', function () { document.body.classList.remove('is-hidden'); });
+  window.addEventListener('message', function (e) {
+    var d = e.data;
+    if (!d || d.src !== 'artofix-preview') return;
+    if (d.act === 'maximize') document.body.classList.toggle('is-max', !!d.on);
+    if (d.act === 'hide') document.body.classList.add('is-hidden');
+    if (d.act === 'minimize') document.body.classList.add('is-hidden');
+  });
+</script>
+</body>
+</html>

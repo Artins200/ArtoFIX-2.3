@@ -68,8 +68,9 @@ media-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-act
 * IPv4: октеты без ведущих нулей (`01.1.1.1` отклоняется), регексп с диапазонами.
 * Хост для TCP-проверки: домен или IP-литерал, без пробелов и управляющих символов.
 * URL: `sanitizeExternalUrl` (только `https`, схемы `steam`/`tg`/`discord`; `http` — лишь на `localhost`/приватные адреса) и `sanitizeBrowseUrl` (для Selenium: `http(s)`/`about:blank`).
-* `bindings`: массив ≤ 200, каждое поле санитизируется, `url` проходит проверку схемы, `label` обрезается до 64 символов — stored-XSS из `artofix_binds.json` больше невозможен.
-* `settings`/`config`: whitelist ключей и типов при записи (цвета — `#rrggbb`, интервалы, IPv4 DNS, перечисления). Пути к драйверам — только `.exe` внутри каталога приложения.
+* Пути к приложениям для биндов: `sanitizeAppPath` — только **абсолютные** пути (диск Windows, UNC, posix) с расширением `.exe`/`.lnk`/`.url`; запрещены shell-метасимволы (`& | < > ^ % ` $ ;`), `..`, управляющие символы; перед запуском проверяется существование файла. `file://`, `.bat`/`.cmd`/`.ps1` и относительные пути отклоняются.
+* `bindings`: массив ≤ 200, каждое поле санитизируется, `url` проходит проверку схемы **или** `sanitizeAppPath`, бинды без валидной ссылки отбрасываются, `label` обрезается до 64 символов — stored-XSS из `artofix_binds.json` больше невозможен.
+* `settings`/`config`: whitelist ключей и типов при записи (цвета — `#rrggbb`, интервалы, IPv4 DNS, перечисления, `winOpacity` 0.3–1, `winRadius` 0–28, `autoBypass` — boolean). Пути к драйверам — только `.exe` внутри каталога приложения.
 
 ### 2.7 Сеть обновлений
 * Белый список хостов: `github.com`, `api.github.com`, `codeload.github.com`, `objects.githubusercontent.com`, `release-assets.githubusercontent.com`, `raw.githubusercontent.com`.

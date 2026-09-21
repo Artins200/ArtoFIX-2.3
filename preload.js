@@ -13,7 +13,7 @@
      4. Никаких Node-модулей (fs/path/child_process) в рендерер.
    ============================================================= */
 
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webFrame } = require('electron');
 
 // ── лимиты аргументов ──
 const MAX_STR = 2048;
@@ -30,7 +30,7 @@ const WIN_ACTS = ['minimize', 'maximize', 'hide', 'restart'];
 const EVENTS = [
   'log-entry', 'zapret-status', 'zapret-dl-progress', 'diag-log', 'diag-progress',
   'tray-action', 'navigate', 'bootstrap', 'setup-step', 'setup-log', 'setup-error',
-  'setup-restart', 'setup-done', 'setup-hw', 'setup-ask-perm',
+  'setup-restart', 'setup-done', 'setup-hw', 'setup-ask-perm', 'win-maximized',
 ];
 
 // ── гигиена аргументов ──
@@ -97,6 +97,15 @@ const api = {
     ipcRenderer.send('api:win-act', a);
   },
   toggleMaximize: function () { ipcRenderer.send('api:toggle-maximize'); },
+  // Масштаб интерфейса: настоящий Chromium-zoom (webFrame), а не CSS-transform —
+  // transform перебивался animation-fill у #app, поэтому масштаб «не работал».
+  setZoom: function (factor) {
+    const n = Number(factor);
+    if (!Number.isFinite(n) || n < 0.5 || n > 2) return;
+    try {
+      if (webFrame && typeof webFrame.setZoomFactor === 'function') webFrame.setZoomFactor(n);
+    } catch (_) {}
+  },
 
   // ── ресурсы/файлы ──
   getIconUrl: function () { return call('api:get-icon-url'); },
@@ -291,6 +300,7 @@ const api = {
   onSetupDone: function (cb) { return subscribe('setup-done', cb); },
   onSetupHw: function (cb) { return subscribe('setup-hw', cb); },
   onSetupAskPerm: function (cb) { return subscribe('setup-ask-perm', cb); },
+  onWinMaximized: function (cb) { return subscribe('win-maximized', cb); },
 };
 
 /** Текст для данных: обрезаем управляющие символы и длину. */

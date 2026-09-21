@@ -334,6 +334,185 @@ ctest('AF_ACTIONS содержит новые действия cbnFixWarp, cbnTe
   assert.strictEqual(typeof ctx.AF_ACTIONS.saveProfileCountryModal, 'function');
 });
 
+// ── 5. Внешний вид: цвета поверх темы, масштаб, скругление/прозрачность окна ──
+// Регрессия «выбрал тему — цвета не меняются»: темы объявлены как body.th-*{--ac:…},
+// поэтому кастомный акцент обязан писаться ИНЛАЙНОМ на <body>, иначе проигрывает теме.
+test('applyColors пишет акценты инлайном на body — перебивает переменные темы', () => {
+  const { ctx } = loadApp('app.js');
+  const bodyVars = {}, rootVars = {};
+  ctx.document.body.style.setProperty = (k, v) => { bodyVars[k] = v; };
+  ctx.document.documentElement.style.setProperty = (k, v) => { rootVars[k] = v; };
+  ctx.applyColors('#ff0000', '#00ff00');
+  assert.strictEqual(bodyVars['--ac'], '#ff0000', 'акцент не записан на body — тема его перебьёт');
+  assert.strictEqual(bodyVars['--acr'], '255,0,0');
+  assert.strictEqual(bodyVars['--ac2'], '#00ff00');
+  assert.strictEqual(bodyVars['--ac2r'], '0,255,0');
+  assert.strictEqual(rootVars['--ac'], '#ff0000');
+});
+
+test('applyColors отбивает мусор вместо битого CSS', () => {
+  const { ctx } = loadApp('app.js');
+  const bodyVars = {};
+  ctx.document.body.style.setProperty = (k, v) => { bodyVars[k] = v; };
+  ctx.applyColors('javascript:alert(1)', null);
+  assert.strictEqual(bodyVars['--ac'], '#4f46e5');
+  assert.strictEqual(bodyVars['--ac2'], '#8b5cf6');
+});
+
+test('setTheme снимает кастомные цвета и подставляет акценты темы в инпуты', () => {
+  const { ctx, byId } = loadApp('app.js');
+  ctx.document.getElementById('color-accent');
+  ctx.document.getElementById('color-accent2');
+  const removed = [];
+  ctx.document.body.style.removeProperty = (k) => removed.push(k);
+  ctx.document.documentElement.style.removeProperty = (k) => removed.push('root:' + k);
+  ctx.APP_SETTINGS = { colors: { ac: '#ff0000', ac2: '#00ff00' } };
+  ctx.setTheme('th-mint');
+  assert.ok(removed.includes('--ac') && removed.includes('--acr'),
+    'инлайновые акценты не сняты — тему не будет видно');
+  assert.strictEqual(ctx.APP_SETTINGS.theme, 'th-mint');
+  assert.strictEqual(ctx.APP_SETTINGS.colors, null);
+  assert.strictEqual(byId['color-accent'].value, '#059669');
+  assert.strictEqual(byId['color-accent2'].value, '#14b8a6');
+});
+
+test('setTheme игнорирует старые/мусорные темы', () => {
+  const { ctx } = loadApp('app.js');
+  ctx.APP_SETTINGS = {};
+  ctx.setTheme('th-cyber');                       // старая тема из прошлых версий
+  assert.strictEqual(ctx.APP_SETTINGS.theme, '');
+  ctx.setTheme('"><script>');
+  assert.strictEqual(ctx.APP_SETTINGS.theme, '');
+});
+
+// Регрессия «масштабирование не работает»: mirrorInput вызывал saver БЕЗ значения,
+// applyScale(undefined) строил scale(NaN), а animation-fill у #app добивал transform.
+test('applyScale без аргумента берёт значение ползунка и не даёт NaN', () => {
+  const { ctx, byId } = loadApp('app.js');
+  const zooms = [];
+  ctx.apiBridge = Object.assign({}, ctx.apiBridge, { setZoom: (v) => zooms.push(v) });
+  ctx.document.getElementById('ui-scale').value = '1.2';
+  ctx.applyScale();                                // ровно так его зовёт mirrorInput
+  assert.deepStrictEqual(zooms, [1.2], 'Chromium-zoom не вызван со значением ползунка');
+  assert.strictEqual(ctx.APP_SETTINGS.uiScale, '1.2');
+  assert.strictEqual(byId['scale-display'].textContent, '1.2');
+  ctx.applyScale('abc');                           // мусор → кламп в 1, не NaN
+  assert.strictEqual(zooms[zooms.length - 1], 1);
+  assert.strictEqual(ctx.APP_SETTINGS.uiScale, '1');
+  ctx.applyScale('99');                            // выход за диапазон → кламп
+  assert.strictEqual(zooms[zooms.length - 1], 2);
+});
+
+test('mirrorInput передаёт значение в saver (saveScale/saveWin)', () => {
+  const { ctx, byId } = loadApp('app.js');
+  const el = ctx.document.getElementById('ui-scale');
+  el.value = '1.1';
+  ctx.mirrorInput.call(el, 'scale-display', 'saveScale', true);
+  assert.strictEqual(byId['scale-display'].textContent, '1.1');
+  assert.strictEqual(ctx.APP_SETTINGS.uiScale, '1.1', 'saver вызван без значения');
+});
+
+test('applyWindowStyle: дефолты, корректные значения и кламп мусора', () => {
+  const { ctx } = loadApp('app.js');
+  const rootVars = {};
+  ctx.document.documentElement.style.setProperty = (k, v) => { rootVars[k] = v; };
+  ctx.APP_SETTINGS = {};
+  ctx.applyWindowStyle();
+  assert.strictEqual(rootVars['--win-alpha'], '1');
+  assert.strictEqual(rootVars['--win-radius'], '20px');
+  ctx.APP_SETTINGS = { winOpacity: '0.55', winRadius: '12' };
+  ctx.applyWindowStyle();
+  assert.strictEqual(rootVars['--win-alpha'], '0.55');
+  assert.strictEqual(rootVars['--win-radius'], '12px');
+  ctx.APP_SETTINGS = { winOpacity: '99', winRadius: '-5' };
+  ctx.applyWindowStyle();
+  assert.strictEqual(rootVars['--win-alpha'], '1');
+  assert.strictEqual(rootVars['--win-radius'], '20px');
+});
+
+test('saveWindowStyle читает ползунки (проценты → доля) и сохраняет настройки', () => {
+  const { ctx, byId } = loadApp('app.js');
+  ctx.document.getElementById('win-radius').value = '14';
+  ctx.document.getElementById('win-opacity').value = '80';
+  ctx.APP_SETTINGS = {};
+  ctx.saveWindowStyle();
+  assert.strictEqual(ctx.APP_SETTINGS.winRadius, '14');
+  assert.strictEqual(ctx.APP_SETTINGS.winOpacity, '0.8');
+});
+
+test('AF_ACTIONS содержит действия окна/авто-обхода из разметки', () => {
+  const { ctx } = loadApp('app.js');
+  ['saveAutoBypass', 'saveWindowStyle', 'winMax', 'setTheme', 'previewColors', 'saveColors', 'resetColors']
+    .forEach((a) => assert.strictEqual(typeof ctx.AF_ACTIONS[a], 'function', a + ' отсутствует'));
+});
+
+test('saveAutoBypass переключает настройку по чекбоксу', () => {
+  const { ctx, byId } = loadApp('app.js');
+  ctx.APP_SETTINGS = {};
+  const cb = ctx.document.getElementById('auto-bypass');
+  cb.checked = false;
+  ctx.saveAutoBypass();
+  assert.strictEqual(ctx.APP_SETTINGS.autoBypass, false);
+  cb.checked = true;
+  ctx.saveAutoBypass();
+  assert.strictEqual(ctx.APP_SETTINGS.autoBypass, true);
+});
+
+// ── 6. Авто-обход без VPN: страна выбрана → Zapret стартует сам ──
+ctest('авто-обход: Zapret поднимается сам и переводит бинды профиля в bypass', async () => {
+  const { ctx, apiStub } = loadApp('app.js');
+  ctx.APP_SETTINGS = {};                           // autoBypass по умолчанию включён
+  ctx.zapretActive = false;
+  ctx.SAVED_BINDS = [{ id: 1, label: 'yt', url: 'https://youtube.com', profile: 'yt', browser: 'chrome', bypass: false }];
+  const ok = await ctx.ensureBypassAuto(false);
+  assert.strictEqual(ok, true, 'обход не включился автоматически');
+  assert.strictEqual(ctx.zapretActive, true);
+  assert.ok(apiStub.calls.zapretStart.length >= 1, 'zapretStart не вызван');
+  await ctx.enableBindsBypassForProfile('yt');
+  assert.strictEqual(ctx.SAVED_BINDS[0].bypass, true, 'бинд профиля не переведён в «С обходом»');
+  assert.ok(apiStub.calls.writeBinds.length >= 1, 'бинды не сохранены');
+});
+
+ctest('авто-обход: «Уже запущен» из main считается успехом', async () => {
+  const { ctx } = loadApp('app.js');
+  ctx.APP_SETTINGS = {};
+  ctx.zapretActive = false;
+  ctx.apiBridge = Object.assign({}, ctx.apiBridge, {
+    zapretStart: () => Promise.resolve({ ok: false, msg: 'Уже запущен' }),
+  });
+  const ok = await ctx.ensureBypassAuto(false);
+  assert.strictEqual(ok, true);
+  assert.strictEqual(ctx.zapretActive, true);
+});
+
+ctest('авто-обход: выключен тумблером → Zapret не стартует', async () => {
+  const { ctx, apiStub } = loadApp('app.js');
+  ctx.APP_SETTINGS = { autoBypass: false };
+  ctx.zapretActive = false;
+  const ok = await ctx.ensureBypassAuto(false);
+  assert.strictEqual(ok, false);
+  assert.strictEqual((apiStub.calls.zapretStart || []).length, 0);
+});
+
+ctest('запуск браузера с bypass сам включает обход до старта', async () => {
+  const { ctx, apiStub } = loadApp('app.js');
+  ctx.APP_SETTINGS = {};
+  ctx.zapretActive = false;
+  await ctx.launchBrowser('https://youtube.com', 'yt', 'chrome', true);
+  assert.ok(apiStub.calls.zapretStart.length >= 1, 'обход не стартовал перед запуском');
+  assert.strictEqual(apiStub.calls.launchBrowser.length, 1);
+  assert.strictEqual(apiStub.calls.launchBrowser[0][0].browser, 'chrome');
+});
+
+ctest('app-бинд уходит в main с browser=app (steam://, ярлыки)', async () => {
+  const { ctx, apiStub } = loadApp('app.js');
+  await ctx.launchBrowser('steam://rungameid/431960', '', 'app', true);
+  assert.strictEqual(apiStub.calls.launchBrowser.length, 1);
+  assert.strictEqual(apiStub.calls.launchBrowser[0][0].browser, 'app');
+  assert.strictEqual(apiStub.calls.launchBrowser[0][0].url, 'steam://rungameid/431960');
+  assert.strictEqual((apiStub.calls.zapretStart || []).length, 0, 'для app-биндов Zapret не нужен');
+});
+
 test('setup.js: SETUP_ACTIONS содержит confirmInstall, skip, skipSetup, launchApp', () => {
   const { ctx } = loadApp('setup.js');
   assert.strictEqual(typeof ctx.SETUP_ACTIONS.confirmInstall, 'function');
