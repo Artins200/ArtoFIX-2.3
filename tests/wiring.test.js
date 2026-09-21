@@ -4,7 +4,7 @@
 
      1. в HTML не осталось inline-обработчиков и inline-скриптов;
      2. каждое data-af-action существует в рендерере;
-     3. каждый api.* вызов рендерера есть в preload;
+     3. каждый rendererApi.* вызов рендерера есть в preload;
      4. каждый канал preload зарегистрирован в main;
      5. рендерер не тянет Node (require/process/__dirname). */
 
@@ -74,7 +74,6 @@ function loadRenderer(file, apiStub) {
     fonts: { check() { return false; } },
   };
   const windowStub = {
-    api: apiStub,
     document: documentStub,
     addEventListener(type, fn) { (listeners[type] = listeners[type] || []).push(fn); },
     removeEventListener() {},
@@ -89,6 +88,12 @@ function loadRenderer(file, apiStub) {
     innerWidth: 1280, innerHeight: 720,
     focus() {},
   };
+  // Electron exposes the bridge as a frozen, read-only global property.
+  if (apiStub !== undefined) {
+    Object.defineProperty(windowStub, 'api', {
+      value: Object.freeze(apiStub), writable: false, configurable: false, enumerable: true,
+    });
+  }
   windowStub.window = windowStub;
   const ctx = vm.createContext(Object.assign(windowStub, {
     document: documentStub, navigator: windowStub.navigator, localStorage: windowStub.localStorage,
@@ -121,6 +126,34 @@ function apiStub() {
 let rendererCtx;
 test('app.js загружается без Node и без исключений', () => {
   rendererCtx = loadRenderer('app.js', apiStub());
+});
+
+test('оба рендерера сохраняют read-only мост preload и используют отдельный alias', () => {
+  for (const file of ['app.js', 'setup.js']) {
+    const bridge = apiStub();
+    const ctx = loadRenderer(file, bridge);
+    assert.strictEqual(ctx.api, bridge, file + ': мост заменён');
+    assert.strictEqual(ctx.rendererApi, bridge, file + ': alias не указывает на мост');
+    const descriptor = Object.getOwnPropertyDescriptor(ctx, 'api');
+    assert.strictEqual(descriptor.writable, false);
+    assert.strictEqual(descriptor.configurable, false);
+    assert.ok(Object.isFrozen(bridge));
+    // VM globals do not always throw on writes like Chromium's Window does.
+    assert.strictEqual(/^\s*(?:var|let|const)\s+api\b/m.test(read(file)), false,
+      file + ': глобальное объявление конфликтует с window.api');
+  }
+});
+
+test('app.js использует локальную заглушку без замены window.api', () => {
+  for (const bridge of [undefined, { ready: false }]) {
+    const ctx = loadRenderer('app.js', bridge);
+    assert.strictEqual(ctx.API_READY, false);
+    assert.strictEqual(ctx.api, bridge);
+    assert.strictEqual(ctx.rendererApi.ready, false);
+    assert.notStrictEqual(ctx.rendererApi, bridge);
+    assert.strictEqual(typeof ctx.rendererApi.onNavigate(), 'function');
+    if (bridge === undefined) assert.strictEqual(Object.hasOwn(ctx, 'api'), false);
+  }
 });
 
 test('каждое data-af-action из index.html есть в AF_ACTIONS', () => {
@@ -222,11 +255,11 @@ test('preload отдаёт ровно один мост window.api', () => {
   assert.strictEqual(bridge.obj.ready, true);
 });
 
-test('все api.* вызовы рендерера есть в preload', () => {
+test('все rendererApi.* вызовы рендерера есть в preload', () => {
   const used = new Set();
   for (const f of ['app.js', 'setup.js']) {
-    // только вызовы вида api.method( — и не внутри строк-доменов вроде 'api.amplitude.com'
-    const re = /(?:^|[^'"\w.])api\.([A-Za-z_$][\w$]*)\s*\(/g;
+    // только вызовы вида rendererApi.method( — и не внутри строк-доменов вроде 'api.amplitude.com'
+    const re = /(?:^|[^'"\w.])rendererApi\.([A-Za-z_$][\w$]*)\s*\(/g;
     let m;
     while ((m = re.exec(read(f)))) used.add(m[1]);
   }
