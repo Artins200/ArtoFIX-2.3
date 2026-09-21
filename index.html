@@ -6,139 +6,132 @@
 <style>
 
 /* =========================================
-   VARIABLES + THEMES
+   DESIGN TOKENS — светлая «дневная» тема
+   (без неона и киберпанка: мягкие поверхности,
+   один акцент, деликатные тени)
    ========================================= */
 :root {
-  --ac:   #00f0ff;
-  --ac2:  #7b2fff;
-  --acr:  0,240,255;
-  --ac2r: 123,47,255;
-  --red:  #ff1a4e;
-  --redr: 255,26,78;
-  --grn:  #00ffaa;
-  --grnr: 0,255,170;
-  --ylw:  #ffd000;
-  --bg:   #04050f;
-  --bg2:  #070818;
-  --panelbg: rgba(4,5,15,0.97);
-  --cardbg:  rgba(255,255,255,0.032);
-  --cardbr:  rgba(255,255,255,0.075);
-  --tx:   #cdd5f0;
-  --tx2:  rgba(180,190,220,0.35);
-  --font: 'Segoe UI',system-ui,-apple-system,sans-serif;
-  --mono: Consolas,'Courier New',monospace;
-  --radius: 14px;
-  --sidebar-w: 220px;
-  --glow: 0 0 20px rgba(var(--acr),.35), 0 0 60px rgba(var(--acr),.1);
+  --ac:   #4f46e5;   /* индиго */
+  --acr:  79,70,229;
+  --ac2:  #8b5cf6;   /* мягкий фиолет — компаньон */
+  --ac2r: 139,92,246;
+  --grn:  #16a34a;  --grnr: 22,163,74;
+  --red:  #e5484d;  --redr: 229,72,77;
+  --ylw:  #d97706;  --ylwr: 217,119,6;
+
+  --bg:   #edf0f7;
+  --panel:#f7f8fc;
+  --card: #ffffff;
+  --card-br: #e4e8f1;
+  --divider: #eceff6;
+
+  --tx:   #1d2436;   /* основной текст */
+  --tx2:  #5d6779;   /* вторичный */
+  --tx3:  #98a1b3;   /* приглушённый */
+
+  --btn-soft: #eef1f8;
+  --input-bg: #f4f6fb;
+  --row-hover: rgba(29,36,54,.045);
+
+  --font: 'Segoe UI Variable Text','Segoe UI',system-ui,-apple-system,'Helvetica Neue',Arial,sans-serif;
+  --mono: 'Cascadia Code',Consolas,'Courier New',monospace;
+  --radius: 16px;
+  --sidebar-w: 232px;
 }
 
-/* ── THEMES ── */
-body.th-cyber   { --ac:#ff00e5; --ac2:#ffe600; --acr:255,0,229;   --ac2r:255,230,0;   }
-body.th-hacker  { --ac:#00ff41; --ac2:#00aa22; --acr:0,255,65;    --ac2r:0,170,34;    --font:Consolas,'Courier New',monospace; }
-body.th-blood   { --ac:#ff2222; --ac2:#ff6600; --acr:255,34,34;   --ac2r:255,102,0;   --bg:#060001; --panelbg:rgba(8,1,1,0.97); }
-body.th-ocean   { --ac:#00c8ff; --ac2:#0055ff; --acr:0,200,255;   --ac2r:0,85,255;    --bg:#00060f; --panelbg:rgba(0,5,16,0.97); }
-body.th-gold    { --ac:#ffd000; --ac2:#ff8800; --acr:255,208,0;   --ac2r:255,136,0;   --bg:#070600; --panelbg:rgba(9,8,0,0.97); }
-body.th-matrix  { --ac:#00ff41; --ac2:#003311; --acr:0,255,65;    --ac2r:0,51,17;     --bg:#000800; --panelbg:rgba(0,6,0,0.98); --font:Consolas,'Courier New',monospace; }
-body.th-rose    { --ac:#ff6eb4; --ac2:#c44dff; --acr:255,110,180; --ac2r:196,77,255;  --bg:#09010a; --panelbg:rgba(10,2,12,0.97); }
-body.th-ice     { --ac:#80ffff; --ac2:#4488ff; --acr:128,255,255; --ac2r:68,136,255;  --bg:#010810; --panelbg:rgba(1,8,18,0.97); }
-body.th-toxic   { --ac:#aaff00; --ac2:#ff8800; --acr:170,255,0;   --ac2r:255,136,0;   --bg:#030800; --panelbg:rgba(3,8,0,0.97); }
+/* ── АЦЕНТНЫЕ ТЕМЫ (светлые) ── */
+body.th-mint  { --ac:#059669; --acr:5,150,105;   --ac2:#14b8a6; --ac2r:20,184,166;  }
+body.th-sky   { --ac:#0284c7; --acr:2,132,199;   --ac2:#38bdf8; --ac2r:56,189,248;  }
+body.th-amber { --ac:#d97706; --acr:217,119,6;   --ac2:#f59e0b; --ac2r:245,158,11;  }
+body.th-rose  { --ac:#e11d48; --acr:225,29,72;   --ac2:#f472b6; --ac2r:244,114,182; }
+
+/* ── ТЕМНАЯ ТЕМА «НОЧЬ» — чистый тёмный, без неона ── */
+body.th-night {
+  --bg:#0d1320; --panel:#111827; --card:#161f31;
+  --card-br:#243049; --divider:#1c2537;
+  --tx:#e7ecf5; --tx2:#94a0b6; --tx3:#5f6c85;
+  --ac:#8195f8; --acr:129,149,248; --ac2:#b39dfb; --ac2r:179,157,251;
+  --grn:#34d399; --grnr:52,211,153;
+  --red:#f2636a; --redr:242,99,106;
+  --ylw:#f4bf55; --ylwr:244,191,85;
+  --btn-soft:#1d2839; --input-bg:#0f1729; --row-hover:rgba(231,236,245,.055);
+}
 
 /* =========================================
    RESET
    ========================================= */
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
-html, body { width:100%; height:100%; overflow:hidden; background:var(--bg); color:var(--tx); font-family:var(--font); }
-button  { cursor:pointer; font-family:var(--font); }
-input, select, textarea { font-family:var(--mono); user-select:text; cursor:text; }
+html, body {
+  width:100%; height:100%; overflow:hidden;
+  color:var(--tx); font-family:var(--font); font-size:13px;
+}
+body {
+  background:
+    radial-gradient(1100px 460px at 80% -10%, rgba(var(--acr),.075), transparent 62%),
+    radial-gradient(900px 420px at -12% 110%, rgba(var(--ac2r),.055), transparent 60%),
+    var(--bg);
+  transition: background .35s ease;
+}
+button  { cursor:pointer; font-family:var(--font); color:inherit; }
+input, select, textarea { font-family:var(--mono); user-select:text; cursor:text; color:var(--tx); }
 select  { cursor:pointer; }
-
-/* =========================================
-   CANVAS + SCANLINES + NOISE
-   ========================================= */
-#bgcanvas { position:fixed; inset:0; z-index:0; pointer-events:none; }
-#scanlines {
-  position:fixed; inset:0; z-index:1; pointer-events:none;
-  background: repeating-linear-gradient(
-    0deg, transparent, transparent 2px,
-    rgba(0,0,0,0.055) 2px, rgba(0,0,0,0.055) 4px
-  );
-}
-/* Vignette overlay */
-#scanlines::after {
-  content:''; position:absolute; inset:0; pointer-events:none;
-  background:radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,.55) 100%);
-}
+::selection { background:rgba(var(--acr),.22); }
+:focus-visible { outline:2px solid rgba(var(--acr),.55); outline-offset:2px; }
 
 /* =========================================
    APP SHELL
    ========================================= */
 #app {
   position:relative; z-index:2; width:100vw; height:100vh;
-  background:var(--panelbg); display:flex; flex-direction:column;
-  animation: appBoot .5s cubic-bezier(.22,1,.36,1) both;
+  background:var(--bg); display:flex; flex-direction:column;
+  animation: appBoot .45s cubic-bezier(.22,1,.36,1) both;
 }
 @keyframes appBoot {
-  from { opacity:0; transform:scale(.975) translateY(8px); filter:blur(4px); }
-  to   { opacity:1; transform:scale(1)    translateY(0);   filter:blur(0); }
+  from { opacity:0; transform:translateY(10px) scale(.99); }
+  to   { opacity:1; transform:translateY(0)    scale(1);   }
 }
 
 /* =========================================
    TITLEBAR
    ========================================= */
 #titlebar {
-  height:44px; flex-shrink:0;
-  background:rgba(0,0,0,.6);
-  border-bottom:1px solid rgba(var(--acr),.1);
+  height:48px; flex-shrink:0;
+  background:var(--panel);
+  border-bottom:1px solid var(--divider);
   display:flex; align-items:center; justify-content:space-between;
-  padding:0 16px; -webkit-app-region:drag;
-  position:relative; z-index:10; 
-}
-/* Gradient underline */
-#titlebar::after {
-  content:''; position:absolute; bottom:0; left:0; right:0; height:1px; pointer-events:none;
-  background:linear-gradient(90deg,
-    transparent 0%,
-    rgba(var(--acr),.9) 30%,
-    rgba(var(--ac2r),.6) 60%,
-    transparent 100%
-  );
+  padding:0 14px 0 18px; -webkit-app-region:drag;
+  position:relative; z-index:10;
 }
 
-/* Logo */
 #logo {
   display:flex; align-items:center; gap:10px; -webkit-app-region:no-drag;
-  font-family:Consolas,'Courier New',monospace; font-weight:900; font-size:12.5px;
-  letter-spacing:3.5px; cursor:default; user-select:none;
+  font-weight:700; font-size:13px; letter-spacing:1.6px; cursor:default; user-select:none;
 }
 #logo-box {
-  width:28px; height:28px; border:1.5px solid rgba(var(--acr),.6);
-  border-radius:7px; display:flex; align-items:center; justify-content:center;
-  font-size:13px; position:relative; overflow:hidden;
-  animation:logoGlow 4s ease-in-out infinite;
-}
-#logo-box::before {
-  content:''; position:absolute; inset:0; pointer-events:none;
-  background:linear-gradient(135deg, rgba(var(--acr),.15), transparent);
-}
-@keyframes logoGlow {
-  0%,100% { box-shadow:0 0 8px rgba(var(--acr),.3); }
-  50%     { box-shadow:0 0 22px rgba(var(--acr),.8), 0 0 44px rgba(var(--acr),.2); }
-}
-#logo .logo-accent { color:var(--ac); letter-spacing:1px; font-size:11px; opacity:.8; }
-
-/* Window buttons */
-#winbtns { -webkit-app-region:no-drag; display:flex; gap:5px; align-items:center; }
-.winbtn {
-  width:28px; height:28px; border-radius:7px;
-  background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.07);
-  color:rgba(255,255,255,.3); font-size:11px;
+  width:30px; height:30px; border-radius:9px;
+  background:linear-gradient(135deg, rgba(var(--acr),.16), rgba(var(--ac2r),.16));
+  border:1px solid rgba(var(--acr),.25);
   display:flex; align-items:center; justify-content:center;
-  transition:all .18s; cursor:pointer;
+  overflow:hidden;
 }
-.winbtn:hover { background:rgba(255,255,255,.1); color:#fff; transform:scale(1.08); }
+#logo-box img { display:block; }
+.logo-accent {
+  font-size:10px; font-weight:700; letter-spacing:.5px;
+  padding:3px 8px; border-radius:20px; margin-left:2px;
+  background:rgba(var(--acr),.1); color:var(--ac);
+}
+
+#winbtns { -webkit-app-region:no-drag; display:flex; gap:4px; align-items:center; }
+.winbtn {
+  width:28px; height:28px; border-radius:8px;
+  background:transparent; border:1px solid transparent;
+  color:var(--tx3); font-size:12px;
+  display:flex; align-items:center; justify-content:center;
+  transition:all .16s; cursor:pointer;
+}
+.winbtn:hover { background:var(--btn-soft); color:var(--tx); }
 #winbtn-close:hover {
-  background:rgba(var(--redr),.22); border-color:rgba(var(--redr),.55);
-  color:var(--red); box-shadow:0 0 12px rgba(var(--redr),.4);
+  background:rgba(var(--redr),.1); border-color:rgba(var(--redr),.25); color:var(--red);
 }
 
 /* =========================================
@@ -151,703 +144,642 @@ select  { cursor:pointer; }
    ========================================= */
 #sidebar {
   width:var(--sidebar-w); flex-shrink:0;
-  background:rgba(0,0,0,.28);
-  border-right:1px solid rgba(255,255,255,.04);
+  background:var(--panel);
+  border-right:1px solid var(--divider);
   display:flex; flex-direction:column;
-  padding:12px 10px 10px; gap:2px;
-  position:relative; overflow:hidden;
-}
-/* Sidebar accent line */
-#sidebar::before {
-  content:''; position:absolute; top:0; right:0; width:1px; height:100%; pointer-events:none;
-  background:linear-gradient(180deg, transparent, rgba(var(--acr),.3) 40%, rgba(var(--ac2r),.2) 70%, transparent);
+  padding:14px 12px 12px; gap:2px;
 }
 
 .nav-sep {
-  font-size:8px; letter-spacing:3px; color:var(--tx2);
-  padding:10px 10px 5px; text-transform:uppercase;
-  font-family:var(--mono); position:relative;
-}
-.nav-sep::after {
-  content:''; position:absolute; bottom:0; left:10px; right:10px; height:1px;
-  background:rgba(255,255,255,.05);
+  font-size:9.5px; letter-spacing:1.8px; color:var(--tx3);
+  padding:12px 10px 6px; text-transform:uppercase; font-weight:700;
 }
 
 .nav-btn {
-  padding:10px 12px; border-radius:10px; background:transparent;
+  padding:9px 12px; border-radius:10px; background:transparent;
   color:var(--tx2); border:1px solid transparent;
-  font-weight:600; font-size:12px; text-align:left;
-  letter-spacing:.5px; display:flex; align-items:center; gap:9px;
-  position:relative; overflow:hidden; transition:all .2s; width:100%;
+  font-weight:600; font-size:12.5px; text-align:left;
+  display:flex; align-items:center; gap:10px;
+  transition:all .16s; width:100%;
 }
-.nav-btn .nav-icon { font-size:14px; flex-shrink:0; transition:transform .25s; }
-.nav-btn:hover {
-  background:rgba(255,255,255,.06); color:rgba(255,255,255,.85);
-  transform:translateX(3px);
-}
-.nav-btn:hover .nav-icon { transform:scale(1.15); }
-/* Ripple on click */
-.nav-btn::after {
-  content:''; position:absolute; inset:0; border-radius:10px; pointer-events:none;
-  background:radial-gradient(circle at var(--mx,50%) var(--my,50%), rgba(var(--acr),.18) 0%, transparent 70%);
-  opacity:0; transition:opacity .4s;
-}
-.nav-btn:active::after { opacity:1; }
-
+.nav-btn .nav-icon { font-size:14px; flex-shrink:0; opacity:.9; transition:transform .2s; }
+.nav-btn:hover { background:var(--row-hover); color:var(--tx); }
+.nav-btn:hover .nav-icon { transform:scale(1.1); }
 .nav-btn.is-active {
-  background:linear-gradient(90deg, rgba(var(--acr),.1), rgba(var(--ac2r),.05));
-  color:var(--ac); border-color:rgba(var(--acr),.2);
-  box-shadow:inset 0 0 20px rgba(var(--acr),.05);
+  background:rgba(var(--acr),.1);
+  color:var(--ac); border-color:rgba(var(--acr),.14);
 }
-.nav-btn.is-active::before {
-  content:''; position:absolute; left:0; top:15%; bottom:15%; width:3px; pointer-events:none;
-  background:linear-gradient(180deg, var(--ac), var(--ac2));
-  border-radius:0 2px 2px 0;
-  box-shadow:0 0 12px rgba(var(--acr),.9), 0 0 24px rgba(var(--acr),.3);
-}
+.nav-btn.is-active .nav-icon { opacity:1; }
 
 /* =========================================
    STATUS BOX (sidebar bottom)
    ========================================= */
 #status-box {
-  margin-top:auto; padding:13px 12px;
-  background:rgba(0,0,0,.45); border-radius:12px;
-  border:1px solid rgba(var(--acr),.1);
-  position:relative; overflow:hidden;
+  margin-top:auto; padding:13px;
+  background:var(--card); border-radius:14px;
+  border:1px solid var(--card-br);
+  box-shadow:0 1px 2px rgba(20,24,44,.04);
 }
-#status-box::before {
-  content:''; position:absolute; top:0; left:0; right:0; height:1px; pointer-events:none;
-  background:linear-gradient(90deg, transparent, rgba(var(--acr),.4), transparent);
-}
-.status-row { display:flex; align-items:center; gap:9px; margin-bottom:12px; }
+.status-row { display:flex; align-items:center; gap:9px; margin-bottom:11px; }
 
 #zapret-dot {
-  width:9px; height:9px; border-radius:50%;
-  background:rgba(255,255,255,.08); flex-shrink:0;
-  border:1.5px solid rgba(255,255,255,.12); transition:all .5s;
+  width:10px; height:10px; border-radius:50%;
+  background:#c7cdd9; flex-shrink:0; transition:all .4s;
 }
+body.th-night #zapret-dot { background:#39445c; }
 #zapret-dot.is-on {
   background:var(--grn);
-  border-color:var(--grn);
-  box-shadow:0 0 10px rgba(var(--grnr),.9), 0 0 24px rgba(var(--grnr),.4);
-  animation:dotPulse 2s ease-in-out infinite;
+  animation:dotPulse 2.2s ease-in-out infinite;
 }
 @keyframes dotPulse {
-  0%,100% { transform:scale(1); opacity:1; }
-  50%     { transform:scale(1.25); opacity:.7; }
+  0%,100% { transform:scale(1); box-shadow:0 0 0 0 rgba(var(--grnr),.35); }
+  50%     { transform:scale(1.15); box-shadow:0 0 0 5px rgba(var(--grnr),0); }
 }
 
 #zapret-label {
-  font-size:8.5px; letter-spacing:2.5px; color:var(--tx2);
-  font-family:var(--mono); transition:.4s;
+  font-size:9.5px; letter-spacing:2px; color:var(--tx3); font-weight:700; transition:.3s;
 }
-#zapret-label.is-on { color:var(--grn); text-shadow:0 0 8px rgba(var(--grnr),.6); }
+#zapret-label.is-on { color:var(--grn); }
 
 .status-btn {
-  display:block; width:100%; padding:9px; border:none; border-radius:9px;
-  font-size:9.5px; letter-spacing:1.5px; font-weight:700; text-transform:uppercase;
-  font-family:var(--font); margin-bottom:6px; transition:all .22s; cursor:pointer;
-  position:relative; overflow:hidden;
+  display:block; width:100%; padding:10px; border:none; border-radius:10px;
+  font-size:10.5px; letter-spacing:.8px; font-weight:700; text-transform:uppercase;
+  font-family:var(--font); margin-bottom:6px; transition:all .18s; cursor:pointer;
 }
 .status-btn:last-child { margin-bottom:0; }
-.status-btn::before {
-  content:''; position:absolute; inset:0; pointer-events:none;
-  background:linear-gradient(135deg, rgba(255,255,255,.1), transparent);
-  opacity:0; transition:.2s;
-}
-.status-btn:hover::before { opacity:1; }
 
 .sb-start {
-  background:linear-gradient(135deg, var(--ac), var(--ac2));
-  color:#000; box-shadow:0 4px 16px rgba(var(--acr),.35);
+  background:var(--ac); color:#fff;
+  box-shadow:0 1px 2px rgba(var(--acr),.3);
 }
-.sb-start:hover {
-  box-shadow:0 6px 28px rgba(var(--acr),.65), 0 0 40px rgba(var(--ac2r),.2);
-  transform:translateY(-2px);
-}
+.sb-start:hover { filter:brightness(1.08); box-shadow:0 4px 14px rgba(var(--acr),.3); transform:translateY(-1px); }
+.sb-start:active { transform:none; }
+
 .sb-stop {
-  background:rgba(var(--redr),.07); color:var(--red);
-  border:1px solid rgba(var(--redr),.25);
+  background:transparent; color:var(--red);
+  border:1px solid rgba(var(--redr),.32);
 }
-.sb-stop:hover {
-  background:rgba(var(--redr),.18);
-  box-shadow:0 0 16px rgba(var(--redr),.35);
-  transform:translateY(-1px);
-}
+.sb-stop:hover { background:rgba(var(--redr),.07); border-color:rgba(var(--redr),.5); }
 
 /* =========================================
    CONTENT AREA
    ========================================= */
 #content-area {
-  flex:1; padding:24px 26px; overflow-y:auto; scroll-behavior:smooth;
+  flex:1; padding:26px 30px; overflow-y:auto; scroll-behavior:smooth;
 }
-#content-area::-webkit-scrollbar { width:4px; }
+#content-area::-webkit-scrollbar { width:10px; }
 #content-area::-webkit-scrollbar-track { background:transparent; }
-#content-area::-webkit-scrollbar-thumb {
-  background:rgba(var(--acr),.2); border-radius:4px;
-}
-#content-area::-webkit-scrollbar-thumb:hover { background:rgba(var(--acr),.4); }
+#content-area::-webkit-scrollbar-thumb { background:var(--card-br); border-radius:6px; border:3px solid var(--bg); }
+#content-area::-webkit-scrollbar-thumb:hover { background:var(--tx3); }
 
-/* Tab animation — staggered entry */
-.tab-page { animation:tabIn .32s cubic-bezier(.22,1,.36,1) both; }
+.tab-page { animation:tabIn .3s cubic-bezier(.22,1,.36,1) both; }
 @keyframes tabIn {
-  from { opacity:0; transform:translateY(14px) scale(.99); filter:blur(2px); }
-  to   { opacity:1; transform:translateY(0)     scale(1);  filter:blur(0); }
+  from { opacity:0; transform:translateY(10px); }
+  to   { opacity:1; transform:translateY(0); }
 }
 
 /* =========================================
    TYPOGRAPHY
    ========================================= */
 .page-title {
-  font-size:16px; font-weight:700; letter-spacing:2.5px; text-transform:uppercase;
-  margin-bottom:22px; display:flex; align-items:center; gap:12px;
-  font-family:Consolas,'Courier New',monospace; animation:titleSlide .4s cubic-bezier(.22,1,.36,1);
+  font-size:17px; font-weight:700; letter-spacing:.2px; color:var(--tx);
+  margin-bottom:22px; display:flex; align-items:center; gap:11px;
 }
-@keyframes titleSlide { from{opacity:0;transform:translateX(-10px)} to{opacity:1;transform:translateX(0)} }
-.page-title-accent { color:var(--ac); filter:drop-shadow(0 0 8px rgba(var(--acr),.6)); }
+.page-title .page-title-accent { font-size:17px; }
 .page-title-line {
-  flex:1; height:1px;
-  background:linear-gradient(90deg, rgba(var(--acr),.3), rgba(var(--ac2r),.15), transparent);
+  flex:1; height:1px; background:var(--divider);
 }
 
 .section-title {
-  font-size:9.5px; letter-spacing:2.5px; color:var(--ac); text-transform:uppercase;
-  margin-bottom:13px; font-family:var(--mono);
-  text-shadow:0 0 10px rgba(var(--acr),.4);
+  font-size:11px; letter-spacing:.6px; color:var(--tx2); text-transform:uppercase;
+  font-weight:700; margin-bottom:13px; display:flex; align-items:center; gap:8px;
 }
+.section-title::before {
+  content:''; width:6px; height:6px; border-radius:50%;
+  background:var(--ac); flex-shrink:0;
+}
+
 .field-label {
-  font-size:9.5px; color:var(--tx2); font-family:var(--mono);
-  display:block; margin-bottom:5px; letter-spacing:.7px;
+  font-size:11px; color:var(--tx2); font-weight:600;
+  display:block; margin-bottom:6px;
 }
 
 /* =========================================
    GRIDS
    ========================================= */
-.grid-auto { display:grid; grid-template-columns:repeat(auto-fill,minmax(255px,1fr)); gap:14px; }
-.grid-2    { display:grid; grid-template-columns:1fr 1fr; gap:9px; }
+.grid-auto { display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:14px; }
+.grid-2    { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
 .grid-3    { display:grid; grid-template-columns:repeat(3,1fr); gap:7px; }
 
 /* =========================================
    CARDS
    ========================================= */
 .af-card {
-  background:var(--cardbg); border:1px solid var(--cardbr);
+  background:var(--card); border:1px solid var(--card-br);
   border-radius:var(--radius); padding:18px;
-  position:relative; overflow:hidden;
-  transition:border-color .25s, transform .25s, box-shadow .25s;
-  
-}
-/* Top glow strip */
-.af-card::after {
-  content:''; position:absolute; top:0; left:15%; right:15%; height:1px;
-  background:linear-gradient(90deg, transparent, rgba(var(--acr),.25), transparent);
-  transition:.3s; pointer-events:none;
-}
-/* Radial hover glow */
-.af-card::before {
-  content:''; position:absolute; inset:0; pointer-events:none;
-  background:radial-gradient(circle at 50% -10%, rgba(var(--acr),.07), transparent 65%);
-  opacity:0; transition:.35s;
+  box-shadow:0 1px 2px rgba(20,24,44,.04);
+  transition:border-color .22s, transform .22s, box-shadow .22s;
 }
 .af-card:hover {
-  border-color:rgba(var(--acr),.22);
-  transform:translateY(-4px);
-  box-shadow:0 18px 40px rgba(0,0,0,.55), 0 0 0 1px rgba(var(--acr),.06);
+  border-color:rgba(var(--acr),.35);
+  transform:translateY(-2px);
+  box-shadow:0 10px 28px rgba(20,24,44,.08);
 }
-.af-card:hover::before  { opacity:1; }
-.af-card:hover::after   { background:linear-gradient(90deg,transparent,rgba(var(--acr),.5),transparent); }
 
 /* =========================================
    BUTTONS
    ========================================= */
 .btn {
-  display:inline-block; padding:9px 15px; border:none; border-radius:9px;
-  font-size:10px; font-weight:700; letter-spacing:1.5px; text-transform:uppercase;
-  font-family:var(--font); transition:all .22s; cursor:pointer;
-  position:relative; overflow:hidden;
+  display:inline-block; padding:9px 16px; border:none; border-radius:10px;
+  font-size:11.5px; font-weight:700; letter-spacing:.4px;
+  font-family:var(--font); transition:all .18s; cursor:pointer;
+  border:1px solid transparent;
 }
-/* Shimmer effect on all buttons */
-.btn::before {
-  content:''; position:absolute; top:0; left:-100%; width:60%; height:100%;
-  background:linear-gradient(90deg, transparent, rgba(255,255,255,.12), transparent);
-  transition:left .45s ease; pointer-events:none;
-}
-.btn:hover::before { left:150%; }
+.btn:disabled { opacity:.45; pointer-events:none; }
 
 .btn-primary {
-  background:linear-gradient(135deg, var(--ac), var(--ac2));
-  color:#000 !important;
-  box-shadow:0 4px 14px rgba(var(--acr),.3);
+  background:var(--ac); color:#fff;
+  box-shadow:0 1px 2px rgba(var(--acr),.3);
 }
 .btn-primary:hover {
-  box-shadow:0 6px 28px rgba(var(--acr),.6), 0 0 40px rgba(var(--ac2r),.15);
-  transform:translateY(-2px);
+  filter:brightness(1.08);
+  box-shadow:0 4px 16px rgba(var(--acr),.32);
+  transform:translateY(-1px);
 }
-.btn-primary:active { transform:translateY(0); box-shadow:0 2px 8px rgba(var(--acr),.3); }
+.btn-primary:active { transform:none; box-shadow:0 1px 2px rgba(var(--acr),.3); }
 
 .btn-secondary {
-  background:rgba(255,255,255,.06); color:rgba(255,255,255,.8) !important;
-  border:1px solid rgba(255,255,255,.1);
+  background:var(--btn-soft); color:var(--tx);
+  border-color:var(--card-br);
 }
 .btn-secondary:hover {
-  background:rgba(255,255,255,.11); color:#fff !important;
-  border-color:rgba(255,255,255,.22);
+  background:var(--row-hover); border-color:var(--tx3);
   transform:translateY(-1px);
-  box-shadow:0 4px 16px rgba(0,0,0,.4);
 }
 
 .btn-danger {
-  background:rgba(var(--redr),.08); color:var(--red) !important;
-  border:1px solid rgba(var(--redr),.28);
+  background:rgba(var(--redr),.07); color:var(--red);
+  border-color:rgba(var(--redr),.3);
 }
-.btn-danger:hover {
-  background:rgba(var(--redr),.2);
-  box-shadow:0 0 18px rgba(var(--redr),.4);
-  transform:translateY(-1px);
+.btn-danger:hover { background:rgba(var(--redr),.14); border-color:rgba(var(--redr),.5); transform:translateY(-1px); }
+
+.btn-glow {
+  background:rgba(var(--acr),.08); color:var(--ac);
+  border-color:rgba(var(--acr),.38);
 }
+.btn-glow:hover { background:rgba(var(--acr),.15); border-color:rgba(var(--acr),.6); transform:translateY(-1px); }
 
 .btn-full { width:100%; display:block; text-align:center; margin-bottom:8px; }
 .btn-full:last-child { margin-bottom:0; }
-
-/* GLOW button variant */
-.btn-glow {
-  background:transparent; color:var(--ac) !important;
-  border:1px solid rgba(var(--acr),.4);
-  box-shadow:0 0 12px rgba(var(--acr),.15), inset 0 0 12px rgba(var(--acr),.04);
-}
-.btn-glow:hover {
-  background:rgba(var(--acr),.08);
-  border-color:rgba(var(--acr),.7);
-  box-shadow:0 0 24px rgba(var(--acr),.4), inset 0 0 20px rgba(var(--acr),.08);
-  transform:translateY(-2px);
-}
 
 /* =========================================
    INPUTS
    ========================================= */
 .af-input {
-  width:100%; padding:10px 14px; border-radius:9px;
-  border:1px solid rgba(255,255,255,.1);
-  background:rgba(0,0,0,.55); color:#fff; font-size:12.5px;
-  outline:none; font-family:var(--mono); transition:all .22s;
+  width:100%; padding:10px 12px; border-radius:10px;
+  border:1px solid var(--card-br);
+  background:var(--input-bg); color:var(--tx); font-size:12.5px;
+  outline:none; transition:all .18s;
   display:block; margin-bottom:9px;
 }
 .af-input:focus {
-  border-color:rgba(var(--acr),.6);
-  box-shadow:0 0 0 3px rgba(var(--acr),.1), 0 0 16px rgba(var(--acr),.12);
-  background:rgba(0,0,0,.65);
+  border-color:var(--ac);
+  background:var(--card);
+  box-shadow:0 0 0 3px rgba(var(--acr),.14);
 }
-.af-input::placeholder { color:rgba(255,255,255,.2); }
+.af-input::placeholder { color:var(--tx3); }
 select.af-input { cursor:pointer; }
-select.af-input option { background:#0d0f1e; }
+select.af-input option { background:var(--card); color:var(--tx); }
 
 /* =========================================
    DATA ROWS
    ========================================= */
 .data-row {
   display:flex; align-items:center; justify-content:space-between;
-  padding:9px 0; border-bottom:1px solid rgba(255,255,255,.04);
-  transition:background .2s;
+  padding:9px 0; border-bottom:1px solid var(--divider);
 }
 .data-row:last-child { border-bottom:none; }
-.data-row:hover { background:rgba(var(--acr),.03); margin:0 -6px; padding:9px 6px; border-radius:6px; }
-.data-label { color:var(--tx2); font-family:var(--mono); font-size:10px; }
-.data-value { color:var(--ac); font-weight:700; font-family:var(--mono); font-size:10.5px; }
+.data-label { color:var(--tx2); font-size:11.5px; font-weight:600; }
+.data-value { color:var(--tx); font-weight:700; font-size:12px; }
 
 /* =========================================
    PROFILE CARDS
    ========================================= */
 .profile-card {
-  background:var(--cardbg); border:1px solid var(--cardbr);
-  border-radius:var(--radius); padding:14px;
+  background:var(--card); border:1px solid var(--card-br);
+  border-radius:14px; padding:14px;
   display:flex; align-items:center; gap:13px;
-  transition:all .22s; cursor:pointer; position:relative; overflow:hidden;
-}
-.profile-card::before {
-  content:''; position:absolute; inset:0; pointer-events:none;
-  background:linear-gradient(135deg, rgba(var(--acr),.04), transparent);
-  opacity:0; transition:.25s;
+  box-shadow:0 1px 2px rgba(20,24,44,.04);
+  transition:all .2s; cursor:pointer;
 }
 .profile-card:hover {
-  border-color:rgba(var(--acr),.28);
-  transform:translateY(-3px) scale(1.01);
-  box-shadow:0 12px 30px rgba(0,0,0,.5);
+  border-color:rgba(var(--acr),.4);
+  transform:translateY(-2px);
+  box-shadow:0 10px 24px rgba(20,24,44,.08);
 }
-.profile-card:hover::before { opacity:1; }
 
 .profile-ava {
-  width:42px; height:42px; border-radius:10px; flex-shrink:0;
-  background:linear-gradient(135deg, rgba(var(--acr),.15), rgba(var(--ac2r),.15));
-  border:1px solid rgba(var(--acr),.25);
+  width:44px; height:44px; border-radius:12px; flex-shrink:0;
+  background:rgba(var(--acr),.09);
+  border:1px solid rgba(var(--acr),.18);
   display:flex; align-items:center; justify-content:center;
-  font-size:20px; transition:transform .25s;
+  font-size:20px; transition:transform .2s;
 }
-.profile-card:hover .profile-ava { transform:scale(1.08) rotate(-3deg); }
-.profile-name { font-size:13px; font-weight:700; margin-bottom:2px; }
-.profile-meta { font-size:10px; color:var(--tx2); font-family:var(--mono); }
+.profile-card:hover .profile-ava { transform:scale(1.05); }
+.profile-name { font-size:13.5px; font-weight:700; margin-bottom:2px; color:var(--tx); }
+.profile-meta { font-size:10.5px; color:var(--tx3); font-family:var(--mono); }
 .profile-del {
   margin-left:auto; width:28px; height:28px; border-radius:8px; flex-shrink:0;
-  background:rgba(var(--redr),.05); border:1px solid rgba(var(--redr),.15);
-  color:rgba(var(--redr),.45); font-size:13px;
-  display:flex; align-items:center; justify-content:center; transition:.18s; cursor:pointer;
+  background:transparent; border:1px solid transparent;
+  color:var(--tx3); font-size:13px;
+  display:flex; align-items:center; justify-content:center; transition:.16s; cursor:pointer;
 }
-.profile-del:hover {
-  background:rgba(var(--redr),.22); color:var(--red);
-  box-shadow:0 0 12px rgba(var(--redr),.3);
-  transform:scale(1.1);
-}
+.profile-del:hover { background:rgba(var(--redr),.1); border-color:rgba(var(--redr),.25); color:var(--red); }
+
 .profile-add {
-  border:1px dashed rgba(255,255,255,.1); border-radius:var(--radius);
+  border:1.5px dashed var(--card-br); border-radius:14px;
   padding:20px; display:flex; align-items:center; justify-content:center;
-  gap:10px; color:var(--tx2); font-size:11px; letter-spacing:1px;
-  transition:all .22s; cursor:pointer; min-height:72px;
-  flex-direction:column;
+  gap:10px; color:var(--tx3); font-size:11.5px; font-weight:600;
+  transition:all .2s; cursor:pointer; min-height:72px;
+  flex-direction:column; background:transparent;
 }
 .profile-add:hover {
-  border-color:rgba(var(--acr),.4); color:var(--ac);
-  background:rgba(var(--acr),.04);
-  box-shadow:inset 0 0 30px rgba(var(--acr),.04);
-  transform:translateY(-2px);
+  border-color:rgba(var(--acr),.55); color:var(--ac);
+  background:rgba(var(--acr),.04); transform:translateY(-2px);
 }
 
 /* =========================================
-   THEME SELECTOR CARDS (new)
+   THEME SELECTOR CARDS
    ========================================= */
 .theme-grid {
-  display:grid; grid-template-columns:repeat(3,1fr); gap:8px;
+  display:grid; grid-template-columns:repeat(3,1fr); gap:10px;
 }
 .theme-card {
-  border-radius:10px; padding:11px 8px; cursor:pointer;
-  border:1.5px solid rgba(255,255,255,.08); transition:all .22s;
-  display:flex; flex-direction:column; align-items:center; gap:6px;
-  font-size:9px; letter-spacing:1px; font-family:var(--mono);
-  color:rgba(255,255,255,.55); position:relative; overflow:hidden;
+  border-radius:13px; padding:11px; cursor:pointer;
+  border:1.5px solid var(--card-br); background:var(--card);
+  display:flex; flex-direction:column; align-items:center; gap:9px;
+  font-size:11px; font-weight:600; color:var(--tx2);
+  transition:all .18s;
 }
-.theme-card::before {
-  content:''; position:absolute; top:0; left:0; right:0; height:3px; pointer-events:none;
-  border-radius:2px 2px 0 0; transition:.2s;
+.theme-card:hover { transform:translateY(-2px); color:var(--tx); border-color:var(--tx3); }
+.theme-card.is-active {
+  border-color:var(--ac);
+  box-shadow:0 0 0 3px rgba(var(--acr),.15);
+  color:var(--tx);
 }
-.theme-card:hover { transform:translateY(-3px); color:#fff; }
-.theme-card.is-active { border-color:rgba(255,255,255,.3); color:#fff; }
-
-.tc-default { background:rgba(0,240,255,.06); }
-.tc-default::before { background:linear-gradient(90deg,#00f0ff,#7b2fff); }
-.tc-cyber   { background:rgba(255,0,229,.06); }
-.tc-cyber::before   { background:linear-gradient(90deg,#ff00e5,#ffe600); }
-.tc-hacker  { background:rgba(0,255,65,.06); }
-.tc-hacker::before  { background:linear-gradient(90deg,#00ff41,#007a1f); }
-.tc-blood   { background:rgba(255,34,34,.06); }
-.tc-blood::before   { background:linear-gradient(90deg,#ff2222,#ff6600); }
-.tc-ocean   { background:rgba(0,200,255,.06); }
-.tc-ocean::before   { background:linear-gradient(90deg,#00c8ff,#0055ff); }
-.tc-gold    { background:rgba(255,208,0,.06); }
-.tc-gold::before    { background:linear-gradient(90deg,#ffd000,#ff8800); }
-.tc-matrix  { background:rgba(0,255,65,.06); }
-.tc-matrix::before  { background:linear-gradient(90deg,#00ff41,#003311); }
-.tc-rose    { background:rgba(255,110,180,.06); }
-.tc-rose::before    { background:linear-gradient(90deg,#ff6eb4,#c44dff); }
-.tc-ice     { background:rgba(128,255,255,.06); }
-.tc-ice::before     { background:linear-gradient(90deg,#80ffff,#4488ff); }
-.tc-toxic   { background:rgba(170,255,0,.06); }
-.tc-toxic::before   { background:linear-gradient(90deg,#aaff00,#ff8800); }
+.theme-preview {
+  width:100%; height:36px; border-radius:9px;
+  border:1px solid rgba(20,24,44,.08);
+}
 
 /* =========================================
    RANGE SLIDER
    ========================================= */
 .range-row { display:flex; align-items:center; gap:10px; margin:6px 0 13px; }
-.range-row label { font-size:10px; color:var(--tx2); font-family:var(--mono); min-width:90px; }
+.range-row label { font-size:11px; color:var(--tx2); font-weight:600; min-width:90px; }
 .range-row input[type=range] {
-  flex:1; -webkit-appearance:none; height:4px; border-radius:4px;
-  background:rgba(255,255,255,.1); outline:none; cursor:pointer;
-  transition:background .2s;
+  flex:1; -webkit-appearance:none; height:5px; border-radius:4px;
+  background:var(--card-br); outline:none; cursor:pointer;
 }
 .range-row input[type=range]::-webkit-slider-thumb {
   -webkit-appearance:none; width:16px; height:16px; border-radius:50%;
-  background:var(--ac); box-shadow:0 0 10px rgba(var(--acr),.8); cursor:pointer;
+  background:var(--ac); border:2.5px solid var(--card);
+  box-shadow:0 1px 4px rgba(20,24,44,.25); cursor:pointer;
   transition:transform .15s;
 }
-.range-row input[type=range]::-webkit-slider-thumb:hover { transform:scale(1.2); }
-.range-val { font-size:10px; color:var(--ac); font-family:var(--mono); min-width:36px; text-align:right; }
+.range-row input[type=range]::-webkit-slider-thumb:hover { transform:scale(1.15); }
+.range-val { font-size:11px; color:var(--ac); font-weight:700; min-width:36px; text-align:right; font-family:var(--mono); }
 
 /* =========================================
    COLOR ROW
    ========================================= */
 .color-row {
   display:flex; align-items:center; justify-content:space-between;
-  padding:9px 0; border-bottom:1px solid rgba(255,255,255,.04);
+  padding:9px 0; border-bottom:1px solid var(--divider);
 }
-.color-row label { font-size:10.5px; color:var(--tx2); font-family:var(--mono); }
+.color-row label { font-size:11.5px; color:var(--tx2); font-weight:600; }
 .color-row input[type=color] {
-  width:44px; height:30px; border:1.5px solid rgba(255,255,255,.12);
-  border-radius:8px; background:none; padding:2px; cursor:pointer; transition:.18s;
+  width:44px; height:30px; border:1.5px solid var(--card-br);
+  border-radius:9px; background:var(--card); padding:2px; cursor:pointer; transition:.16s;
 }
-.color-row input[type=color]:hover { border-color:rgba(var(--acr),.6); transform:scale(1.05); }
+.color-row input[type=color]:hover { border-color:var(--ac); transform:scale(1.04); }
 
 /* =========================================
    TOASTS
    ========================================= */
 #toasts {
   position:fixed; bottom:18px; right:18px;
-  display:flex; flex-direction:column-reverse; gap:7px;
+  display:flex; flex-direction:column-reverse; gap:8px;
   z-index:8000; pointer-events:none;
 }
 .toast {
-  background:rgba(4,5,18,.97); border:1px solid rgba(255,255,255,.1);
-  border-left:3px solid var(--ac); padding:11px 16px; border-radius:10px;
-  color:#fff; font-size:11.5px; font-weight:600; font-family:var(--font);
-  box-shadow:0 8px 28px rgba(0,0,0,.7), 0 0 20px rgba(var(--acr),.08);
-  animation:toastIn .32s cubic-bezier(.22,1,.36,1);
-  
+  background:var(--card); border:1px solid var(--card-br);
+  border-left:3px solid var(--ac); padding:12px 16px; border-radius:11px;
+  color:var(--tx); font-size:12px; font-weight:600; font-family:var(--font);
+  box-shadow:0 12px 32px rgba(20,24,44,.18);
+  animation:toastIn .3s cubic-bezier(.22,1,.36,1);
+  max-width:420px;
 }
-.toast.toast-err { border-left-color:var(--red); box-shadow:0 8px 28px rgba(0,0,0,.7),0 0 20px rgba(var(--redr),.12); }
-.toast.toast-ok  { border-left-color:var(--grn); box-shadow:0 8px 28px rgba(0,0,0,.7),0 0 20px rgba(var(--grnr),.12); }
+.toast.toast-err { border-left-color:var(--red); }
+.toast.toast-ok  { border-left-color:var(--grn); }
 @keyframes toastIn {
-  from { opacity:0; transform:translateX(44px) scale(.9); }
-  to   { opacity:1; transform:translateX(0)    scale(1); }
+  from { opacity:0; transform:translateX(36px) scale(.96); }
+  to   { opacity:1; transform:translateX(0)    scale(1);  }
 }
 
 /* =========================================
    MODAL
    ========================================= */
 #modal-overlay {
-  position:fixed; inset:0; z-index:8888; background:rgba(0,0,0,.8);
+  position:fixed; inset:0; z-index:8888;
+  background:rgba(13,19,32,.45);
+  -webkit-backdrop-filter:blur(5px); backdrop-filter:blur(5px);
   display:none; align-items:center; justify-content:center;
-  
 }
 #modal-overlay.is-open { display:flex; }
 .modal-box {
-  background:rgba(6,7,20,.99); border:1px solid rgba(var(--acr),.22);
-  border-radius:18px; padding:28px 28px 22px; width:440px; max-width:92vw;
-  box-shadow:0 24px 80px rgba(0,0,0,.9), 0 0 0 1px rgba(var(--acr),.06), var(--glow);
-  animation:modalIn .25s cubic-bezier(.22,1,.36,1);
-  position:relative; overflow:hidden;
-}
-.modal-box::before {
-  content:''; position:absolute; top:0; left:20%; right:20%; height:1px; pointer-events:none;
-  background:linear-gradient(90deg,transparent,rgba(var(--acr),.6),transparent);
+  background:var(--card); border:1px solid var(--card-br);
+  border-radius:18px; padding:24px; width:460px; max-width:92vw;
+  box-shadow:0 30px 80px rgba(13,19,32,.4);
+  animation:modalIn .24s cubic-bezier(.22,1,.36,1);
 }
 @keyframes modalIn {
-  from { opacity:0; transform:scale(.92) translateY(12px); }
+  from { opacity:0; transform:scale(.94) translateY(10px); }
   to   { opacity:1; transform:scale(1)   translateY(0); }
 }
 .modal-title {
-  font-size:14px; font-weight:700; letter-spacing:1.5px;
-  font-family:Consolas,'Courier New',monospace; color:var(--ac);
+  font-size:14.5px; font-weight:700; color:var(--tx);
   margin-bottom:18px; display:flex; align-items:center; gap:9px;
 }
 .modal-close {
-  margin-left:auto; width:26px; height:26px; border-radius:7px; cursor:pointer;
-  background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.1);
-  color:rgba(255,255,255,.35); display:flex; align-items:center; justify-content:center;
-  font-size:13px; transition:.18s;
+  margin-left:auto; width:26px; height:26px; border-radius:8px; cursor:pointer;
+  background:var(--btn-soft); border:1px solid var(--card-br);
+  color:var(--tx3); display:flex; align-items:center; justify-content:center;
+  font-size:12px; transition:.16s;
 }
-.modal-close:hover { background:rgba(var(--redr),.22); color:var(--red); border-color:rgba(var(--redr),.4); }
+.modal-close:hover { background:rgba(var(--redr),.1); color:var(--red); border-color:rgba(var(--redr),.3); }
 
 /* =========================================
-   BIND CARDS
+   BIND CARDS + BADGES
    ========================================= */
-.bind-card {
-  background:var(--cardbg); border:1px solid var(--cardbr);
-  border-radius:12px; padding:13px 15px;
+.bind-item {
+  background:var(--card); border:1px solid var(--card-br);
+  border-radius:13px; padding:13px 15px;
   display:flex; align-items:center; gap:12px;
-  cursor:pointer; transition:all .22s; position:relative; overflow:hidden;
+  box-shadow:0 1px 2px rgba(20,24,44,.04);
+  cursor:pointer; transition:all .18s;
 }
-.bind-card::before {
-  content:''; position:absolute; left:0; top:0; bottom:0; width:3px; pointer-events:none;
-  background:linear-gradient(180deg, var(--ac), var(--ac2));
-  border-radius:0 2px 2px 0; opacity:0; transition:.2s;
+.bind-item:hover {
+  border-color:rgba(var(--acr),.4); transform:translateY(-2px);
+  box-shadow:0 8px 22px rgba(20,24,44,.08);
 }
-.bind-card:hover { border-color:rgba(var(--acr),.25); transform:translateY(-2px); }
-.bind-card:hover::before { opacity:1; }
+.bind-ico { font-size:21px; flex-shrink:0; width:30px; text-align:center; }
+.bind-label { font-size:13px; font-weight:700; color:var(--tx); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.bind-meta { font-size:10px; color:var(--tx3); font-family:var(--mono); margin-top:3px; display:flex; align-items:center; gap:6px; }
+.bind-del {
+  margin-left:auto; width:28px; height:28px; border-radius:8px; flex-shrink:0;
+  background:transparent; border:1px solid transparent;
+  color:var(--tx3); font-size:12px;
+  display:flex; align-items:center; justify-content:center; transition:.16s; cursor:pointer;
+}
+.bind-del:hover { background:rgba(var(--redr),.1); border-color:rgba(var(--redr),.25); color:var(--red); }
 
-/* =========================================
-   BADGE
-   ========================================= */
 .badge {
-  font-size:8px; letter-spacing:1.5px; padding:2px 7px; border-radius:4px;
+  font-size:8.5px; letter-spacing:1.2px; padding:2px 7px; border-radius:5px;
   font-family:var(--mono); font-weight:700; text-transform:uppercase;
 }
-.badge-bypass { background:rgba(var(--acr),.12); color:var(--ac); border:1px solid rgba(var(--acr),.25); }
-.badge-direct { background:rgba(255,255,255,.06); color:var(--tx2); border:1px solid rgba(255,255,255,.1); }
+.badge-bypass { background:rgba(var(--grnr),.12); color:var(--grn); border:1px solid rgba(var(--grnr),.28); }
+.badge-direct { background:var(--btn-soft); color:var(--tx3); border:1px solid var(--card-br); }
+
+.bind-badge { font-size:8.5px; letter-spacing:1.2px; padding:2px 7px; border-radius:5px; font-family:var(--mono); font-weight:700; text-transform:uppercase; }
+.bind-badge.bypass { background:rgba(var(--grnr),.12); color:var(--grn); border:1px solid rgba(var(--grnr),.28); }
+.bind-badge.direct { background:var(--btn-soft); color:var(--tx3); border:1px solid var(--card-br); }
 
 /* =========================================
-   HOME ZAPRET STATUS CHIP
+   HOME: HERO-КАРТОЧКА ZAPRET + САЙТЫ
    ========================================= */
-.zapret-chip {
-  display:inline-flex; align-items:center; gap:8px;
-  padding:8px 16px; border-radius:30px;
-  border:1px solid rgba(var(--acr),.2);
-  background:rgba(var(--acr),.05);
-  font-family:var(--mono); font-size:11px; letter-spacing:2px;
-  transition:all .3s;
+.hero-card {
+  margin-bottom:16px;
+  display:flex; align-items:center; gap:16px; flex-wrap:wrap;
 }
-.zapret-chip .chip-dot {
-  width:7px; height:7px; border-radius:50%; background:rgba(255,255,255,.2); transition:.3s;
+.hero-left { display:flex; align-items:center; gap:12px; flex:1; min-width:220px; }
+.hero-dot {
+  width:12px; height:12px; border-radius:50%; background:var(--red);
+  flex-shrink:0; transition:all .4s;
 }
-.zapret-chip.online { border-color:rgba(var(--grnr),.35); background:rgba(var(--grnr),.06); }
-.zapret-chip.online .chip-dot { background:var(--grn); box-shadow:0 0 8px rgba(var(--grnr),.8); animation:dotPulse 2s infinite; }
+.hero-title { font-size:14.5px; font-weight:700; color:var(--tx); margin-bottom:2px; }
+.hero-state { font-size:10px; letter-spacing:1.5px; font-weight:700; margin-left:6px; }
+.hero-sub { font-size:11px; color:var(--tx3); }
+.hero-btns { display:flex; gap:8px; }
 
-/* =========================================
-   QUICK LAUNCH SITE CARDS
-   ========================================= */
-.site-card {
-  background:var(--cardbg); border:1px solid var(--cardbr);
-  border-radius:var(--radius); padding:16px 18px;
-  position:relative; overflow:hidden; transition:all .22s;
-}
-.site-card-header {
-  display:flex; align-items:center; gap:10px; margin-bottom:12px;
-}
+.home-sites { display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); gap:12px; }
+.site-card { padding:15px 16px; }
+.site-card-header { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
 .site-icon {
-  width:36px; height:36px; border-radius:9px; flex-shrink:0;
-  display:flex; align-items:center; justify-content:center; font-size:20px;
-  border:1px solid rgba(255,255,255,.08);
-  background:rgba(255,255,255,.04);
+  width:38px; height:38px; border-radius:11px; flex-shrink:0;
+  display:flex; align-items:center; justify-content:center; font-size:19px;
 }
-.site-name { font-size:14px; font-weight:700; letter-spacing:.5px; }
+.site-name { font-size:13.5px; font-weight:700; color:var(--tx); }
+
+.home-site-card { padding:15px 16px; }
+.home-site-btns { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+.home-site-btns button {
+  background:var(--input-bg); border:1px solid var(--card-br);
+  color:var(--tx2); border-radius:8px; padding:7px 8px;
+  font-size:10.5px; font-weight:600; font-family:var(--font); cursor:pointer; transition:all .16s;
+}
+.home-site-btns button:hover {
+  background:rgba(var(--acr),.08); border-color:rgba(var(--acr),.35);
+  color:var(--ac);
+}
+.home-site-btns button:active { transform:scale(.97); }
+
+.home-tools { display:flex; gap:8px; margin-top:16px; flex-wrap:wrap; }
 
 /* =========================================
-   GLOW DIVIDER
+   GLow DIVIDER (теперь просто тонкая линия)
    ========================================= */
-.glow-sep {
-  height:1px; margin:18px 0;
-  background:linear-gradient(90deg, transparent, rgba(var(--acr),.25), rgba(var(--ac2r),.15), transparent);
-}
+.glow-sep { height:1px; margin:18px 0; background:var(--divider); }
 
 /* =========================================
-   MATRIX RAIN (special canvas layer)
+   TOGGLE SWITCH
    ========================================= */
-#matrix-canvas {
-  position:fixed; inset:0; z-index:0; pointer-events:none;
-  opacity:0; transition:opacity 1s;
+.toggle-sw { position:relative; display:inline-block; width:40px; height:22px; flex-shrink:0; }
+.toggle-sw input { opacity:0; width:0; height:0; }
+.toggle-knob {
+  position:absolute; inset:0; border-radius:22px; cursor:pointer;
+  background:#cfd5e1; transition:all .22s;
 }
-body.th-matrix #matrix-canvas { opacity:.18; }
-body.th-hacker #matrix-canvas { opacity:.12; }
+body.th-night .toggle-knob { background:#33405c; }
+.toggle-knob::before {
+  content:''; position:absolute; left:3px; top:50%; transform:translateY(-50%);
+  width:16px; height:16px; border-radius:50%; background:#fff;
+  box-shadow:0 1px 3px rgba(20,24,44,.3); transition:all .22s;
+}
+.toggle-sw input:checked + .toggle-knob { background:var(--ac); }
+.toggle-sw input:checked + .toggle-knob::before { left:calc(100% - 19px); }
 
 /* =========================================
    STAGGER ANIMATION HELPERS
    ========================================= */
-.stagger > * { animation:staggerIn .35s cubic-bezier(.22,1,.36,1) both; }
-.stagger > *:nth-child(1)  { animation-delay:.04s; }
-.stagger > *:nth-child(2)  { animation-delay:.08s; }
-.stagger > *:nth-child(3)  { animation-delay:.12s; }
-.stagger > *:nth-child(4)  { animation-delay:.16s; }
-.stagger > *:nth-child(5)  { animation-delay:.20s; }
-.stagger > *:nth-child(6)  { animation-delay:.24s; }
+.stagger > * { animation:staggerIn .32s cubic-bezier(.22,1,.36,1) both; }
+.stagger > *:nth-child(1)  { animation-delay:.03s; }
+.stagger > *:nth-child(2)  { animation-delay:.06s; }
+.stagger > *:nth-child(3)  { animation-delay:.09s; }
+.stagger > *:nth-child(4)  { animation-delay:.12s; }
+.stagger > *:nth-child(5)  { animation-delay:.15s; }
+.stagger > *:nth-child(6)  { animation-delay:.18s; }
 @keyframes staggerIn {
-  from { opacity:0; transform:translateY(12px) scale(.97); }
-  to   { opacity:1; transform:translateY(0)     scale(1); }
+  from { opacity:0; transform:translateY(8px); }
+  to   { opacity:1; transform:translateY(0); }
 }
+
 /* =========================================
    DIAG ROWS
    ========================================= */
 .diag-row {
   display:flex; align-items:center; gap:12px;
-  padding:8px 12px; border-radius:8px;
-  background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.06);
-  transition:.2s;
+  padding:8px 12px; border-radius:9px;
+  background:var(--input-bg); border:1px solid var(--divider);
+  transition:.16s;
 }
-.diag-row:hover { background:rgba(255,255,255,.05); }
-.diag-icon { font-size:15px; flex-shrink:0; width:20px; text-align:center; }
-.diag-name { flex:1; font-size:11px; font-weight:700; color:var(--tx); font-family:var(--mono); }
-.diag-ver  { font-size:10px; color:var(--tx2); font-family:var(--mono); min-width:90px; text-align:right; }
-.diag-status { font-size:10px; font-family:var(--mono); min-width:70px; text-align:right; font-weight:700; }
+.diag-row:hover { background:var(--row-hover); }
+.diag-icon { font-size:14px; flex-shrink:0; width:20px; text-align:center; }
+.diag-name { flex:1; font-size:11.5px; font-weight:700; color:var(--tx); }
+.diag-ver  { font-size:10.5px; color:var(--tx3); font-family:var(--mono); min-width:90px; text-align:right; }
+.diag-status { font-size:10.5px; font-family:var(--mono); min-width:76px; text-align:right; font-weight:700; }
 .diag-status.ok   { color:var(--grn); }
-.diag-status.warn { color:#ffd000; }
+.diag-status.warn { color:var(--ylw); }
 .diag-status.err  { color:var(--red); }
 .diag-status.wait { color:var(--ac); }
-.diag-row-placeholder { font-size:11px; color:var(--tx2); font-family:var(--mono); padding:10px 0; text-align:center; }
+.diag-row-placeholder { font-size:11.5px; color:var(--tx3); padding:10px 0; text-align:center; }
 .diag-log-ok   { color:var(--grn); }
-.diag-log-warn { color:#ffd000; }
+.diag-log-warn { color:var(--ylw); }
 .diag-log-err  { color:var(--red); }
 .diag-log-info { color:var(--tx2); }
 .diag-log-step { color:var(--ac); font-weight:700; }
 
 /* =========================================
-   HOME SITE CARDS
+   CHEBURNET
    ========================================= */
-.home-site-card { padding:14px 16px; }
-.home-site-name {
-  font-size:12px; font-weight:700; letter-spacing:.5px;
-  color:var(--tx); margin-bottom:10px; font-family:var(--font);
+.cbn-test-row {
+  display:flex; align-items:center; gap:9px; padding:7px 10px;
+  border-radius:9px; background:var(--input-bg);
+  border:1px solid var(--divider); font-size:11px; font-weight:600;
+  transition:all .2s;
 }
-.home-site-btns { display:grid; grid-template-columns:1fr 1fr; gap:5px; }
-.home-site-btns button {
-  background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.08);
-  color:rgba(255,255,255,.7); border-radius:6px; padding:5px 8px;
-  font-size:10px; font-family:var(--mono); cursor:pointer; transition:all .18s;
+.cbn-dot {
+  width:9px; height:9px; border-radius:50%; flex-shrink:0;
+  background:#c7cdd9; transition:all .4s;
 }
-.home-site-btns button:hover {
-  background:rgba(var(--acr),.12); border-color:rgba(var(--acr),.3);
-  color:var(--ac);
-}
-.home-site-btns button:active { transform:scale(.97); }
-.toggle-sw { position:relative; display:inline-block; width:38px; height:22px; flex-shrink:0; }
-.toggle-sw input { opacity:0; width:0; height:0; }
-.toggle-knob {
-  position:absolute; inset:0; border-radius:22px; cursor:pointer;
-  background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.15);
-  transition:all .25s;
-}
-.toggle-knob::before {
-  content:''; position:absolute; left:3px; top:50%; transform:translateY(-50%);
-  width:14px; height:14px; border-radius:50%; background:rgba(255,255,255,.4);
-  transition:all .25s;
-}
-.toggle-sw input:checked + .toggle-knob {
-  background:rgba(var(--acr),.25); border-color:rgba(var(--acr),.5);
-  box-shadow:0 0 10px rgba(var(--acr),.3);
-}
-.toggle-sw input:checked + .toggle-knob::before {
-  left:calc(100% - 17px); background:var(--ac);
-  box-shadow:0 0 8px rgba(var(--acr),.8);
+body.th-night .cbn-dot { background:#39445c; }
+.cbn-dot.ok   { background:var(--grn); }
+.cbn-dot.err  { background:var(--red); }
+.cbn-dot.wait { background:var(--ylw); animation:dotPulse 1s infinite; }
+
+.cbn-info-box {
+  background:rgba(var(--acr),.05); border:1px solid rgba(var(--acr),.16);
+  border-radius:10px; padding:11px 12px; font-size:10.5px; color:var(--tx2);
+  line-height:1.7; margin-top:4px;
 }
 
 /* =========================================
-   CHEBURNET STATUS
+   HOSTS LIST (adblock)
    ========================================= */
-.cbn-test-row {
-  display:flex; align-items:center; gap:9px; padding:6px 10px;
-  border-radius:8px; background:rgba(255,255,255,.03);
-  border:1px solid rgba(255,255,255,.06); font-family:var(--mono); font-size:10.5px;
-  transition:all .25s;
+.hosts-list-box {
+  max-height:200px; overflow-y:auto;
+  background:var(--input-bg); border:1px solid var(--divider);
+  border-radius:10px; padding:8px 10px; margin-bottom:14px;
+  font-family:var(--mono); font-size:10.5px;
 }
-.cbn-dot {
-  width:8px; height:8px; border-radius:50%; flex-shrink:0;
-  background:rgba(255,255,255,.2); transition:all .4s;
-}
-.cbn-dot.ok   { background:var(--grn); box-shadow:0 0 8px rgba(var(--grnr),.8); }
-.cbn-dot.err  { background:var(--red); box-shadow:0 0 8px rgba(var(--redr),.8); }
-.cbn-dot.wait { background:var(--ylw); animation:dotPulse 1s infinite; }
+.hosts-list-box::-webkit-scrollbar { width:8px; }
+.hosts-list-box::-webkit-scrollbar-thumb { background:var(--card-br); border-radius:4px; }
+.hosts-row { display:flex; align-items:center; justify-content:space-between; padding:3px 6px; border-radius:6px; transition:.14s; }
+.hosts-row:hover { background:var(--row-hover); }
+.hosts-del { cursor:pointer; color:var(--tx3); padding:0 5px; font-size:11px; transition:.14s; }
+.hosts-del:hover { color:var(--red); }
 
+/* =========================================
+   LOG VIEWER
+   ========================================= */
+.log-view {
+  font-family:var(--mono); font-size:10.5px; line-height:1.8;
+  max-height:calc(100vh - 260px); overflow-y:auto; padding:12px 14px;
+}
+.log-view::-webkit-scrollbar { width:8px; }
+.log-view::-webkit-scrollbar-thumb { background:var(--card-br); border-radius:4px; }
+.log-row { display:flex; gap:8px; align-items:baseline; padding:2.5px 0; border-bottom:1px solid var(--divider); }
+.log-time { color:var(--tx3); font-size:9.5px; flex-shrink:0; width:52px; }
+.log-browser { font-size:9.5px; font-weight:700; flex-shrink:0; width:46px; }
+.log-profile { color:var(--ac); font-size:9.5px; flex-shrink:0; width:76px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.log-msg { flex:1; word-break:break-all; color:var(--tx); }
+.log-msg.err { color:var(--red); }
+.log-msg.ok  { color:var(--grn); }
+
+/* =========================================
+   PROGRESS BAR
+   ========================================= */
+.progress-track {
+  background:var(--input-bg); border:1px solid var(--divider);
+  border-radius:6px; height:8px; overflow:hidden;
+}
+.progress-fill {
+  height:100%; width:0%;
+  background:linear-gradient(90deg, var(--ac), var(--ac2));
+  transition:width .4s ease; border-radius:6px;
+}
+
+/* =========================================
+   MONO LOG BOXES (diag / zapret update)
+   ========================================= */
+.mono-box {
+  background:var(--input-bg); border:1px solid var(--divider);
+  border-radius:10px; padding:10px 12px;
+  font-family:var(--mono); font-size:10.5px; line-height:1.85;
+  overflow-y:auto;
+}
+.mono-box::-webkit-scrollbar { width:8px; }
+.mono-box::-webkit-scrollbar-thumb { background:var(--card-br); border-radius:4px; }
+
+/* =========================================
+   TG / SUPPORT CARD
+   ========================================= */
+.tg-card {
+  display:flex; align-items:center; gap:12px; padding:14px 16px;
+  background:rgba(var(--acr),.06); border:1px solid rgba(var(--acr),.2);
+  border-radius:12px; cursor:pointer; transition:.2s; text-decoration:none;
+}
+.tg-card:hover { background:rgba(var(--acr),.12); border-color:rgba(var(--acr),.4); transform:translateY(-2px); }
+.tg-title { font-size:13px; font-weight:700; color:var(--ac); letter-spacing:.6px; }
+.tg-sub { font-size:10.5px; color:var(--tx3); font-family:var(--mono); margin-top:2px; }
+.tg-arrow { margin-left:auto; color:var(--ac); font-size:15px; }
 
 /* =========================================
    СИСТЕМНЫЕ БАННЕРЫ (нет прав / нет моста API)
    ========================================= */
 .sys-banner {
   position:fixed; left:50%; transform:translateX(-50%);
-  top:44px; z-index:9998; max-width:min(760px,92vw);
-  padding:9px 16px; border-radius:9px;
-  background:rgba(255,208,0,.08); border:1px solid rgba(255,208,0,.35);
-  color:var(--ylw); font-family:var(--mono); font-size:10.5px; line-height:1.5;
-  box-shadow:0 8px 26px rgba(0,0,0,.55); text-align:center;
+  top:56px; z-index:9998; max-width:min(760px,92vw);
+  padding:10px 16px; border-radius:10px;
+  background:#fff8e8; border:1px solid #f0d492;
+  color:#7c5a12; font-size:11px; line-height:1.5; font-weight:600;
+  box-shadow:0 8px 26px rgba(20,24,44,.14); text-align:center;
+}
+body.th-night .sys-banner {
+  background:rgba(244,191,85,.1); border-color:rgba(244,191,85,.4); color:#f2d38b;
 }
 #api-warn-banner.sys-banner, #api-warn-banner {
   position:fixed; left:50%; transform:translateX(-50%);
-  top:44px; z-index:9999; max-width:min(760px,92vw);
-  padding:9px 16px; border-radius:9px;
-  background:rgba(255,26,78,.1); border:1px solid rgba(255,26,78,.4);
-  color:var(--red); font-family:var(--mono); font-size:10.5px; line-height:1.5;
-  box-shadow:0 8px 26px rgba(0,0,0,.6); text-align:center;
+  top:56px; z-index:9999; max-width:min(760px,92vw);
+  padding:10px 16px; border-radius:10px;
+  background:rgba(var(--redr),.07); border:1px solid rgba(var(--redr),.35);
+  color:var(--red); font-size:11px; line-height:1.5; font-weight:600;
+  box-shadow:0 8px 26px rgba(20,24,44,.18); text-align:center;
 }
 #admin-hint { top:auto; bottom:14px; }
 </style>
 </head>
 <body>
-
-<canvas id="bgcanvas"></canvas>
-<canvas id="matrix-canvas"></canvas>
-<div id="scanlines"></div>
 
 <!-- ===========================
      MODAL
@@ -862,7 +794,7 @@ body.th-hacker #matrix-canvas { opacity:.12; }
 <div id="app">
   <div id="titlebar">
     <div id="logo">
-      <div id="logo-box"><img id="logo-img" src="" width="22" height="22" style="border-radius:4px;display:block"></div>
+      <div id="logo-box"><img id="logo-img" src="" width="20" height="20" style="display:block"></div>
       ARTOFIX <span class="logo-accent">2.3</span>
     </div>
     <div id="winbtns">
@@ -881,7 +813,7 @@ body.th-hacker #matrix-canvas { opacity:.12; }
       <div class="nav-sep">Система</div>
       <button class="nav-btn"           data-tab="settings" data-af-on="click" data-af-action="goTab" data-af-args='["settings"]'><span class="nav-icon">🎨</span>Внешний вид</button>
       <button class="nav-btn"           data-tab="config"   data-af-on="click" data-af-action="goTab" data-af-args='["config"]'><span class="nav-icon">⚙️</span>Конфигурация</button>
-      <button class="nav-btn"           data-tab="cheburnet" data-af-on="click" data-af-action="goTab" data-af-args='["cheburnet"]'><span class="nav-icon">🛡</span>Чебурнет</button>
+      <button class="nav-btn"           data-tab="cheburnet" data-af-on="click" data-af-action="goTab" data-af-args='["cheburnet"]'><span class="nav-icon">🌐</span>Чебурнет</button>
       <button class="nav-btn"           data-tab="logs"      data-af-on="click" data-af-action="goTab" data-af-args='["logs"]'><span class="nav-icon" id="logs-nav-icon">📋</span>Логи</button>
       <button class="nav-btn"           data-tab="diag"      data-af-on="click" data-af-action="goTab" data-af-args='["diag"]'><span class="nav-icon">🔧</span>Компоненты</button>
       <button class="nav-btn"           data-tab="zapret-update" data-af-on="click" data-af-action="goTab" data-af-args='["zapret-update"]'><span class="nav-icon">🔄</span>Обновление Zapret</button>
@@ -913,23 +845,30 @@ body.th-hacker #matrix-canvas { opacity:.12; }
 <div class="tab-page">
   <div class="page-title"><span class="page-title-accent">⚡</span> Быстрый старт <div class="page-title-line"></div></div>
 
-  <!-- Zapret статус + кнопки управления -->
-  <div class="af-card" style="margin-bottom:14px;display:flex;align-items:center;gap:18px;flex-wrap:wrap">
-    <div style="display:flex;align-items:center;gap:10px;flex:1">
-      <div id="home-zap-dot" style="width:10px;height:10px;border-radius:50%;background:var(--red);flex-shrink:0;transition:.3s"></div>
-      <span style="font-family:var(--mono);font-size:11px;color:var(--tx2)">Zapret: <span id="home-zap-label" style="color:var(--red);font-weight:700">ВЫКЛ</span></span>
+  <!-- Zapret: главный статус + управление -->
+  <div class="af-card hero-card">
+    <div class="hero-left">
+      <div id="home-zap-dot" class="hero-dot"></div>
+      <div>
+        <div class="hero-title">Zapret<span id="home-zap-label" class="hero-state" style="color:var(--red)">ВЫКЛ</span></div>
+        <div class="hero-sub">Обход блокировок для сайтов и приложений</div>
+      </div>
     </div>
-    <div style="display:flex;gap:8px">
-      <button class="btn btn-primary" style="padding:7px 18px" data-af-on="click" data-af-action="zapretStart">Запустить</button>
-      <button class="btn btn-secondary" style="padding:7px 18px" data-af-on="click" data-af-action="zapretStop">Стоп</button>
+    <div class="hero-btns">
+      <button class="btn btn-primary" data-af-on="click" data-af-action="zapretStart">Запустить</button>
+      <button class="btn btn-secondary" data-af-on="click" data-af-action="zapretStop">Стоп</button>
     </div>
   </div>
 
   <!-- Сайты -->
-  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px">
+  <div class="section-title" style="margin-bottom:10px">Открыть сайт</div>
+  <div class="home-sites">
 
-    <div class="af-card home-site-card">
-      <div class="home-site-name">YouTube</div>
+    <div class="af-card site-card">
+      <div class="site-card-header">
+        <div class="site-icon" style="background:#fdeaea">📹</div>
+        <div class="site-name">YouTube</div>
+      </div>
       <div class="home-site-btns">
         <button data-af-on="click" data-af-action="launchBrowser" data-af-args="[&quot;https://youtube.com&quot;, &quot;yt&quot;, &quot;chrome&quot;, true]">Chrome</button>
         <button data-af-on="click" data-af-action="launchBrowser" data-af-args="[&quot;https://youtube.com&quot;, &quot;yt_e&quot;, &quot;msedge&quot;, true]">Edge</button>
@@ -938,8 +877,11 @@ body.th-hacker #matrix-canvas { opacity:.12; }
       </div>
     </div>
 
-    <div class="af-card home-site-card">
-      <div class="home-site-name">Discord</div>
+    <div class="af-card site-card">
+      <div class="site-card-header">
+        <div class="site-icon" style="background:#e9ebfc">💬</div>
+        <div class="site-name">Discord</div>
+      </div>
       <div class="home-site-btns">
         <button data-af-on="click" data-af-action="launchBrowser" data-af-args="[&quot;https://discord.com/app&quot;, &quot;dc&quot;, &quot;chrome&quot;, true]">Chrome</button>
         <button data-af-on="click" data-af-action="launchBrowser" data-af-args="[&quot;https://discord.com/app&quot;, &quot;dc_e&quot;, &quot;msedge&quot;, true]">Edge</button>
@@ -948,8 +890,11 @@ body.th-hacker #matrix-canvas { opacity:.12; }
       </div>
     </div>
 
-    <div class="af-card home-site-card">
-      <div class="home-site-name">Spotify</div>
+    <div class="af-card site-card">
+      <div class="site-card-header">
+        <div class="site-icon" style="background:#e5f6ec">🎧</div>
+        <div class="site-name">Spotify</div>
+      </div>
       <div class="home-site-btns">
         <button data-af-on="click" data-af-action="launchBrowser" data-af-args="[&quot;https://open.spotify.com&quot;, &quot;sp&quot;, &quot;chrome&quot;, true]">Chrome</button>
         <button data-af-on="click" data-af-action="launchBrowser" data-af-args="[&quot;https://open.spotify.com&quot;, &quot;sp_e&quot;, &quot;msedge&quot;, true]">Edge</button>
@@ -958,8 +903,11 @@ body.th-hacker #matrix-canvas { opacity:.12; }
       </div>
     </div>
 
-    <div class="af-card home-site-card">
-      <div class="home-site-name">Twitch</div>
+    <div class="af-card site-card">
+      <div class="site-card-header">
+        <div class="site-icon" style="background:#efe7fa">🎮</div>
+        <div class="site-name">Twitch</div>
+      </div>
       <div class="home-site-btns">
         <button data-af-on="click" data-af-action="launchBrowser" data-af-args="[&quot;https://twitch.tv&quot;, &quot;tw&quot;, &quot;chrome&quot;, true]">Chrome</button>
         <button data-af-on="click" data-af-action="launchBrowser" data-af-args="[&quot;https://twitch.tv&quot;, &quot;tw_e&quot;, &quot;msedge&quot;, true]">Edge</button>
@@ -968,8 +916,11 @@ body.th-hacker #matrix-canvas { opacity:.12; }
       </div>
     </div>
 
-    <div class="af-card home-site-card">
-      <div class="home-site-name">Telegram Web</div>
+    <div class="af-card site-card">
+      <div class="site-card-header">
+        <div class="site-icon" style="background:#e3f1fc">✈️</div>
+        <div class="site-name">Telegram Web</div>
+      </div>
       <div class="home-site-btns">
         <button data-af-on="click" data-af-action="launchBrowser" data-af-args="[&quot;https://web.telegram.org&quot;, &quot;tg&quot;, &quot;chrome&quot;, true]">Chrome</button>
         <button data-af-on="click" data-af-action="launchBrowser" data-af-args="[&quot;https://web.telegram.org&quot;, &quot;tg_e&quot;, &quot;msedge&quot;, true]">Edge</button>
@@ -978,8 +929,11 @@ body.th-hacker #matrix-canvas { opacity:.12; }
       </div>
     </div>
 
-    <div class="af-card home-site-card">
-      <div class="home-site-name">Instagram</div>
+    <div class="af-card site-card">
+      <div class="site-card-header">
+        <div class="site-icon" style="background:#fdeef4">📸</div>
+        <div class="site-name">Instagram</div>
+      </div>
       <div class="home-site-btns">
         <button data-af-on="click" data-af-action="launchBrowser" data-af-args="[&quot;https://instagram.com&quot;, &quot;ig&quot;, &quot;chrome&quot;, true]">Chrome</button>
         <button data-af-on="click" data-af-action="launchBrowser" data-af-args="[&quot;https://instagram.com&quot;, &quot;ig_e&quot;, &quot;msedge&quot;, true]">Edge</button>
@@ -991,7 +945,7 @@ body.th-hacker #matrix-canvas { opacity:.12; }
   </div>
 
   <!-- Инструменты -->
-  <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+  <div class="home-tools">
     <button class="btn btn-secondary" data-af-on="click" data-af-action="closeBrowsers">Закрыть браузеры</button>
     <button class="btn btn-secondary" data-af-on="click" data-af-action="openFolder" data-af-args='["profiles"]'>Папка профилей</button>
     <button class="btn btn-secondary" data-af-on="click" data-af-action="openFolder" data-af-args='["Zapret"]'>Папка Zapret</button>
@@ -1013,7 +967,7 @@ body.th-hacker #matrix-canvas { opacity:.12; }
   <div class="page-title"><span class="page-title-accent">🔗</span> Бинды <div class="page-title-line"></div></div>
 
   <!-- Форма создания бинда -->
-  <div class="af-card" style="margin-bottom:13px">
+  <div class="af-card" style="margin-bottom:14px">
     <div class="section-title">Создать бинд</div>
     <div class="grid-2" style="margin-bottom:0">
       <div>
@@ -1033,25 +987,25 @@ body.th-hacker #matrix-canvas { opacity:.12; }
         </select>
         <label class="field-label">Обход блокировок</label>
         <select class="af-input" id="bind-bypass">
-          <option value="1">✅ С обходом (Zapret)</option>
-          <option value="0">❌ Без обхода</option>
+          <option value="1">С обходом (Zapret)</option>
+          <option value="0">Без обхода</option>
         </select>
         <label class="field-label">Название бинда</label>
         <input class="af-input" id="bind-name" type="text" placeholder="Мой YouTube" style="margin-bottom:0">
       </div>
     </div>
-    <div class="grid-2" style="margin-top:10px">
+    <div class="grid-2" style="margin-top:12px">
       <button class="btn btn-primary" data-af-on="click" data-af-action="addBind">＋ Добавить бинд</button>
-      <button class="btn btn-secondary" data-af-on="click" data-af-action="renderBinds">↺ Обновить список</button>
+      <button class="btn btn-secondary" data-af-on="click" data-af-action="renderBinds">Обновить список</button>
     </div>
   </div>
 
   <!-- Список сохранённых биндов -->
-  <div class="section-title" style="margin-bottom:9px">Сохранённые бинды</div>
+  <div class="section-title">Сохранённые бинды</div>
   <div class="grid-auto" id="binds-grid"></div>
 
   <!-- Быстрые сайты -->
-  <div class="section-title" style="margin-top:16px;margin-bottom:9px">Быстрый запуск</div>
+  <div class="section-title" style="margin-top:18px">Быстрый запуск</div>
   <div class="grid-auto">
     <div class="af-card">
       <div class="section-title">Популярные сайты</div>
@@ -1074,22 +1028,22 @@ body.th-hacker #matrix-canvas { opacity:.12; }
 
     <!-- HOSTS блок -->
     <div class="af-card" style="grid-column:1/-1">
-      <div class="section-title">🌐 Системный блок (hosts-файл) — работает для всех браузеров</div>
-      <p style="font-size:10.5px;color:var(--tx2);font-family:var(--mono);margin-bottom:14px;line-height:1.7">
-        Добавляет домены рекламных сетей в <code style="color:var(--ac)">C:\Windows\System32\drivers\etc\hosts</code>.<br>
+      <div class="section-title">Системный блок (hosts-файл) — работает для всех браузеров</div>
+      <p style="font-size:11.5px;color:var(--tx2);margin-bottom:14px;line-height:1.7">
+        Добавляет домены рекламных сетей в <code style="color:var(--ac);font-family:var(--mono);font-size:10.5px">C:\Windows\System32\drivers\etc\hosts</code>.<br>
         Работает сразу для всех браузеров и приложений. Требует прав администратора при первом применении.
       </p>
 
       <!-- Пресеты -->
       <div class="section-title" style="margin-bottom:8px">Готовые списки</div>
       <div style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:14px">
-        <button class="btn btn-secondary" style="font-size:9px;padding:7px 10px" data-af-on="click" data-af-action="addPreset" data-af-args="[&quot;google_ads&quot;]">Google Ads</button>
-        <button class="btn btn-secondary" style="font-size:9px;padding:7px 10px" data-af-on="click" data-af-action="addPreset" data-af-args="[&quot;yandex_ads&quot;]">Яндекс Реклама</button>
-        <button class="btn btn-secondary" style="font-size:9px;padding:7px 10px" data-af-on="click" data-af-action="addPreset" data-af-args="[&quot;meta_ads&quot;]">Meta/Facebook Ads</button>
-        <button class="btn btn-secondary" style="font-size:9px;padding:7px 10px" data-af-on="click" data-af-action="addPreset" data-af-args="[&quot;trackers&quot;]">Трекеры/Аналитика</button>
-        <button class="btn btn-secondary" style="font-size:9px;padding:7px 10px" data-af-on="click" data-af-action="addPreset" data-af-args="[&quot;casino&quot;]">Казино/Ставки</button>
-        <button class="btn btn-secondary" style="font-size:9px;padding:7px 10px" data-af-on="click" data-af-action="addPreset" data-af-args="[&quot;malware&quot;]">Малварь/Фишинг</button>
-        <button class="btn btn-danger"    style="font-size:9px;padding:7px 10px" data-af-on="click" data-af-action="clearAllDomains">✕ Очистить всё</button>
+        <button class="btn btn-secondary" style="font-size:10px;padding:7px 11px" data-af-on="click" data-af-action="addPreset" data-af-args="[&quot;google_ads&quot;]">Google Ads</button>
+        <button class="btn btn-secondary" style="font-size:10px;padding:7px 11px" data-af-on="click" data-af-action="addPreset" data-af-args="[&quot;yandex_ads&quot;]">Яндекс Реклама</button>
+        <button class="btn btn-secondary" style="font-size:10px;padding:7px 11px" data-af-on="click" data-af-action="addPreset" data-af-args="[&quot;meta_ads&quot;]">Meta / Facebook</button>
+        <button class="btn btn-secondary" style="font-size:10px;padding:7px 11px" data-af-on="click" data-af-action="addPreset" data-af-args="[&quot;trackers&quot;]">Трекеры и аналитика</button>
+        <button class="btn btn-secondary" style="font-size:10px;padding:7px 11px" data-af-on="click" data-af-action="addPreset" data-af-args="[&quot;casino&quot;]">Казино и ставки</button>
+        <button class="btn btn-secondary" style="font-size:10px;padding:7px 11px" data-af-on="click" data-af-action="addPreset" data-af-args="[&quot;malware&quot;]">Малварь и фишинг</button>
+        <button class="btn btn-danger"    style="font-size:10px;padding:7px 11px" data-af-on="click" data-af-action="clearAllDomains">Очистить всё</button>
       </div>
 
       <!-- Ручное добавление -->
@@ -1101,33 +1055,33 @@ body.th-hacker #matrix-canvas { opacity:.12; }
 
       <!-- Список доменов -->
       <div class="section-title" style="margin-bottom:8px">Список блокировок (<span id="hosts-count">0</span> доменов)</div>
-      <div id="hosts-list" style="max-height:200px;overflow-y:auto;background:rgba(0,0,0,.35);border:1px solid var(--cardbr);border-radius:8px;padding:8px;margin-bottom:14px;font-family:var(--mono);font-size:10.5px">
-        <span style="color:var(--tx2)">Загрузка...</span>
+      <div id="hosts-list" class="hosts-list-box">
+        <span style="color:var(--tx3)">Загрузка...</span>
       </div>
 
       <!-- Применить -->
       <div class="grid-2">
         <button class="btn btn-primary" data-af-on="click" data-af-action="applyHosts">⚡ Применить к системе</button>
-        <button class="btn btn-secondary" data-af-on="click" data-af-action="loadHostsDomains">↺ Перечитать hosts</button>
+        <button class="btn btn-secondary" data-af-on="click" data-af-action="loadHostsDomains">Перечитать hosts</button>
       </div>
-      <div id="hosts-status" style="font-size:10px;color:var(--tx2);font-family:var(--mono);margin-top:8px;min-height:16px"></div>
+      <div id="hosts-status" style="font-size:10.5px;color:var(--tx3);font-family:var(--mono);margin-top:9px;min-height:16px"></div>
     </div>
 
     <!-- uBlock блок -->
     <div class="af-card" style="grid-column:1/-1">
-      <div class="section-title">🧩 uBlock Origin — автоустановка в профили браузера</div>
-      <p style="font-size:10.5px;color:var(--tx2);font-family:var(--mono);margin-bottom:14px;line-height:1.7">
-        Копирует расширение uBlock Origin в выбранный профиль Chrome/Edge/Yandex.<br>
-        <b style="color:var(--ac)">Требование:</b> Скачай <a data-af-on="click" data-af-action="openUblockLink" style="color:var(--ac);cursor:pointer;text-decoration:underline">uBlock Origin CRX</a>,
-        распакуй в папку <code style="color:var(--ac)">assets/ublock/</code> рядом с программой.
+      <div class="section-title">uBlock Origin — автоустановка в профили браузера</div>
+      <p style="font-size:11.5px;color:var(--tx2);margin-bottom:14px;line-height:1.7">
+        Копирует расширение uBlock Origin в выбранный профиль Chrome / Edge / Яндекс.<br>
+        <b style="color:var(--tx)">Требование:</b> скачай <a data-af-on="click" data-af-action="openUblockLink" style="color:var(--ac);cursor:pointer;text-decoration:underline">uBlock Origin CRX</a>,
+        распакуй в папку <code style="color:var(--ac);font-family:var(--mono);font-size:10.5px">assets/ublock/</code> рядом с программой.
       </p>
       <label class="field-label">Выбери профиль для установки</label>
       <select class="af-input" id="ublock-profile" style="margin-bottom:10px"></select>
       <div class="grid-2">
-        <button class="btn btn-primary" data-af-on="click" data-af-action="installUblock">🧩 Установить uBlock</button>
-        <button class="btn btn-secondary" data-af-on="click" data-af-action="openUblockFolder">📂 Открыть assets/ublock/</button>
+        <button class="btn btn-primary" data-af-on="click" data-af-action="installUblock">Установить uBlock</button>
+        <button class="btn btn-secondary" data-af-on="click" data-af-action="openUblockFolder">Открыть assets/ublock/</button>
       </div>
-      <div id="ublock-status" style="font-size:10px;color:var(--tx2);font-family:var(--mono);margin-top:8px;min-height:16px"></div>
+      <div id="ublock-status" style="font-size:10.5px;color:var(--tx3);font-family:var(--mono);margin-top:9px;min-height:16px"></div>
     </div>
 
   </div>
@@ -1143,75 +1097,68 @@ body.th-hacker #matrix-canvas { opacity:.12; }
   <div class="af-card" style="margin-bottom:14px">
     <div class="section-title">Темы оформления</div>
     <div class="theme-grid stagger">
-      <div class="theme-card tc-default" data-af-on="click" data-af-action="setTheme" data-af-args="[&quot;&quot;]"       id="tc-">⚡ Default</div>
-      <div class="theme-card tc-cyber"   data-af-on="click" data-af-action="setTheme" data-af-args="[&quot;th-cyber&quot;]"  id="tc-th-cyber">🌸 Cyber</div>
-      <div class="theme-card tc-hacker"  data-af-on="click" data-af-action="setTheme" data-af-args="[&quot;th-hacker&quot;]" id="tc-th-hacker">💻 Hacker</div>
-      <div class="theme-card tc-blood"   data-af-on="click" data-af-action="setTheme" data-af-args="[&quot;th-blood&quot;]"  id="tc-th-blood">🩸 Blood</div>
-      <div class="theme-card tc-ocean"   data-af-on="click" data-af-action="setTheme" data-af-args="[&quot;th-ocean&quot;]"  id="tc-th-ocean">🌊 Ocean</div>
-      <div class="theme-card tc-gold"    data-af-on="click" data-af-action="setTheme" data-af-args="[&quot;th-gold&quot;]"   id="tc-th-gold">👑 Gold</div>
-      <div class="theme-card tc-matrix"  data-af-on="click" data-af-action="setTheme" data-af-args="[&quot;th-matrix&quot;]" id="tc-th-matrix">🟩 Matrix</div>
-      <div class="theme-card tc-rose"    data-af-on="click" data-af-action="setTheme" data-af-args="[&quot;th-rose&quot;]"   id="tc-th-rose">🌹 Rose</div>
-      <div class="theme-card tc-ice"     data-af-on="click" data-af-action="setTheme" data-af-args="[&quot;th-ice&quot;]"    id="tc-th-ice">❄️ Ice</div>
-      <div class="theme-card tc-toxic"   data-af-on="click" data-af-action="setTheme" data-af-args="[&quot;th-toxic&quot;]"  id="tc-th-toxic">☢️ Toxic</div>
+      <div class="theme-card" data-af-on="click" data-af-action="setTheme" data-af-args='[""]' id="tc-">
+        <div class="theme-preview" style="background:linear-gradient(120deg,#4f46e5,#8b5cf6)"></div>
+        Классика
+      </div>
+      <div class="theme-card" data-af-on="click" data-af-action="setTheme" data-af-args='["th-mint"]' id="tc-th-mint">
+        <div class="theme-preview" style="background:linear-gradient(120deg,#059669,#14b8a6)"></div>
+        Мята
+      </div>
+      <div class="theme-card" data-af-on="click" data-af-action="setTheme" data-af-args='["th-sky"]' id="tc-th-sky">
+        <div class="theme-preview" style="background:linear-gradient(120deg,#0284c7,#38bdf8)"></div>
+        Небо
+      </div>
+      <div class="theme-card" data-af-on="click" data-af-action="setTheme" data-af-args='["th-amber"]' id="tc-th-amber">
+        <div class="theme-preview" style="background:linear-gradient(120deg,#d97706,#f59e0b)"></div>
+        Янтарь
+      </div>
+      <div class="theme-card" data-af-on="click" data-af-action="setTheme" data-af-args='["th-rose"]' id="tc-th-rose">
+        <div class="theme-preview" style="background:linear-gradient(120deg,#e11d48,#f472b6)"></div>
+        Роза
+      </div>
+      <div class="theme-card" data-af-on="click" data-af-action="setTheme" data-af-args='["th-night"]' id="tc-th-night">
+        <div class="theme-preview" style="background:linear-gradient(120deg,#101a2c 40%,#33406b 75%,#8195f8)"></div>
+        Ночь
+      </div>
     </div>
   </div>
 
   <div class="grid-2" style="margin-bottom:14px">
     <!-- Кастомные цвета -->
     <div class="af-card">
-      <div class="section-title">Кастомные цвета</div>
+      <div class="section-title">Акцентные цвета</div>
       <div class="color-row">
         <label>Акцент 1</label>
-        <input type="color" id="color-accent"  value="#00f0ff" data-af-on="input" data-af-action="previewColors">
+        <input type="color" id="color-accent"  value="#4f46e5" data-af-on="input" data-af-action="previewColors">
       </div>
       <div class="color-row">
         <label>Акцент 2</label>
-        <input type="color" id="color-accent2" value="#7b2fff" data-af-on="input" data-af-action="previewColors">
+        <input type="color" id="color-accent2" value="#8b5cf6" data-af-on="input" data-af-action="previewColors">
       </div>
-      <div class="color-row" style="border:none;padding-bottom:0">
-        <label>Прозрачность фона</label>
-        <span class="data-value" id="opacity-display">0.97</span>
-      </div>
-      <div class="range-row" style="margin-top:5px">
-        <label></label>
-        <input type="range" id="bg-opacity" min="0.70" max="0.99" step="0.01" value="0.97" data-af-on="input" data-af-action="previewColors">
-      </div>
-      <div class="grid-2" style="margin-top:6px">
-        <button class="btn btn-primary" data-af-on="click" data-af-action="saveColors">💾 Сохранить</button>
-        <button class="btn btn-danger"  data-af-on="click" data-af-action="resetColors">↺ Сброс</button>
+      <div class="grid-2" style="margin-top:12px">
+        <button class="btn btn-primary" data-af-on="click" data-af-action="saveColors">Сохранить</button>
+        <button class="btn btn-danger"  data-af-on="click" data-af-action="resetColors">Сброс</button>
       </div>
     </div>
 
-    <!-- Эффекты -->
+    <!-- Интерфейс -->
     <div class="af-card">
-      <div class="section-title">Эффекты и анимации</div>
+      <div class="section-title">Интерфейс</div>
       <div class="color-row">
-        <label>Частицы фона</label>
-        <select class="af-input" id="fx-particles" style="width:auto;margin:0;padding:5px 10px;font-size:10px" data-af-on="change" data-af-action="saveFx">
-          <option value="net">Сетка</option>
-          <option value="dots">Точки</option>
-          <option value="stars">Звёзды</option>
-          <option value="none">Выкл</option>
-        </select>
+        <label>Масштаб интерфейса</label>
+        <span class="range-val" id="scale-display">1.0</span>
       </div>
-      <div class="color-row">
-        <label>Скорость частиц</label>
-        <span class="data-value" id="speed-display">0.5</span>
-      </div>
-      <div class="range-row" style="margin-top:5px">
+      <div class="range-row" style="margin-top:6px">
         <label></label>
-        <input type="range" id="fx-speed" min="0.1" max="2.0" step="0.1" value="0.5"
-               data-af-on="input" data-af-action="mirrorInput" data-af-args='["speed-display", "saveFx", true]'>
+        <input type="range" id="ui-scale" min="0.8" max="1.3" step="0.1" value="1"
+               data-af-on="input" data-af-action="mirrorInput" data-af-args='["scale-display", "saveScale", true]'>
       </div>
-      <div class="color-row" style="border:none">
-        <label>Сканлайны</label>
-        <select class="af-input" id="fx-scanlines" style="width:auto;margin:0;padding:5px 10px;font-size:10px" data-af-on="change" data-af-action="saveFx">
-          <option value="on">Вкл</option>
-          <option value="off">Выкл</option>
-        </select>
-      </div>
+      <p style="font-size:10.5px;color:var(--tx3);line-height:1.6;margin-top:10px">
+        Меняет размер всего интерфейса — удобно для больших экранов или маленьких окон.
+      </p>
     </div>
-
+  </div>
 </div>
 </template>
 
@@ -1224,13 +1171,13 @@ body.th-hacker #matrix-canvas { opacity:.12; }
     <div class="af-card">
       <div class="section-title">User-Agent</div>
       <label class="field-label">Пресеты</label>
-      <div class="grid-2" style="margin-bottom:9px">
-        <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" data-af-on="click" data-af-action="setUA" data-af-args="[&quot;chrome_win&quot;]">Chrome / Win10</button>
-        <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" data-af-on="click" data-af-action="setUA" data-af-args="[&quot;chrome_mac&quot;]">Chrome / Mac</button>
-        <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" data-af-on="click" data-af-action="setUA" data-af-args="[&quot;edge_win&quot;]">Edge / Win11</button>
-        <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" data-af-on="click" data-af-action="setUA" data-af-args="[&quot;firefox_win&quot;]">Firefox / Win</button>
-        <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" data-af-on="click" data-af-action="setUA" data-af-args="[&quot;safari_mac&quot;]">Safari / Mac</button>
-        <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" data-af-on="click" data-af-action="setUA" data-af-args="[&quot;mobile_android&quot;]">Android Chrome</button>
+      <div class="grid-2" style="margin-bottom:10px">
+        <button class="btn btn-secondary" style="font-size:10px;padding:7px 4px" data-af-on="click" data-af-action="setUA" data-af-args="[&quot;chrome_win&quot;]">Chrome / Win10</button>
+        <button class="btn btn-secondary" style="font-size:10px;padding:7px 4px" data-af-on="click" data-af-action="setUA" data-af-args="[&quot;chrome_mac&quot;]">Chrome / Mac</button>
+        <button class="btn btn-secondary" style="font-size:10px;padding:7px 4px" data-af-on="click" data-af-action="setUA" data-af-args="[&quot;edge_win&quot;]">Edge / Win11</button>
+        <button class="btn btn-secondary" style="font-size:10px;padding:7px 4px" data-af-on="click" data-af-action="setUA" data-af-args="[&quot;firefox_win&quot;]">Firefox / Win</button>
+        <button class="btn btn-secondary" style="font-size:10px;padding:7px 4px" data-af-on="click" data-af-action="setUA" data-af-args="[&quot;safari_mac&quot;]">Safari / Mac</button>
+        <button class="btn btn-secondary" style="font-size:10px;padding:7px 4px" data-af-on="click" data-af-action="setUA" data-af-args="[&quot;mobile_android&quot;]">Android Chrome</button>
       </div>
       <label class="field-label">Кастомный User-Agent</label>
       <input class="af-input" id="cfg-ua" type="text" placeholder="Mozilla/5.0 ...">
@@ -1239,121 +1186,121 @@ body.th-hacker #matrix-canvas { opacity:.12; }
     <div class="af-card">
       <div class="section-title">Разрешение экрана</div>
       <label class="field-label">Пресеты</label>
-      <div class="grid-3" style="margin-bottom:9px">
-        <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" data-af-on="click" data-af-action="setRes" data-af-args="[&quot;1920,1080&quot;]">1920×1080</button>
-        <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" data-af-on="click" data-af-action="setRes" data-af-args="[&quot;2560,1440&quot;]">2560×1440</button>
-        <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" data-af-on="click" data-af-action="setRes" data-af-args="[&quot;1366,768&quot;]">1366×768</button>
-        <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" data-af-on="click" data-af-action="setRes" data-af-args="[&quot;1280,720&quot;]">1280×720</button>
-        <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" data-af-on="click" data-af-action="setRes" data-af-args="[&quot;1440,900&quot;]">1440×900</button>
-        <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" data-af-on="click" data-af-action="setRes" data-af-args="[&quot;375,812&quot;]">375×812 📱</button>
+      <div class="grid-3" style="margin-bottom:10px">
+        <button class="btn btn-secondary" style="font-size:10px;padding:7px 4px" data-af-on="click" data-af-action="setRes" data-af-args="[&quot;1920,1080&quot;]">1920×1080</button>
+        <button class="btn btn-secondary" style="font-size:10px;padding:7px 4px" data-af-on="click" data-af-action="setRes" data-af-args="[&quot;2560,1440&quot;]">2560×1440</button>
+        <button class="btn btn-secondary" style="font-size:10px;padding:7px 4px" data-af-on="click" data-af-action="setRes" data-af-args="[&quot;1366,768&quot;]">1366×768</button>
+        <button class="btn btn-secondary" style="font-size:10px;padding:7px 4px" data-af-on="click" data-af-action="setRes" data-af-args="[&quot;1280,720&quot;]">1280×720</button>
+        <button class="btn btn-secondary" style="font-size:10px;padding:7px 4px" data-af-on="click" data-af-action="setRes" data-af-args="[&quot;1440,900&quot;]">1440×900</button>
+        <button class="btn btn-secondary" style="font-size:10px;padding:7px 4px" data-af-on="click" data-af-action="setRes" data-af-args="[&quot;375,812&quot;]">375×812 📱</button>
       </div>
       <label class="field-label">Кастомное (ширина,высота)</label>
       <input class="af-input" id="cfg-res" type="text" placeholder="1920,1080">
-      <div class="grid-2" style="margin-top:2px">
-        <button class="btn btn-primary" data-af-on="click" data-af-action="saveConfig">💾 Сохранить всё</button>
-        <button class="btn btn-secondary" data-af-on="click" data-af-action="loadConfig">↺ Загрузить</button>
+      <div class="grid-2" style="margin-top:4px">
+        <button class="btn btn-primary" data-af-on="click" data-af-action="saveConfig">Сохранить всё</button>
+        <button class="btn btn-secondary" data-af-on="click" data-af-action="loadConfig">Загрузить</button>
       </div>
     </div>
 
     <div class="af-card" style="grid-column:1/-1">
-      <div class="section-title">🎭 Обманка аккаунта — маскировка под старый профиль</div>
-      <p style="font-size:10.5px;color:var(--tx2);font-family:var(--mono);margin-bottom:13px;line-height:1.7">
+      <div class="section-title">Обманка аккаунта — маскировка под старый профиль</div>
+      <p style="font-size:11.5px;color:var(--tx2);margin-bottom:14px;line-height:1.7">
         Эти данные передаются в браузер через скрипты — сайты видят «старый» аккаунт вместо нового.
       </p>
       <div class="grid-2">
         <div>
           <label class="field-label">Возраст аккаунта Chrome</label>
           <div class="grid-2" style="margin-bottom:9px">
-            <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" data-af-on="click" data-af-action="setSpoof" data-af-args="[&quot;account_age&quot;, &quot;3+ года&quot;]">3+ лет</button>
-            <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" data-af-on="click" data-af-action="setSpoof" data-af-args="[&quot;account_age&quot;, &quot;1-2 года&quot;]">1-2 года</button>
-            <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" data-af-on="click" data-af-action="setSpoof" data-af-args="[&quot;account_age&quot;, &quot;6-12 мес&quot;]">6-12 мес</button>
-            <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" data-af-on="click" data-af-action="setSpoof" data-af-args="[&quot;account_age&quot;, &quot;новый&quot;]">Новый</button>
+            <button class="btn btn-secondary" style="font-size:10px;padding:7px 4px" data-af-on="click" data-af-action="setSpoof" data-af-args="[&quot;account_age&quot;, &quot;3+ года&quot;]">3+ лет</button>
+            <button class="btn btn-secondary" style="font-size:10px;padding:7px 4px" data-af-on="click" data-af-action="setSpoof" data-af-args="[&quot;account_age&quot;, &quot;1-2 года&quot;]">1-2 года</button>
+            <button class="btn btn-secondary" style="font-size:10px;padding:7px 4px" data-af-on="click" data-af-action="setSpoof" data-af-args="[&quot;account_age&quot;, &quot;6-12 мес&quot;]">6-12 мес</button>
+            <button class="btn btn-secondary" style="font-size:10px;padding:7px 4px" data-af-on="click" data-af-action="setSpoof" data-af-args="[&quot;account_age&quot;, &quot;новый&quot;]">Новый</button>
           </div>
           <input class="af-input" id="spoof-age" type="text" placeholder="напр: 2 года 3 месяца">
 
           <label class="field-label">История браузера (имитация)</label>
           <div class="grid-2" style="margin-bottom:9px">
-            <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" data-af-on="click" data-af-action="setSpoof" data-af-args="[&quot;history&quot;, &quot;активный&quot;]">Активный юзер</button>
-            <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" data-af-on="click" data-af-action="setSpoof" data-af-args="[&quot;history&quot;, &quot;умеренный&quot;]">Умеренный</button>
-            <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" data-af-on="click" data-af-action="setSpoof" data-af-args="[&quot;history&quot;, &quot;редкий&quot;]">Редкий</button>
-            <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" data-af-on="click" data-af-action="setSpoof" data-af-args="[&quot;history&quot;, &quot;чистый&quot;]">Чистый</button>
+            <button class="btn btn-secondary" style="font-size:10px;padding:7px 4px" data-af-on="click" data-af-action="setSpoof" data-af-args="[&quot;history&quot;, &quot;активный&quot;]">Активный юзер</button>
+            <button class="btn btn-secondary" style="font-size:10px;padding:7px 4px" data-af-on="click" data-af-action="setSpoof" data-af-args="[&quot;history&quot;, &quot;умеренный&quot;]">Умеренный</button>
+            <button class="btn btn-secondary" style="font-size:10px;padding:7px 4px" data-af-on="click" data-af-action="setSpoof" data-af-args="[&quot;history&quot;, &quot;редкий&quot;]">Редкий</button>
+            <button class="btn btn-secondary" style="font-size:10px;padding:7px 4px" data-af-on="click" data-af-action="setSpoof" data-af-args="[&quot;history&quot;, &quot;чистый&quot;]">Чистый</button>
           </div>
           <input class="af-input" id="spoof-history" type="text" placeholder="активный">
         </div>
         <div>
           <label class="field-label">Временная зона</label>
           <div class="grid-2" style="margin-bottom:9px">
-            <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" data-af-on="click" data-af-action="setSpoof" data-af-args="[&quot;timezone&quot;, &quot;Europe/Moscow&quot;]">Москва</button>
-            <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" data-af-on="click" data-af-action="setSpoof" data-af-args="[&quot;timezone&quot;, &quot;Europe/Kiev&quot;]">Киев</button>
-            <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" data-af-on="click" data-af-action="setSpoof" data-af-args="[&quot;timezone&quot;, &quot;Europe/London&quot;]">Лондон</button>
-            <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" data-af-on="click" data-af-action="setSpoof" data-af-args="[&quot;timezone&quot;, &quot;America/New_York&quot;]">Нью-Йорк</button>
+            <button class="btn btn-secondary" style="font-size:10px;padding:7px 4px" data-af-on="click" data-af-action="setSpoof" data-af-args="[&quot;timezone&quot;, &quot;Europe/Moscow&quot;]">Москва</button>
+            <button class="btn btn-secondary" style="font-size:10px;padding:7px 4px" data-af-on="click" data-af-action="setSpoof" data-af-args="[&quot;timezone&quot;, &quot;Europe/Kiev&quot;]">Киев</button>
+            <button class="btn btn-secondary" style="font-size:10px;padding:7px 4px" data-af-on="click" data-af-action="setSpoof" data-af-args="[&quot;timezone&quot;, &quot;Europe/London&quot;]">Лондон</button>
+            <button class="btn btn-secondary" style="font-size:10px;padding:7px 4px" data-af-on="click" data-af-action="setSpoof" data-af-args="[&quot;timezone&quot;, &quot;America/New_York&quot;]">Нью-Йорк</button>
           </div>
           <input class="af-input" id="spoof-tz" type="text" placeholder="Europe/Moscow">
 
           <label class="field-label">Язык браузера</label>
           <div class="grid-2" style="margin-bottom:9px">
-            <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" data-af-on="click" data-af-action="setSpoof" data-af-args="[&quot;lang&quot;, &quot;ru-RU,ru&quot;]">Русский</button>
-            <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" data-af-on="click" data-af-action="setSpoof" data-af-args="[&quot;lang&quot;, &quot;en-US,en&quot;]">English US</button>
-            <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" data-af-on="click" data-af-action="setSpoof" data-af-args="[&quot;lang&quot;, &quot;uk-UA,uk&quot;]">Украинский</button>
-            <button class="btn btn-secondary" style="font-size:9px;padding:7px 4px" data-af-on="click" data-af-action="setSpoof" data-af-args="[&quot;lang&quot;, &quot;de-DE,de&quot;]">Deutsch</button>
+            <button class="btn btn-secondary" style="font-size:10px;padding:7px 4px" data-af-on="click" data-af-action="setSpoof" data-af-args="[&quot;lang&quot;, &quot;ru-RU,ru&quot;]">Русский</button>
+            <button class="btn btn-secondary" style="font-size:10px;padding:7px 4px" data-af-on="click" data-af-action="setSpoof" data-af-args="[&quot;lang&quot;, &quot;en-US,en&quot;]">English US</button>
+            <button class="btn btn-secondary" style="font-size:10px;padding:7px 4px" data-af-on="click" data-af-action="setSpoof" data-af-args="[&quot;lang&quot;, &quot;uk-UA,uk&quot;]">Украинский</button>
+            <button class="btn btn-secondary" style="font-size:10px;padding:7px 4px" data-af-on="click" data-af-action="setSpoof" data-af-args="[&quot;lang&quot;, &quot;de-DE,de&quot;]">Deutsch</button>
           </div>
           <input class="af-input" id="spoof-lang" type="text" placeholder="ru-RU,ru">
         </div>
       </div>
-      <div class="grid-2" style="margin-top:4px">
-        <button class="btn btn-primary" data-af-on="click" data-af-action="saveSpoofConfig">💾 Сохранить обманку</button>
-        <button class="btn btn-secondary" data-af-on="click" data-af-action="loadSpoofConfig">↺ Загрузить</button>
+      <div class="grid-2" style="margin-top:6px">
+        <button class="btn btn-primary" data-af-on="click" data-af-action="saveSpoofConfig">Сохранить обманку</button>
+        <button class="btn btn-secondary" data-af-on="click" data-af-action="loadSpoofConfig">Загрузить</button>
       </div>
     </div>
 
     <div class="af-card">
       <div class="section-title">Zapret</div>
-      <button class="btn btn-secondary btn-full" data-af-on="click" data-af-action="openFolder" data-af-args='["Zapret"]'>📂 Открыть папку Zapret</button>
-      <button class="btn btn-secondary btn-full" data-af-on="click" data-af-action="zapretService">🔧 service.bat (диагностика)</button>
-      <button class="btn btn-danger btn-full" data-af-on="click" data-af-action="killWinws">💀 Убить winws.exe</button>
+      <button class="btn btn-secondary btn-full" data-af-on="click" data-af-action="openFolder" data-af-args='["Zapret"]'>Открыть папку Zapret</button>
+      <button class="btn btn-secondary btn-full" data-af-on="click" data-af-action="zapretService">service.bat (диагностика)</button>
+      <button class="btn btn-danger btn-full" data-af-on="click" data-af-action="killWinws">Остановить winws.exe</button>
     </div>
 
     <!-- Fingerprint -->
     <div class="af-card" style="grid-column:1/-1">
-      <div class="section-title">🎭 Fingerprint — рандомизация отпечатка браузера</div>
-      <p style="font-size:10.5px;color:var(--tx2);font-family:var(--mono);margin-bottom:13px;line-height:1.7">
-        Каждый запуск браузера будет с уникальным GPU, платформой и canvas — сайты не смогут отследить что это один и тот же девайс.
+      <div class="section-title">Fingerprint — рандомизация отпечатка браузера</div>
+      <p style="font-size:11.5px;color:var(--tx2);margin-bottom:14px;line-height:1.7">
+        Каждый запуск браузера будет с уникальным GPU, платформой и canvas — сайты не смогут отследить, что это один и тот же девайс.
       </p>
       <div class="grid-2">
         <div>
           <div class="color-row">
-            <label style="font-size:10.5px;color:var(--tx);font-family:var(--mono)">Рандомный WebGL GPU</label>
+            <label style="font-size:11.5px;color:var(--tx);font-weight:600">Рандомный WebGL GPU</label>
             <label class="toggle-sw"><input type="checkbox" id="fp-webgl" checked data-af-on="change" data-af-action="saveFpConfig"><span class="toggle-knob"></span></label>
           </div>
           <div class="color-row">
-            <label style="font-size:10.5px;color:var(--tx);font-family:var(--mono)">Рандомная платформа</label>
+            <label style="font-size:11.5px;color:var(--tx);font-weight:600">Рандомная платформа</label>
             <label class="toggle-sw"><input type="checkbox" id="fp-platform" checked data-af-on="change" data-af-action="saveFpConfig"><span class="toggle-knob"></span></label>
           </div>
           <div class="color-row" style="border:none">
-            <label style="font-size:10.5px;color:var(--tx);font-family:var(--mono)">Рандомный Canvas noise</label>
+            <label style="font-size:11.5px;color:var(--tx);font-weight:600">Рандомный Canvas noise</label>
             <label class="toggle-sw"><input type="checkbox" id="fp-canvas" checked data-af-on="change" data-af-action="saveFpConfig"><span class="toggle-knob"></span></label>
           </div>
         </div>
         <div>
           <div class="color-row">
-            <label style="font-size:10.5px;color:var(--tx);font-family:var(--mono)">Рандомное разрешение</label>
+            <label style="font-size:11.5px;color:var(--tx);font-weight:600">Рандомное разрешение</label>
             <label class="toggle-sw"><input type="checkbox" id="fp-resolution" data-af-on="change" data-af-action="saveFpConfig"><span class="toggle-knob"></span></label>
           </div>
           <div class="color-row" style="border:none">
-            <label style="font-size:10.5px;color:var(--tx);font-family:var(--mono)">Рандомный User-Agent</label>
+            <label style="font-size:11.5px;color:var(--tx);font-weight:600">Рандомный User-Agent</label>
             <label class="toggle-sw"><input type="checkbox" id="fp-ua" data-af-on="change" data-af-action="saveFpConfig"><span class="toggle-knob"></span></label>
           </div>
-          <div style="margin-top:10px">
+          <div style="margin-top:12px">
             <label class="field-label">Профиль для превью / смены личности</label>
             <select class="af-input" id="fp-profile" style="margin-bottom:9px"></select>
             <div class="grid-2">
-              <button class="btn btn-glow" data-af-on="click" data-af-action="previewFingerprint">👁 Предпросмотр</button>
-              <button class="btn btn-secondary" data-af-on="click" data-af-action="rerollFingerprint">🎲 Новый отпечаток</button>
+              <button class="btn btn-glow" data-af-on="click" data-af-action="previewFingerprint">Предпросмотр</button>
+              <button class="btn btn-secondary" data-af-on="click" data-af-action="rerollFingerprint">Новый отпечаток</button>
             </div>
           </div>
         </div>
       </div>
-      <div id="fp-preview" style="display:none;margin-top:12px;background:rgba(0,0,0,.4);border:1px solid rgba(var(--acr),.1);border-radius:8px;padding:10px 12px;font-family:var(--mono);font-size:10px;line-height:2;color:var(--tx2)"></div>
+      <div id="fp-preview" class="mono-box" style="display:none;margin-top:12px;font-size:10px;line-height:2;color:var(--tx2);max-height:300px"></div>
     </div>
 
   </div>
@@ -1366,25 +1313,25 @@ body.th-hacker #matrix-canvas { opacity:.12; }
   <div class="page-title"><span class="page-title-accent">📋</span> Логи запусков <div class="page-title-line"></div></div>
 
   <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
-    <select class="af-input" id="log-filter-browser" style="width:auto;padding:5px 10px;font-size:10px" data-af-on="change" data-af-action="renderLogs">
+    <select class="af-input" id="log-filter-browser" style="width:auto;padding:7px 11px;font-size:11px" data-af-on="change" data-af-action="renderLogs">
       <option value="">Все браузеры</option>
       <option value="chrome">Chrome</option>
       <option value="msedge">Edge</option>
       <option value="firefox">Firefox</option>
       <option value="yandex">Яндекс</option>
     </select>
-    <select class="af-input" id="log-filter-level" style="width:auto;padding:5px 10px;font-size:10px" data-af-on="change" data-af-action="renderLogs">
+    <select class="af-input" id="log-filter-level" style="width:auto;padding:7px 11px;font-size:11px" data-af-on="change" data-af-action="renderLogs">
       <option value="">Все сообщения</option>
       <option value="error">Только ошибки</option>
       <option value="engine">Только engine</option>
     </select>
-    <button class="btn btn-secondary" style="padding:5px 14px;font-size:10px;margin-left:auto" data-af-on="click" data-af-action="clearLogs">Очистить</button>
-    <button class="btn btn-secondary" style="padding:5px 14px;font-size:10px" data-af-on="click" data-af-action="renderLogs">Обновить</button>
+    <button class="btn btn-secondary" style="padding:7px 14px;font-size:10.5px;margin-left:auto" data-af-on="click" data-af-action="clearLogs">Очистить</button>
+    <button class="btn btn-secondary" style="padding:7px 14px;font-size:10.5px" data-af-on="click" data-af-action="renderLogs">Обновить</button>
   </div>
 
   <div class="af-card" style="padding:0;overflow:hidden">
-    <div id="logs-wrap" style="font-family:var(--mono);font-size:10.5px;line-height:1.8;max-height:calc(100vh - 230px);overflow-y:auto;padding:12px 14px">
-      <div style="color:var(--tx2)">Нет записей. Запусти браузер — здесь появятся логи.</div>
+    <div id="logs-wrap" class="log-view">
+      <div style="color:var(--tx3)">Нет записей. Запусти браузер — здесь появятся логи.</div>
     </div>
   </div>
 </div>
@@ -1397,11 +1344,11 @@ body.th-hacker #matrix-canvas { opacity:.12; }
 
   <!-- Список компонентов -->
   <div class="af-card" style="margin-bottom:14px">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
-      <div style="font-size:12px;font-weight:700;color:var(--tx);font-family:var(--mono)">Статус компонентов</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+      <div style="font-size:13px;font-weight:700;color:var(--tx)">Статус компонентов</div>
       <div style="display:flex;gap:8px">
-        <button class="btn btn-secondary" style="padding:6px 14px;font-size:10px" data-af-on="click" data-af-action="diagCheck" id="diag-check-btn">Проверить</button>
-        <button class="btn btn-primary" style="padding:6px 14px;font-size:10px" data-af-on="click" data-af-action="diagInstallAll" id="diag-install-btn" disabled>Установить всё</button>
+        <button class="btn btn-secondary" style="padding:7px 14px;font-size:10.5px" data-af-on="click" data-af-action="diagCheck" id="diag-check-btn">Проверить</button>
+        <button class="btn btn-primary" style="padding:7px 14px;font-size:10.5px" data-af-on="click" data-af-action="diagInstallAll" id="diag-install-btn" disabled>Установить всё</button>
       </div>
     </div>
     <div id="diag-list" style="display:flex;flex-direction:column;gap:6px">
@@ -1410,24 +1357,24 @@ body.th-hacker #matrix-canvas { opacity:.12; }
   </div>
 
   <!-- Лог -->
-  <div class="af-card" style="flex:1">
+  <div class="af-card">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-      <div style="font-size:11px;font-weight:700;color:var(--tx2);font-family:var(--mono);letter-spacing:.5px">ЛОГ УСТАНОВКИ</div>
-      <button data-af-on="click" data-af-action="clearDiagLog" style="background:none;border:none;color:var(--tx2);cursor:pointer;font-size:10px;font-family:var(--mono)">очистить</button>
+      <div style="font-size:11px;font-weight:700;color:var(--tx2);letter-spacing:.8px">ЛОГ УСТАНОВКИ</div>
+      <button data-af-on="click" data-af-action="clearDiagLog" style="background:none;border:none;color:var(--tx3);cursor:pointer;font-size:10.5px;font-weight:600">очистить</button>
     </div>
-    <div id="diag-log" style="background:rgba(0,0,0,.4);border:1px solid rgba(var(--acr),.08);border-radius:8px;padding:10px 12px;font-family:var(--mono);font-size:10.5px;line-height:1.9;min-height:180px;max-height:300px;overflow-y:auto">
-      <span style="color:var(--tx2)">// Здесь будет лог установки</span>
+    <div id="diag-log" class="mono-box" style="min-height:180px;max-height:300px">
+      <span style="color:var(--tx3)">Здесь будет лог установки</span>
     </div>
   </div>
 
   <!-- Прогресс -->
   <div id="diag-progress-wrap" style="display:none;margin-top:12px">
-    <div style="display:flex;justify-content:space-between;margin-bottom:5px">
-      <span id="diag-progress-label" style="font-size:10px;font-family:var(--mono);color:var(--tx2)"></span>
-      <span id="diag-progress-pct" style="font-size:10px;font-family:var(--mono);color:var(--ac)">0%</span>
+    <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+      <span id="diag-progress-label" style="font-size:10.5px;font-family:var(--mono);color:var(--tx2)"></span>
+      <span id="diag-progress-pct" style="font-size:10.5px;font-family:var(--mono);color:var(--ac);font-weight:700">0%</span>
     </div>
-    <div style="background:rgba(255,255,255,.05);border-radius:4px;height:5px;overflow:hidden">
-      <div id="diag-progress-bar" style="height:100%;width:0%;background:linear-gradient(90deg,var(--ac),var(--ac2));transition:width .4s ease;border-radius:4px"></div>
+    <div class="progress-track">
+      <div id="diag-progress-bar" class="progress-fill"></div>
     </div>
   </div>
 </div>
@@ -1436,23 +1383,23 @@ body.th-hacker #matrix-canvas { opacity:.12; }
 <!-- CHEBURNET PROTECTION -->
 <template id="tpl-cheburnet">
 <div class="tab-page">
-  <div class="page-title"><span class="page-title-accent">🛡</span> Защита от Чебурнета <div class="page-title-line"></div></div>
+  <div class="page-title"><span class="page-title-accent">🌐</span> Защита от Чебурнета <div class="page-title-line"></div></div>
 
   <!-- Статус угрозы -->
-  <div class="af-card" style="margin-bottom:14px;border-color:rgba(var(--acr),.15)">
-    <div style="display:flex;align-items:center;gap:16px">
-      <div id="cbn-threat-icon" style="font-size:40px;line-height:1;filter:drop-shadow(0 0 12px rgba(var(--acr),.5))">🔍</div>
-      <div style="flex:1">
+  <div class="af-card" style="margin-bottom:14px">
+    <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+      <div id="cbn-threat-icon" style="font-size:34px;line-height:1">🔍</div>
+      <div style="flex:1;min-width:200px">
         <div class="section-title" style="margin:0 0 4px">Статус угрозы</div>
-        <div id="cbn-threat-label" style="font-size:13px;font-weight:700;color:var(--tx2);font-family:var(--mono)">Нажми «Проверить» для анализа</div>
-        <div id="cbn-threat-sub"   style="font-size:10px;color:var(--tx2);font-family:var(--mono);margin-top:3px"></div>
+        <div id="cbn-threat-label" style="font-size:13.5px;font-weight:700;color:var(--tx2)">Нажми «Проверить» для анализа</div>
+        <div id="cbn-threat-sub"   style="font-size:10.5px;color:var(--tx3);margin-top:3px"></div>
       </div>
-      <button class="btn btn-glow" data-af-on="click" data-af-action="cheburnetCheck">🔍 Проверить</button>
+      <button class="btn btn-glow" data-af-on="click" data-af-action="cheburnetCheck">Проверить</button>
     </div>
-    <div style="margin-top:14px;background:rgba(0,0,0,.35);border-radius:8px;height:6px;overflow:hidden">
-      <div id="cbn-threat-bar" style="height:100%;width:0%;background:linear-gradient(90deg,var(--grn),var(--ac));border-radius:6px;transition:width 1s ease,background 1s ease"></div>
+    <div style="margin-top:14px" class="progress-track">
+      <div id="cbn-threat-bar" class="progress-fill" style="background:linear-gradient(90deg,var(--grn),var(--ac))"></div>
     </div>
-    <div style="display:flex;justify-content:space-between;margin-top:4px;font-size:9px;font-family:var(--mono);color:var(--tx2)">
+    <div style="display:flex;justify-content:space-between;margin-top:5px;font-size:9.5px;font-family:var(--mono);color:var(--tx3);letter-spacing:1px">
       <span>БЕЗОПАСНО</span><span>ОПАСНО</span>
     </div>
   </div>
@@ -1460,39 +1407,39 @@ body.th-hacker #matrix-canvas { opacity:.12; }
   <div class="grid-2" style="margin-bottom:14px">
     <!-- Автозапуск Zapret -->
     <div class="af-card">
-      <div class="section-title">⚡ Автозащита</div>
-      <p style="font-size:10.5px;color:var(--tx2);font-family:var(--mono);line-height:1.7;margin-bottom:12px">
-        При обнаружении блокировок — автоматически запускает Zapret и переключает браузер в режим обхода.
+      <div class="section-title">Автозащита</div>
+      <p style="font-size:11px;color:var(--tx2);line-height:1.7;margin-bottom:12px">
+        При обнаружении блокировок автоматически запускает Zapret и переключает браузер в режим обхода.
       </p>
       <div class="color-row">
-        <label style="font-size:10.5px;color:var(--tx2);font-family:var(--mono)">Автозапуск при старте</label>
+        <label style="font-size:11.5px;font-weight:600;color:var(--tx2)">Автозапуск при старте</label>
         <label class="toggle-sw"><input type="checkbox" id="cbn-autostart" data-af-on="change" data-af-action="saveCbn"><span class="toggle-knob"></span></label>
       </div>
       <div class="color-row">
-        <label style="font-size:10.5px;color:var(--tx2);font-family:var(--mono)">Мониторинг каждые N сек</label>
-        <span class="data-value" id="cbn-interval-v">30</span>
+        <label style="font-size:11.5px;font-weight:600;color:var(--tx2)">Мониторинг каждые N сек</label>
+        <span class="range-val" id="cbn-interval-v">30</span>
       </div>
-      <div class="range-row"><label></label>
+      <div class="range-row" style="margin-bottom:8px"><label></label>
         <input type="range" id="cbn-interval" min="10" max="120" step="5" value="30"
                data-af-on="input" data-af-action="mirrorInput" data-af-args='["cbn-interval-v", "saveCbn", false]'>
       </div>
       <div class="color-row" style="border:none">
-        <label style="font-size:10.5px;color:var(--tx2);font-family:var(--mono)">Авто-перезапуск Zapret</label>
+        <label style="font-size:11.5px;font-weight:600;color:var(--tx2)">Авто-перезапуск Zapret</label>
         <label class="toggle-sw"><input type="checkbox" id="cbn-autorestart" checked data-af-on="change" data-af-action="saveCbn"><span class="toggle-knob"></span></label>
       </div>
     </div>
 
     <!-- Тесты доступности -->
     <div class="af-card">
-      <div class="section-title">🌐 Тесты доступности</div>
+      <div class="section-title">Тесты доступности</div>
       <div id="cbn-tests-list" style="display:flex;flex-direction:column;gap:6px"></div>
-      <button class="btn btn-secondary btn-full" style="margin-top:10px" data-af-on="click" data-af-action="cheburnetRunTests">▶ Запустить тесты</button>
+      <button class="btn btn-secondary btn-full" style="margin-top:12px" data-af-on="click" data-af-action="cheburnetRunTests">Запустить тесты</button>
     </div>
   </div>
 
   <!-- DNS защита -->
   <div class="af-card" style="margin-bottom:14px">
-    <div class="section-title">🔒 DNS Защита — обход DPI через зашифрованный DNS</div>
+    <div class="section-title">DNS-защита — обход DPI через зашифрованный DNS</div>
     <div class="grid-2">
       <div>
         <label class="field-label">Первичный DNS</label>
@@ -1518,31 +1465,31 @@ body.th-hacker #matrix-canvas { opacity:.12; }
           <option value="dot">DNS-over-TLS (DoT)</option>
           <option value="plain">Обычный DNS</option>
         </select>
-        <div style="background:rgba(var(--acr),.06);border:1px solid rgba(var(--acr),.15);border-radius:8px;padding:10px;font-size:10px;font-family:var(--mono);color:var(--tx2);line-height:1.7;margin-top:2px">
+        <div class="cbn-info-box">
           DoH — шифрует DNS через HTTPS<br>
           DoT — шифрует DNS через TLS<br>
-          Скрывает от провайдера что ты открываешь
+          Скрывает от провайдера, что ты открываешь
         </div>
       </div>
     </div>
-    <div class="grid-2" style="margin-top:8px">
-      <button class="btn btn-primary" data-af-on="click" data-af-action="cheburnetApplyDns">🔒 Применить DNS</button>
-      <button class="btn btn-secondary" data-af-on="click" data-af-action="cheburnetResetDns">↺ Сбросить DNS</button>
+    <div class="grid-2" style="margin-top:10px">
+      <button class="btn btn-primary" data-af-on="click" data-af-action="cheburnetApplyDns">Применить DNS</button>
+      <button class="btn btn-secondary" data-af-on="click" data-af-action="cheburnetResetDns">Сбросить DNS</button>
     </div>
-    <div id="cbn-dns-status" style="font-size:10px;color:var(--tx2);font-family:var(--mono);margin-top:8px;min-height:16px"></div>
+    <div id="cbn-dns-status" style="font-size:10.5px;color:var(--tx3);font-family:var(--mono);margin-top:9px;min-height:16px"></div>
   </div>
 
   <!-- Аварийный режим -->
-  <div class="af-card" style="border-color:rgba(var(--redr),.2)">
-    <div class="section-title" style="color:var(--red)">☢️ Аварийный режим — если всё заблокировано</div>
-    <p style="font-size:10.5px;color:var(--tx2);font-family:var(--mono);line-height:1.7;margin-bottom:12px">
-      Полный Чебурнет? Запускает браузер напрямую через Zapret с максимальным обходом + смена DNS + anti-DPI заголовки.
+  <div class="af-card">
+    <div class="section-title" style="color:var(--red)">Аварийный режим — если всё заблокировано</div>
+    <p style="font-size:11px;color:var(--tx2);line-height:1.7;margin-bottom:12px">
+      Полный Чебурнет? Запускает браузер напрямую через Zapret с максимальным обходом, сменой DNS и anti-DPI заголовками.
     </p>
     <div class="grid-2">
       <button class="btn btn-danger btn-full" data-af-on="click" data-af-action="cheburnetEmergency">🆘 Аварийный режим</button>
-      <button class="btn btn-secondary btn-full" data-af-on="click" data-af-action="cheburnetFullCheck">🔬 Полная диагностика</button>
+      <button class="btn btn-secondary btn-full" data-af-on="click" data-af-action="cheburnetFullCheck">Полная диагностика</button>
     </div>
-    <div id="cbn-emergency-log" style="display:none;background:rgba(0,0,0,.5);border:1px solid rgba(var(--redr),.2);border-radius:8px;padding:10px;margin-top:12px;font-family:var(--mono);font-size:10px;max-height:120px;overflow-y:auto;line-height:1.8"></div>
+    <div id="cbn-emergency-log" class="mono-box" style="display:none;margin-top:12px;font-size:10px;max-height:120px;line-height:1.8"></div>
   </div>
 </div>
 </template>
@@ -1553,7 +1500,7 @@ body.th-hacker #matrix-canvas { opacity:.12; }
   <div class="page-title"><span class="page-title-accent">🔄</span> Обновление Zapret <div class="page-title-line"></div></div>
 
   <!-- Текущая версия и новая -->
-  <div class="grid-2" style="margin-bottom:13px">
+  <div class="grid-2" style="margin-bottom:14px">
     <div class="af-card">
       <div class="section-title">Установленная версия</div>
       <div class="data-row" style="margin-top:8px">
@@ -1562,9 +1509,9 @@ body.th-hacker #matrix-canvas { opacity:.12; }
       </div>
       <div class="data-row">
         <span class="data-label">Папка</span>
-        <span class="data-value" style="font-size:10px;font-family:var(--mono)" id="zu-path">—</span>
+        <span class="data-value" style="font-size:10.5px;font-family:var(--mono)" id="zu-path">—</span>
       </div>
-      <button class="btn btn-secondary btn-full" style="margin-top:10px" data-af-on="click" data-af-action="openFolder" data-af-args='["Zapret"]'>📂 Открыть папку</button>
+      <button class="btn btn-secondary btn-full" style="margin-top:10px" data-af-on="click" data-af-action="openFolder" data-af-args='["Zapret"]'>Открыть папку</button>
     </div>
     <div class="af-card">
       <div class="section-title">Последняя версия на GitHub</div>
@@ -1580,44 +1527,44 @@ body.th-hacker #matrix-canvas { opacity:.12; }
         <span class="data-label">Размер</span>
         <span class="data-value" id="zu-size">—</span>
       </div>
-      <button class="btn btn-secondary btn-full" style="margin-top:10px" id="zu-btn-check" data-af-on="click" data-af-action="zapretCheckUpdate">🔍 Проверить обновление</button>
+      <button class="btn btn-secondary btn-full" style="margin-top:10px" id="zu-btn-check" data-af-on="click" data-af-action="zapretCheckUpdate">Проверить обновление</button>
     </div>
   </div>
 
   <!-- Статус / прогресс -->
-  <div class="af-card" style="margin-bottom:13px" id="zu-status-card" style="display:none">
+  <div class="af-card" style="margin-bottom:14px;display:none" id="zu-status-card">
     <div class="section-title" id="zu-status-title">Статус</div>
     <div style="margin-top:8px;margin-bottom:10px">
-      <div style="display:flex;justify-content:space-between;margin-bottom:5px">
-        <span style="font-size:11px;font-family:var(--mono);color:var(--tx2)" id="zu-status-label">Ожидание...</span>
-        <span style="font-size:11px;font-family:var(--mono);color:var(--ac)" id="zu-pct">0%</span>
+      <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+        <span style="font-size:11.5px;font-family:var(--mono);color:var(--tx2)" id="zu-status-label">Ожидание...</span>
+        <span style="font-size:11.5px;font-family:var(--mono);color:var(--ac);font-weight:700" id="zu-pct">0%</span>
       </div>
-      <div style="background:rgba(255,255,255,.05);border:1px solid rgba(var(--acr),.15);border-radius:5px;height:8px;overflow:hidden">
-        <div id="zu-bar" style="height:100%;width:0%;background:linear-gradient(90deg,var(--ac),#7b2fff);box-shadow:0 0 8px rgba(var(--acr),.5);transition:width .4s ease;border-radius:5px"></div>
+      <div class="progress-track" style="height:9px">
+        <div id="zu-bar" class="progress-fill" style="height:100%"></div>
       </div>
     </div>
-    <div id="zu-log" style="background:rgba(0,0,0,.35);border:1px solid rgba(var(--acr),.1);border-radius:6px;padding:8px 10px;max-height:140px;overflow-y:auto;font-family:var(--mono);font-size:10.5px;line-height:1.8"></div>
+    <div id="zu-log" class="mono-box" style="max-height:140px"></div>
   </div>
 
   <!-- Кнопка обновить -->
   <div class="af-card" id="zu-update-card" style="display:none">
-    <div class="section-title" id="zu-update-title">🆕 Доступно обновление!</div>
+    <div class="section-title" id="zu-update-title">Доступно обновление!</div>
     <p style="font-size:12px;color:var(--tx2);margin:8px 0 14px;line-height:1.7" id="zu-update-desc"></p>
     <div class="grid-2">
-      <button class="btn btn-primary" id="zu-btn-update" data-af-on="click" data-af-action="zapretDoUpdate">⬇ Скачать и установить</button>
-      <button class="btn btn-secondary" data-af-on="click" data-af-style='{"display":"none"}'>Позже</button>
+      <button class="btn btn-primary" id="zu-btn-update" data-af-on="click" data-af-action="zapretDoUpdate">Скачать и установить</button>
+      <button class="btn btn-secondary" style="display:none">Позже</button>
     </div>
   </div>
 
   <!-- Уже актуально -->
   <div class="af-card" id="zu-ok-card" style="display:none">
-    <div style="color:var(--grn);font-family:var(--mono);font-size:13px;padding:8px 0">✓ Zapret актуален — обновление не требуется</div>
+    <div style="color:var(--grn);font-size:13px;font-weight:700;padding:6px 0">✓ Zapret актуален — обновление не требуется</div>
   </div>
 
   <!-- Changelog -->
   <div class="af-card" id="zu-changelog-card" style="display:none">
     <div class="section-title">Что нового</div>
-    <div id="zu-changelog" style="font-size:12px;color:var(--tx2);line-height:1.8;margin-top:8px;max-height:160px;overflow-y:auto;font-family:var(--mono)"></div>
+    <div id="zu-changelog" style="font-size:11.5px;color:var(--tx2);line-height:1.8;margin-top:6px;max-height:160px;overflow-y:auto;font-family:var(--mono)"></div>
   </div>
 
 </div>
@@ -1638,26 +1585,23 @@ body.th-hacker #matrix-canvas { opacity:.12; }
     </div>
     <div class="af-card">
       <div class="section-title">Браузеры</div>
-      <div class="data-row"><span class="data-label">Chrome</span><span class="data-value">✓</span></div>
-      <div class="data-row"><span class="data-label">Edge</span><span class="data-value">✓</span></div>
-      <div class="data-row"><span class="data-label">Firefox</span><span class="data-value">✓</span></div>
-      <div class="data-row"><span class="data-label">Yandex</span><span class="data-value">✓</span></div>
+      <div class="data-row"><span class="data-label">Chrome</span><span class="data-value" style="color:var(--grn)">✓</span></div>
+      <div class="data-row"><span class="data-label">Edge</span><span class="data-value" style="color:var(--grn)">✓</span></div>
+      <div class="data-row"><span class="data-label">Firefox</span><span class="data-value" style="color:var(--grn)">✓</span></div>
+      <div class="data-row"><span class="data-label">Yandex</span><span class="data-value" style="color:var(--grn)">✓</span></div>
     </div>
-    <div class="af-card" style="grid-column:1/-1;border-color:rgba(var(--acr),.22);background:rgba(var(--acr),.03)">
-      <div class="section-title">📣 Поддержка и обновления</div>
-      <p style="font-size:13px;color:var(--tx);line-height:1.75;margin-bottom:14px">
+    <div class="af-card" style="grid-column:1/-1">
+      <div class="section-title">Поддержка и обновления</div>
+      <p style="font-size:12.5px;color:var(--tx2);line-height:1.7;margin-bottom:14px">
         Следи за обновлениями, сообщай о багах и получай новые версии в Telegram-канале автора:
       </p>
-      <a data-af-on="click" data-af-action="openTG" style="display:flex;align-items:center;gap:12px;padding:13px 16px;
-        background:rgba(var(--acr),.07);border:1px solid rgba(var(--acr),.2);border-radius:10px;
-        cursor:pointer;transition:.2s;text-decoration:none;"
-        data-af-on="mouseover" data-af-style="{&quot;background&quot;: &quot;rgba(var(--acr),.14)&quot;}" data-af-on="mouseout" data-af-style="{&quot;background&quot;: &quot;rgba(var(--acr),.07)&quot;}">
-        <span style="font-size:26px">📲</span>
+      <a data-af-on="click" data-af-action="openTG" class="tg-card">
+        <span style="font-size:24px">📲</span>
         <div>
-          <div style="font-size:13px;font-weight:700;color:var(--ac);font-family:Consolas,'Courier New',monospace;letter-spacing:1px">ARTOFIX CHANNEL</div>
-          <div style="font-size:10px;color:var(--tx2);font-family:var(--mono);margin-top:2px">t.me/+SLxGyEiRG7sxM2Ey</div>
+          <div class="tg-title">ARTOFIX CHANNEL</div>
+          <div class="tg-sub">t.me/+SLxGyEiRG7sxM2Ey</div>
         </div>
-        <span style="margin-left:auto;color:rgba(var(--acr),.5);font-size:16px">→</span>
+        <span class="tg-arrow">→</span>
       </a>
     </div>
   </div>

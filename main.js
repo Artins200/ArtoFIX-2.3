@@ -217,7 +217,7 @@ function createWindow() {
     width: 1100, height: 680,
     minWidth: 900, minHeight: 580,
     frame: false,
-    backgroundColor: '#04050f',
+    backgroundColor: '#edf0f7',
     show: false,
     resizable: true,
   }, { webPreferences: HARDENED_WEB_PREFS }));
@@ -236,7 +236,7 @@ function createSetupWindow() {
   setupWin = new BrowserWindow(Object.assign({
     width: 560, height: 540,
     resizable: false, frame: false,
-    backgroundColor: '#04050f',
+    backgroundColor: '#edf0f7',
     show: false, center: true,
   }, { webPreferences: HARDENED_WEB_PREFS }));
   setupWin.loadFile(path.join(__dirname, 'setup.html'));
@@ -694,6 +694,9 @@ async function launchBrowser({ url, profile, browser }) {
     ARTOFIX_CONFIG: dataPath('config.json'),
     ARTOFIX_ROOT: getAppRoot(),
     ARTOFIX_BROWSER: safeBrowser,
+    // Python в Windows пишет stdout в кодировку консоли (cp1251/cp866) —
+    // принудительно UTF-8, иначе символы вроде «→» дают UnicodeEncodeError.
+    PYTHONIOENCODING: 'utf-8',
   });
   if (rolled.proxy && rolled.proxy.password) env.ARTOFIX_PROXY_PASS = rolled.proxy.password;
 
@@ -715,8 +718,8 @@ async function launchBrowser({ url, profile, browser }) {
   }
 
   runningProfiles.add(profile);
-  child.stdout.on('data', (d) => appendLog(profile, safeBrowser, d.toString()));
-  child.stderr.on('data', (d) => appendLog(profile, safeBrowser, d.toString()));
+  child.stdout.on('data', (d) => appendLog(profile, safeBrowser, d.toString('utf8')));
+  child.stderr.on('data', (d) => appendLog(profile, safeBrowser, d.toString('utf8')));
   child.on('error', (e) => {
     runningProfiles.delete(profile);
     appendLog(profile, safeBrowser, '[error] ' + e.message + ' — проверь, что Python установлен');

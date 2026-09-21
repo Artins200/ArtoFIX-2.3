@@ -196,103 +196,7 @@ function afEl(tag, opts, kids) {
   return el;
 }
 
-// ── PARTICLE CANVAS (multi-mode) ──
-try { (function() {
-  var cv  = document.getElementById('bgcanvas');
-  var ctx = cv.getContext('2d');
-  var W, H, pts = [], mode = 'net', spd = 0.5;
-  var mouse = { x: -999, y: -999 };
 
-  window.CANVAS_API = {
-    setMode: function(m) { mode = m; resize(); },
-    setSpeed: function(s) { spd = parseFloat(s) || 0.5; },
-  };
-
-  document.addEventListener('mousemove', function(e) { mouse.x = e.clientX; mouse.y = e.clientY; });
-
-  function resize() {
-    W = cv.width  = window.innerWidth;
-    H = cv.height = window.innerHeight;
-    pts = [];
-    if (mode === 'stars') {
-      for (var i = 0; i < 160; i++) pts.push({
-        x: Math.random()*W, y: Math.random()*H,
-        r: Math.random()*1.8+.4, twinkle: Math.random()*Math.PI*2,
-        speed: (Math.random()-.5)*.4,
-      });
-    } else if (mode === 'dots') {
-      for (var i = 0; i < 70; i++) pts.push({
-        x: Math.random()*W, y: Math.random()*H,
-        vx: (Math.random()-.5)*spd, vy: (Math.random()-.5)*spd,
-        r: Math.random()*2+.8,
-      });
-    } else if (mode !== 'none') { // net
-      var cols = Math.ceil(W/55), rows = Math.ceil(H/55);
-      for (var i = 0; i < cols; i++) for (var j = 0; j < rows; j++) pts.push({
-        x: i*55+27, y: j*55+27, ox: i*55+27, oy: j*55+27,
-        vx: (Math.random()-.5)*spd, vy: (Math.random()-.5)*spd,
-      });
-    }
-  }
-  window.addEventListener('resize', resize);
-  resize();
-
-  function draw() {
-    try {
-      ctx.clearRect(0, 0, W, H);
-      if (mode === 'none') { requestAnimationFrame(draw); return; }
-      var rgb = getComputedStyle(document.documentElement).getPropertyValue('--acr').trim() || '0,240,255';
-
-      if (mode === 'stars') {
-        var t = Date.now() / 1000;
-        pts.forEach(function(p) {
-          p.twinkle += .025 * spd;
-          var alpha = .4 + Math.sin(p.twinkle) * .35;
-          var dx = p.x - mouse.x, dy = p.y - mouse.y, dist = Math.sqrt(dx*dx+dy*dy);
-          if (dist < 100 && dist > 0) { p.x += dx/dist*1.5; p.y += dy/dist*1.5; }
-          p.x += Math.sin(t * Math.abs(p.speed) * .6 + p.twinkle) * .15 * spd;
-          p.y += Math.cos(t * Math.abs(p.speed) * .4 + p.twinkle) * .12 * spd;
-          if (p.x < 0) p.x = W; if (p.x > W) p.x = 0;
-          if (p.y < 0) p.y = H; if (p.y > H) p.y = 0;
-          ctx.fillStyle = 'rgba('+rgb+','+alpha.toFixed(2)+')';
-          ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI*2); ctx.fill();
-        });
-      } else if (mode === 'dots') {
-        pts.forEach(function(p) {
-          p.x += p.vx * spd; p.y += p.vy * spd;
-          if (p.x < 0 || p.x > W) p.vx *= -1;
-          if (p.y < 0 || p.y > H) p.vy *= -1;
-          var dx = p.x-mouse.x, dy=p.y-mouse.y, dist=Math.sqrt(dx*dx+dy*dy);
-          if (dist<80 && dist>0) { p.x += dx/dist*2; p.y += dy/dist*2; }
-          ctx.fillStyle = 'rgba('+rgb+',.35)';
-          ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI*2); ctx.fill();
-        });
-        ctx.lineWidth = .7;
-        for (var i=0; i<pts.length; i++) for (var j=i+1; j<pts.length; j++) {
-          var dx=pts[i].x-pts[j].x, dy=pts[i].y-pts[j].y, d=Math.sqrt(dx*dx+dy*dy);
-          if (d<120) { ctx.strokeStyle='rgba('+rgb+','+(1-d/120)*.18+')'; ctx.beginPath(); ctx.moveTo(pts[i].x,pts[i].y); ctx.lineTo(pts[j].x,pts[j].y); ctx.stroke(); }
-        }
-      } else { // net
-        for (var k=0; k<pts.length; k++) {
-          pts[k].x += pts[k].vx * spd; pts[k].y += pts[k].vy * spd;
-          if (Math.abs(pts[k].x-pts[k].ox)>9) pts[k].vx*=-1;
-          if (Math.abs(pts[k].y-pts[k].oy)>9) pts[k].vy*=-1;
-          var dx=pts[k].x-mouse.x, dy=pts[k].y-mouse.y, dist=Math.sqrt(dx*dx+dy*dy);
-          if (dist<70 && dist>0) { pts[k].x+=dx/dist*1.5; pts[k].y+=dy/dist*1.5; }
-        }
-        ctx.lineWidth = .8;
-        for (var i=0; i<pts.length; i++) for (var j=i+1; j<pts.length; j++) {
-          var dx=pts[i].x-pts[j].x, dy=pts[i].y-pts[j].y, d=Math.sqrt(dx*dx+dy*dy);
-          if (d<90) { ctx.strokeStyle='rgba('+rgb+','+(1-d/90)*.2+')'; ctx.beginPath(); ctx.moveTo(pts[i].x,pts[i].y); ctx.lineTo(pts[j].x,pts[j].y); ctx.stroke(); }
-        }
-        ctx.fillStyle='rgba('+rgb+',.18)';
-        pts.forEach(function(p){ ctx.beginPath(); ctx.arc(p.x,p.y,1.5,0,Math.PI*2); ctx.fill(); });
-      }
-    } catch(e) {}
-    requestAnimationFrame(draw);
-  }
-  draw();
-})(); } catch(e) { console.warn('[canvas]', e); }
 
 // ── TOAST ──
 function showToast(msg, type) {
@@ -433,7 +337,7 @@ function syncZapretUI() {
   var hlbl   = document.getElementById('home-zap-label');
   if (dot)  { dot.classList.toggle('is-on', zapretActive); }
   if (lbl)  { lbl.textContent = zapretActive ? 'ZAPRET ONLINE' : 'ZAPRET OFFLINE'; lbl.classList.toggle('is-on', zapretActive); }
-  if (hdot) { hdot.style.background = zapretActive ? 'var(--grn)' : 'var(--red)'; hdot.style.boxShadow = zapretActive ? '0 0 8px rgba(var(--grnr),.8)' : 'none'; }
+  if (hdot) { hdot.style.background = zapretActive ? 'var(--grn)' : 'var(--red)'; }
   if (hlbl) { hlbl.textContent = zapretActive ? 'ВКЛ' : 'ВЫКЛ'; hlbl.style.color = zapretActive ? 'var(--grn)' : 'var(--red)'; }
 }
 
@@ -727,36 +631,28 @@ function renderBinds() {
   }
   SAVED_BINDS.forEach(function(b) {
     var card = document.createElement('div');
-    card.className = 'af-card';
-    card.style.cssText = 'display:flex;align-items:center;gap:12px;padding:13px 15px;cursor:pointer;';
+    card.className = 'bind-item';
     var icon = b.browser === 'app' ? '🖥️' : b.browser === 'msedge' ? '🌐' : b.browser === 'firefox' ? '🦊' : b.browser === 'yandex' ? '🟡' : '🔵';
 
     // Бейдж собирается узлами, а не строкой HTML
     var bypassBadge = afEl('span', {
+      cls: 'bind-badge ' + (b.bypass ? 'bypass' : 'direct'),
       text: b.bypass ? 'BYPASS' : 'DIRECT',
-      style: b.bypass
-        ? 'font-size:8px;background:rgba(var(--grnr),.15);color:var(--grn);border:1px solid rgba(var(--grnr),.3);border-radius:4px;padding:2px 5px;letter-spacing:.5px'
-        : 'font-size:8px;background:rgba(255,255,255,.06);color:var(--tx2);border:1px solid rgba(255,255,255,.1);border-radius:4px;padding:2px 5px;letter-spacing:.5px',
     });
 
     var delBtn = afEl('button', {
       cls: 'bind-del',
       text: '🗑',
       attrs: { type: 'button', title: 'Удалить бинд' },
-      style: 'margin-left:auto;width:26px;height:26px;border-radius:7px;flex-shrink:0;background:rgba(255,26,78,.06);border:1px solid rgba(255,26,78,.18);color:rgba(255,26,78,.5);font-size:12px;display:flex;align-items:center;justify-content:center;transition:.18s;cursor:pointer',
-      on: {
-        mouseover: function() { this.style.background = 'rgba(255,26,78,.2)'; this.style.color = 'var(--red)'; },
-        mouseout:  function() { this.style.background = 'rgba(255,26,78,.06)'; this.style.color = 'rgba(255,26,78,.5)'; },
-        click: function(e) { e.stopPropagation(); deleteBind(b.id); },
-      },
+      on: { click: function(e) { e.stopPropagation(); deleteBind(b.id); } },
     });
 
-    var meta = afEl('div', { style: 'font-size:9px;color:var(--tx2);font-family:var(--mono);margin-top:2px;display:flex;align-items:center;gap:5px' },
-      [bypassBadge, document.createTextNode(' ' + (b.browser !== 'app' ? b.browser + ' · ' + (b.profile || '—') : 'Приложение'))]);
+    var meta = afEl('div', { cls: 'bind-meta' },
+      [bypassBadge, document.createTextNode(b.browser !== 'app' ? b.browser + ' · ' + (b.profile || '—') : 'Приложение')]);
 
-    card.appendChild(afEl('div', { text: icon, style: 'font-size:22px;flex-shrink:0' }));
+    card.appendChild(afEl('div', { cls: 'bind-ico', text: icon }));
     card.appendChild(afEl('div', { style: 'flex:1;min-width:0' }, [
-      afEl('div', { text: b.label || b.url || '—', style: 'font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis' }),
+      afEl('div', { cls: 'bind-label', text: b.label || b.url || '—' }),
       meta,
     ]));
     card.appendChild(delBtn);
@@ -770,30 +666,37 @@ function renderBinds() {
 // ── THEMES & COLORS ──
 var APP_SETTINGS = { theme: '', colors: null };
 
+// Список тем нового дизайна (без киберпанк-набора).
+// Старые значения (th-cyber, th-hacker, th-matrix и т.п.) больше не применяются.
+var AF_THEMES = ['th-mint','th-sky','th-amber','th-rose','th-night'];
+var AF_THEME_NAMES = {
+  '': 'Классика',
+  'th-mint': 'Мята',
+  'th-sky': 'Небо',
+  'th-amber': 'Янтарь',
+  'th-rose': 'Роза',
+  'th-night': 'Ночь',
+};
+
 function previewColors() {
-  var ac  = document.getElementById('color-accent')?.value  || '#00f0ff';
-  var ac2 = document.getElementById('color-accent2')?.value || '#7b2fff';
-  var op  = document.getElementById('bg-opacity')?.value    || '0.97';
-  var disp = document.getElementById('opacity-display');
-  if (disp) disp.textContent = parseFloat(op).toFixed(2);
-  applyColors(ac, ac2, op);
+  var ac  = document.getElementById('color-accent')?.value  || '#4f46e5';
+  var ac2 = document.getElementById('color-accent2')?.value || '#8b5cf6';
+  applyColors(ac, ac2);
 }
 
 async function saveColors() {
-  var ac  = document.getElementById('color-accent')?.value  || '#00f0ff';
-  var ac2 = document.getElementById('color-accent2')?.value || '#7b2fff';
-  var op  = document.getElementById('bg-opacity')?.value    || '0.97';
-  applyColors(ac, ac2, op);
-  APP_SETTINGS.colors = { ac, ac2, op };
+  var ac  = document.getElementById('color-accent')?.value  || '#4f46e5';
+  var ac2 = document.getElementById('color-accent2')?.value || '#8b5cf6';
+  applyColors(ac, ac2);
+  APP_SETTINGS.colors = { ac: ac, ac2: ac2 };
   await saveSettings();
   showToast('✅ Цвета сохранены!', 'ok');
 }
 
 async function resetColors() {
   var s = document.documentElement.style;
-  ['--ac','--acr','--ac2','--ac2r','--panelbg'].forEach(function(p){ s.removeProperty(p); });
-  var THEMES = ['th-cyber','th-hacker','th-blood','th-ocean','th-gold','th-matrix','th-rose','th-ice','th-toxic'];
-  THEMES.forEach(function(t){ document.body.classList.remove(t); });
+  ['--ac','--acr','--ac2','--ac2r'].forEach(function(p){ s.removeProperty(p); });
+  AF_THEMES.forEach(function(t){ document.body.classList.remove(t); });
   APP_SETTINGS.theme  = '';
   APP_SETTINGS.colors = null;
   await saveSettings();
@@ -809,85 +712,29 @@ function hexToRgb(hex) {
   return r + ',' + g + ',' + b;
 }
 
-function applyColors(ac, ac2, opacity) {
+function applyColors(ac, ac2) {
   var s = document.documentElement.style;
   s.setProperty('--ac',   ac);
   s.setProperty('--acr',  hexToRgb(ac));
   s.setProperty('--ac2',  ac2);
   s.setProperty('--ac2r', hexToRgb(ac2));
-  s.setProperty('--panelbg', 'rgba(5,7,18,' + opacity + ')');
 }
-
-// ── MATRIX CANVAS ──
-var matrixRAF = null, matrixCols = [];
-function initMatrixCanvas() {
-  var c = document.getElementById('matrix-canvas');
-  if (!c) return;
-  c.width = window.innerWidth; c.height = window.innerHeight;
-  var ctx = c.getContext('2d');
-  var colW = 16;
-  var cols = Math.floor(c.width / colW);
-  matrixCols = Array.from({length:cols}, () => Math.random() * c.height);
-  if (matrixRAF) cancelAnimationFrame(matrixRAF);
-  function draw() {
-    ctx.fillStyle = 'rgba(0,0,0,.05)';
-    ctx.fillRect(0,0,c.width,c.height);
-    var ac = getComputedStyle(document.body).getPropertyValue('--ac').trim() || '#00ff41';
-    ctx.fillStyle = ac; ctx.font = '14px Share Tech Mono';
-    matrixCols.forEach(function(y,i) {
-      ctx.fillText(String.fromCharCode(0x30A0 + Math.floor(Math.random()*96)), i*colW, y);
-      if (y > c.height && Math.random() > .975) matrixCols[i] = 0;
-      else matrixCols[i] = y + colW;
-    });
-    matrixRAF = requestAnimationFrame(draw);
-  }
-  draw();
-}
-function stopMatrixCanvas() {
-  if (matrixRAF) { cancelAnimationFrame(matrixRAF); matrixRAF = null; }
-  var c = document.getElementById('matrix-canvas');
-  if (c) { var ctx = c.getContext('2d'); ctx.clearRect(0,0,c.width,c.height); }
-}
-window.addEventListener('resize', function() {
-  var c = document.getElementById('matrix-canvas');
-  if (c) { c.width = window.innerWidth; c.height = window.innerHeight; }
-});
 
 // ── THEMES ──
 function setTheme(cls) {
-  var THEMES = ['th-cyber','th-hacker','th-blood','th-ocean','th-gold','th-matrix','th-rose','th-ice','th-toxic'];
-  // Сохраняем пользовательские CSS переменные
-  var s = document.documentElement.style;
-  var hadCustom = s.getPropertyValue('--ac');
-  THEMES.forEach(function(t){ document.body.classList.remove(t); });
+  if (cls && AF_THEMES.indexOf(cls) === -1) cls = '';   // старые темы игнорируем
+  AF_THEMES.forEach(function(t){ document.body.classList.remove(t); });
   if (cls) document.body.classList.add(cls);
   APP_SETTINGS.theme = cls;
   saveSettings();
-  // Matrix / Hacker — запускаем дождь
-  if (cls === 'th-matrix' || cls === 'th-hacker') initMatrixCanvas();
-  else stopMatrixCanvas();
   // Подсветка карточки
   document.querySelectorAll('.theme-card').forEach(function(el) {
     el.classList.remove('is-active');
     if (el.id === 'tc-' + cls) el.classList.add('is-active');
   });
-  showToast('🎨 Тема: ' + (cls || 'Default'), 'ok');
+  showToast('🎨 Тема: ' + (AF_THEME_NAMES[cls] || cls || 'Классика'), 'ok');
 }
 
-function applyGlow(val) {
-  var i = val / 100;
-  document.documentElement.style.setProperty('--glow',
-    '0 0 ' + Math.round(20*i) + 'px rgba(var(--acr),' + (.35*i).toFixed(2) + '),' +
-    '0 0 ' + Math.round(60*i) + 'px rgba(var(--acr),' + (.1*i).toFixed(2) + ')'
-  );
-  APP_SETTINGS.glowIntensity = val;
-  saveSettings();
-}
-
-function applyFont(font) {
-  document.documentElement.style.setProperty('--font', font);
-  APP_SETTINGS.fxFont = font;
-}
 
 function applyScale(val) {
   // zoom не работает в Electron — используем transform на #app
@@ -903,18 +750,9 @@ function applyScale(val) {
   saveSettings();
 }
 
+// Эффекты фона (частицы/сканлайны) из старого дизайна удалены —
+// функция сохранена для совместимости с записанными настройками.
 function saveFx() {
-  var get = function(id) { var el = document.getElementById(id); return el ? el.value : null; };
-  var particles = get('fx-particles');
-  var speed     = get('fx-speed');
-  var scanlines = get('fx-scanlines');
-  var font      = get('fx-font');
-  if (particles) { APP_SETTINGS.fxParticles = particles; if(window.CANVAS_API) CANVAS_API.setMode(particles); }
-  if (speed)     { APP_SETTINGS.fxSpeed = parseFloat(speed); if(window.CANVAS_API) CANVAS_API.setSpeed(speed); }
-  if (scanlines) APP_SETTINGS.fxScanlines = scanlines;
-  if (font)      { APP_SETTINGS.fxFont = font; applyFont(font); }
-  var scanEl = document.getElementById('scanlines');
-  if (scanEl) scanEl.style.opacity = (scanlines === 'off') ? '0' : '1';
   saveSettings();
 }
 
@@ -922,20 +760,20 @@ function initSettingsTab() {
   var s = APP_SETTINGS;
   // Цвета
   if (s.colors) {
-    var acEl = document.getElementById('color-accent');
-    var ac2El= document.getElementById('color-accent2');
-    var opEl = document.getElementById('bg-opacity');
-    var opD  = document.getElementById('opacity-display');
-    if (acEl)  acEl.value  = s.colors.ac  || '#00f0ff';
-    if (ac2El) ac2El.value = s.colors.ac2 || '#7b2fff';
-    if (opEl)  { opEl.value = s.colors.op || '0.97'; if(opD) opD.textContent = parseFloat(s.colors.op||'0.97').toFixed(2); }
+    var acEl  = document.getElementById('color-accent');
+    var ac2El = document.getElementById('color-accent2');
+    if (acEl)  acEl.value  = s.colors.ac  || '#4f46e5';
+    if (ac2El) ac2El.value = s.colors.ac2 || '#8b5cf6';
   }
-  // FX
-  if (s.fxParticles) { var el=document.getElementById('fx-particles'); if(el) el.value=s.fxParticles; }
-  if (s.fxSpeed)     { var el=document.getElementById('fx-speed');     if(el){ el.value=s.fxSpeed; var d=document.getElementById('speed-display'); if(d) d.textContent=parseFloat(s.fxSpeed).toFixed(1); } }
-  if (s.fxScanlines) { var el=document.getElementById('fx-scanlines'); if(el) el.value=s.fxScanlines; }
+  // Масштаб интерфейса
+  if (s.uiScale) {
+    var scEl = document.getElementById('ui-scale');
+    var scD  = document.getElementById('scale-display');
+    if (scEl) scEl.value = s.uiScale;
+    if (scD)  scD.textContent = parseFloat(s.uiScale).toFixed(1);
+  }
   // Активная тема
-  var cur = s.theme || '';
+  var cur = (s.theme && AF_THEMES.indexOf(s.theme) !== -1) ? s.theme : '';
   document.querySelectorAll('.theme-card').forEach(function(el) {
     el.classList.remove('is-active');
     if (el.id === 'tc-' + cur) el.classList.add('is-active');
@@ -950,20 +788,15 @@ async function loadSettings() {
   try {
     var s = await apiBridge.readSettings();
     if (s) APP_SETTINGS = s;
+    // Тема: применяем только из нового набора (старые киберпанк-темы сбрасываются)
     if (APP_SETTINGS.theme) {
-      var THEMES = ['th-cyber','th-hacker','th-blood','th-ocean','th-gold','th-matrix','th-rose','th-ice','th-toxic'];
-      THEMES.forEach(function(t){ document.body.classList.remove(t); });
-      if (APP_SETTINGS.theme) document.body.classList.add(APP_SETTINGS.theme);
-      if (APP_SETTINGS.theme === 'th-matrix' || APP_SETTINGS.theme === 'th-hacker') {
-        setTimeout(initMatrixCanvas, 800);
+      AF_THEMES.forEach(function(t){ document.body.classList.remove(t); });
+      if (AF_THEMES.indexOf(APP_SETTINGS.theme) !== -1) {
+        document.body.classList.add(APP_SETTINGS.theme);
       }
     }
-    if (APP_SETTINGS.colors) applyColors(APP_SETTINGS.colors.ac, APP_SETTINGS.colors.ac2, APP_SETTINGS.colors.op);
-    if (APP_SETTINGS.fxScanlines === 'off') {
-      var sc = document.getElementById('scanlines'); if(sc) sc.style.opacity = '0';
-    }
-    if (APP_SETTINGS.fxParticles && window.CANVAS_API) CANVAS_API.setMode(APP_SETTINGS.fxParticles);
-    if (APP_SETTINGS.fxSpeed     && window.CANVAS_API) CANVAS_API.setSpeed(APP_SETTINGS.fxSpeed);
+    if (APP_SETTINGS.colors) applyColors(APP_SETTINGS.colors.ac, APP_SETTINGS.colors.ac2);
+    if (APP_SETTINGS.uiScale) applyScale(APP_SETTINGS.uiScale);
   } catch(e) {}
 }
 
@@ -1085,25 +918,15 @@ function renderHostsList() {
   }
   el.textContent = '';
   HOSTS_DOMAINS.forEach(function(d, i) {
-    row_el = afEl('div', {
-      style: 'display:flex;align-items:center;justify-content:space-between;padding:3px 4px;border-radius:4px;transition:.15s',
-      on: {
-        mouseover: function(){ this.style.background = 'rgba(255,255,255,.04)'; },
-        mouseout:  function(){ this.style.background = ''; },
-      },
-    }, [
-      afEl('span', { style: 'color:var(--tx)' }, [
+    row_el = afEl('div', { cls: 'hosts-row' }, [
+      afEl('span', { style: 'color:var(--tx2)' }, [
         document.createTextNode('0.0.0.0 '),
-        afEl('span', { text: d, style: 'color:var(--ac)' }),
+        afEl('span', { text: d, style: 'color:var(--tx);font-weight:600' }),
       ]),
       afEl('span', {
+        cls: 'hosts-del',
         text: '✕',
-        style: 'cursor:pointer;color:rgba(255,26,78,.45);padding:0 4px;font-size:11px;transition:.15s',
-        on: {
-          mouseover: function(){ this.style.color = 'var(--red)'; },
-          mouseout:  function(){ this.style.color = 'rgba(255,26,78,.45)'; },
-          click: function(){ removeDomain(i); },
-        },
+        on: { click: function(){ removeDomain(i); } },
       }),
     ]);
     el.appendChild(row_el);
@@ -1509,13 +1332,11 @@ function renderLogsDOM(wrap) {
     var color  = isErr ? 'var(--red)' : isOk ? 'var(--grn)' : 'var(--tx2)';
     var bcolor = BROWSER_COLORS[e.browser] || 'var(--ac)';
     // Все значения — текстовые узлы: логи приходят из stdout браузера/скриптов
-    wrap.appendChild(afEl('div', {
-      style: 'display:flex;gap:8px;align-items:baseline;padding:2px 0;border-bottom:1px solid rgba(255,255,255,.03)',
-    }, [
-      afEl('span', { text: time, style: 'color:rgba(255,255,255,.25);font-size:9px;flex-shrink:0;width:52px' }),
-      afEl('span', { text: e.browser || '', style: 'color:' + bcolor + ';font-size:9px;flex-shrink:0;width:44px' }),
-      afEl('span', { text: e.profile || '', style: 'color:rgba(var(--acr),.5);font-size:9px;flex-shrink:0;width:72px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap', attrs: { title: e.profile || '' } }),
-      afEl('span', { text: msg, style: 'color:' + color + ';flex:1;word-break:break-all' }),
+    wrap.appendChild(afEl('div', { cls: 'log-row' }, [
+      afEl('span', { cls: 'log-time', text: time }),
+      afEl('span', { cls: 'log-browser', text: e.browser || '', style: 'color:' + bcolor }),
+      afEl('span', { cls: 'log-profile', text: e.profile || '', attrs: { title: e.profile || '' } }),
+      afEl('span', { cls: 'log-msg ' + (isErr ? 'err' : isOk ? 'ok' : ''), text: msg }),
     ]));
   });
 }
@@ -1870,7 +1691,7 @@ function zuLog(msg, type) {
   var box = document.getElementById('zu-log');
   if (!box) return;
   var span = document.createElement('div');
-  span.style.color = type === 'ok' ? 'var(--grn)' : type === 'err' ? 'var(--red)' : type === 'warn' ? '#ffcc00' : 'var(--tx2)';
+  span.style.color = type === 'ok' ? 'var(--grn)' : type === 'err' ? 'var(--red)' : type === 'warn' ? 'var(--ylw)' : 'var(--tx2)';
   span.textContent = msg;
   box.appendChild(span);
   box.scrollTop = box.scrollHeight;
@@ -2113,7 +1934,7 @@ function mirrorInput(labelId, saverName, asFloat) {
   var label = document.getElementById(labelId);
   var val = this.value;
   if (label) label.textContent = asFloat ? parseFloat(val).toFixed(1) : val;
-  var savers = { saveFx: saveFx, saveCbn: saveCbn };
+  var savers = { saveFx: saveFx, saveCbn: saveCbn, saveScale: applyScale };
   if (typeof savers[saverName] === 'function') savers[saverName]();
 }
 
