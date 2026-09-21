@@ -2,6 +2,7 @@
 /* Установщик работает в тех же условиях, что и основной рендерер:
    sandbox + contextIsolation, никаких require() — только window.api. */
 
+// Use a separate name: top-level var api would overwrite the read-only preload bridge.
 var apiBridge = window.api || null;
 if (!apiBridge || apiBridge.ready !== true) {
   document.addEventListener('DOMContentLoaded', function () {

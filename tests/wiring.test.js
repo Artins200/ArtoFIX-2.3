@@ -77,7 +77,6 @@ function loadRenderer(file, apiStub, frozenApi) {
     fonts: { check() { return false; } },
   };
   const windowStub = {
-    api: apiStub,
     document: documentStub,
     addEventListener(type, fn) { (listeners[type] = listeners[type] || []).push(fn); },
     removeEventListener() {},
@@ -92,6 +91,12 @@ function loadRenderer(file, apiStub, frozenApi) {
     innerWidth: 1280, innerHeight: 720,
     focus() {},
   };
+  // Use Electron's frozen, non-writable bridge for ordinary renderer tests too.
+  if (apiStub !== undefined && !frozenApi) {
+    Object.defineProperty(windowStub, 'api', {
+      value: Object.freeze(apiStub), writable: false, configurable: false, enumerable: true,
+    });
+  }
   windowStub.window = windowStub;
   const ctx = vm.createContext(Object.assign(windowStub, {
     document: documentStub, navigator: windowStub.navigator, localStorage: windowStub.localStorage,
@@ -100,6 +105,7 @@ function loadRenderer(file, apiStub, frozenApi) {
     Date, Promise, Error, RegExp, isNaN, parseFloat, parseInt, encodeURIComponent, decodeURIComponent,
   }));
   if (frozenApi) {
+    Object.freeze(apiStub);
     // как contextBridge.exposeInMainWorld('api', Object.freeze(…)):
     // чтение работает, а присваивание read-only свойству в строгом режиме бросает
     Object.defineProperty(ctx, 'api', {
@@ -142,6 +148,34 @@ test('рендереры не перезаписывают read-only мост wi
   for (const f of ['app.js', 'setup.js']) {
     assert.doesNotThrow(() => loadRenderer(f, apiStub(), true),
       f + ': попытка присвоить read-only window.api (TypeError)');
+  }
+});
+
+test('оба рендерера сохраняют read-only мост preload и используют отдельный alias', () => {
+  for (const file of ['app.js', 'setup.js']) {
+    const bridge = apiStub();
+    const ctx = loadRenderer(file, bridge);
+    assert.strictEqual(ctx.api, bridge, file + ': мост заменён');
+    assert.strictEqual(ctx.apiBridge, bridge, file + ': alias не указывает на мост');
+    const descriptor = Object.getOwnPropertyDescriptor(ctx, 'api');
+    assert.strictEqual(descriptor.writable, false);
+    assert.strictEqual(descriptor.configurable, false);
+    assert.ok(Object.isFrozen(bridge));
+    // VM globals do not always throw on writes like Chromium's Window does.
+    assert.strictEqual(/^\s*(?:var|let|const)\s+api\b/m.test(read(file)), false,
+      file + ': глобальное объявление конфликтует с window.api');
+  }
+});
+
+test('app.js использует локальную заглушку без замены window.api', () => {
+  for (const bridge of [undefined, { ready: false }]) {
+    const ctx = loadRenderer('app.js', bridge);
+    assert.strictEqual(ctx.API_READY, false);
+    assert.strictEqual(ctx.api, bridge);
+    assert.strictEqual(ctx.apiBridge.ready, false);
+    assert.notStrictEqual(ctx.apiBridge, bridge);
+    assert.strictEqual(typeof ctx.apiBridge.onNavigate(), 'function');
+    if (bridge === undefined) assert.strictEqual(Object.hasOwn(ctx, 'api'), false);
   }
 });
 

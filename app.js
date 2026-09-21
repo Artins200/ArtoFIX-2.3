@@ -22,6 +22,7 @@
 //  1. МОСТ В MAIN-ПРОЦЕСС
 // ─────────────────────────────────────────────
 var API_READY = !!(window.api && window.api.ready === true);
+// Use a separate name: top-level var api would overwrite the read-only preload bridge.
 var apiBridge = API_READY ? window.api : null;
 
 /**
