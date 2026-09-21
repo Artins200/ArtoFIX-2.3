@@ -23,7 +23,7 @@
 // ─────────────────────────────────────────────
 var API_READY = !!(window.api && window.api.ready === true);
 // Use a separate name: top-level var api would overwrite the read-only preload bridge.
-var rendererApi = API_READY ? window.api : null;
+var apiBridge = API_READY ? window.api : null;
 
 /**
  * Заглушка на случай, если preload не загрузился.
@@ -58,7 +58,7 @@ function makeNullApi() {
 }
 
 if (!API_READY) {
-  rendererApi = makeNullApi();
+  apiBridge = makeNullApi();
   // Баннер показываем на DOMContentLoaded — до этого body может быть пуст
   document.addEventListener('DOMContentLoaded', function () { showApiBanner(); });
   console.warn('[renderer] window.api недоступен — интерфейс работает в режиме просмотра');
@@ -247,7 +247,7 @@ function goTab(tabName, btn) {
   syncZapretUI();
 }
 
-rendererApi.onNavigate(function(tab) {
+apiBridge.onNavigate(function(tab) {
   if (typeof tab !== 'string' || !/^[a-z\-]{1,20}$/.test(tab)) return;
   var btn = document.querySelector('[data-tab="' + tab + '"]');
   goTab(tab, btn);
@@ -259,7 +259,7 @@ rendererApi.onNavigate(function(tab) {
 
 // ── OPEN TG ──
 function openTG() {
-  rendererApi.openExternal('https://t.me/+SLxGyEiRG7sxM2Ey');
+  apiBridge.openExternal('https://t.me/+SLxGyEiRG7sxM2Ey');
 }
 
 // ── BROWSER LAUNCH ──
@@ -269,7 +269,7 @@ async function launchBrowser(url, profile, browser, bypass) {
     // Ярлыки и приложения (steam://, tg://, discord://) открывает main —
     // он проверяет схему по белому списку, рендерер ничего не запускает сам.
     try {
-      var appRes = await rendererApi.launchBrowser({ url: url, profile: profile, browser: 'app' });
+      var appRes = await apiBridge.launchBrowser({ url: url, profile: profile, browser: 'app' });
       if (appRes && appRes.ok) showToast('▶ Приложение запущено', 'ok');
       else showToast('Не удалось открыть: ' + ((appRes && appRes.msg) || 'схема не разрешена'), 'err');
     } catch(e) { showToast('Ошибка: ' + e.message, 'err'); }
@@ -279,7 +279,7 @@ async function launchBrowser(url, profile, browser, bypass) {
     showToast('⚠ Запрет не активен — запуск без обхода', '');
   }
   try {
-    var res = await rendererApi.launchBrowser({ url: url, profile: profile, browser: browser });
+    var res = await apiBridge.launchBrowser({ url: url, profile: profile, browser: browser });
     if (res && res.ok) showToast('▶ ' + browser + ': ' + profile, 'ok');
     else showToast('Ошибка: ' + (res ? res.msg : '?'), 'err');
   } catch(e) {
@@ -306,7 +306,7 @@ var zapretActive = false;
 
 async function zapretStart() {
   try {
-    var res = await rendererApi.zapretStart();
+    var res = await apiBridge.zapretStart();
     if (res && res.ok) { zapretActive = true; syncZapretUI(); showToast('Zapret запущен!', 'ok'); }
     else showToast('Zapret: ' + (res ? res.msg : '?'), 'err');
   } catch(e) { showToast('Ошибка моста API', 'err'); }
@@ -314,21 +314,21 @@ async function zapretStart() {
 
 async function zapretStop() {
   try {
-    await rendererApi.zapretStop();
+    await apiBridge.zapretStop();
     zapretActive = false; syncZapretUI(); showToast('Zapret остановлен', 'err');
   } catch(e) {}
 }
 
-rendererApi.onZapretStatus(function(s) {
+apiBridge.onZapretStatus(function(s) {
   if (!s) return;
   zapretActive = !!s.on; syncZapretUI();
   if (s.msg) showToast(s.msg, s.on ? 'ok' : 'err');
 });
 
-rendererApi.onTrayAction(function(a) {
+apiBridge.onTrayAction(function(a) {
   if (a === 'run')    zapretStart();
   if (a === 'stop')   zapretStop();
-  if (a === 'config') rendererApi.openFolder('Zapret');
+  if (a === 'config') apiBridge.openFolder('Zapret');
 });
 
 function syncZapretUI() {
@@ -367,7 +367,7 @@ function getBrowserIcon(browser) {
 // Читаем мета-данные профиля (браузер по умолчанию)
 async function getProfileMeta(name) {
   try {
-    var r = await rendererApi.readProfileMeta(name);
+    var r = await apiBridge.readProfileMeta(name);
     return r || {};
   } catch(e) { return {}; }
 }
@@ -377,7 +377,7 @@ async function renderProfiles() {
   if (!grid) return;
 
   var list = [];
-  try { list = await rendererApi.listProfiles(); } catch(e) {}
+  try { list = await apiBridge.listProfiles(); } catch(e) {}
 
   grid.textContent = '';
 
@@ -427,9 +427,9 @@ var PROFILE_META_CACHE = {};
 
 async function loadProfileMetas() {
   try {
-    var list = await rendererApi.listProfiles();
+    var list = await apiBridge.listProfiles();
     for (var i = 0; i < list.length; i++) {
-      var r = await rendererApi.readProfileMeta(list[i]);
+      var r = await apiBridge.readProfileMeta(list[i]);
       if (r) PROFILE_META_CACHE[list[i]] = r;
     }
   } catch(e) {}
@@ -500,7 +500,7 @@ async function submitCreateProfile() {
   }
 
   try {
-    var res = await rendererApi.createProfile(safe);
+    var res = await apiBridge.createProfile(safe);
     if (res && res.ok) {
       var meta = { browser: _selectedBrowser, note: note, created: new Date().toISOString() };
       if (proxyServer) {
@@ -510,7 +510,7 @@ async function submitCreateProfile() {
           password: proxyPassEl ? proxyPassEl.value : '',
         };
       }
-      await rendererApi.writeProfileMeta(safe, meta);
+      await apiBridge.writeProfileMeta(safe, meta);
       PROFILE_META_CACHE[safe] = { browser: _selectedBrowser, note: note };
       closeModal();
       showToast('✅ Профиль "' + safe + '" создан (' + _selectedBrowser + ')', 'ok');
@@ -528,7 +528,7 @@ async function createProfile() {
 async function deleteProfile(name) {
   if (!confirm('Удалить профиль "' + name + '"?\nВсе данные будут стёрты.')) return;
   try {
-    var res = await rendererApi.deleteProfile(name);
+    var res = await apiBridge.deleteProfile(name);
     if (res && res.ok) {
       delete PROFILE_META_CACHE[name];
       showToast('"' + name + '" удалён', 'err');
@@ -553,9 +553,9 @@ async function saveSpoofConfig() {
   var spoof = { account_age: age, history: hist, timezone: tz, lang: lang };
   // пишем в config.json вместе с UA/res
   try {
-    var existing = await rendererApi.readConfig();
+    var existing = await apiBridge.readConfig();
     existing.spoof = spoof;
-    var r = await rendererApi.writeConfig(existing);
+    var r = await apiBridge.writeConfig(existing);
     if (r && r.ok) showToast('Обманка сохранена! Применится при след. запуске.', 'ok');
     else showToast('Ошибка записи', 'err');
   } catch(e) { showToast('Ошибка моста API', 'err'); }
@@ -563,7 +563,7 @@ async function saveSpoofConfig() {
 
 async function loadSpoofConfig() {
   try {
-    var data = await rendererApi.readConfig();
+    var data = await apiBridge.readConfig();
     var s = data.spoof || {};
     var ageEl  = document.getElementById('spoof-age');
     var histEl = document.getElementById('spoof-history');
@@ -579,13 +579,13 @@ var SAVED_BINDS = [];
 
 async function loadBinds() {
   try {
-    var r = await rendererApi.readBinds();
+    var r = await apiBridge.readBinds();
     if (r && Array.isArray(r)) SAVED_BINDS = r;
   } catch(e) {}
 }
 
 async function saveBindsToFile() {
-  try { await rendererApi.writeBinds(SAVED_BINDS); } catch(e) {}
+  try { await apiBridge.writeBinds(SAVED_BINDS); } catch(e) {}
 }
 
 function addBind() {
@@ -782,12 +782,12 @@ function initSettingsTab() {
 }
 
 async function saveSettings() {
-  try { await rendererApi.writeSettings(APP_SETTINGS); } catch(e) {}
+  try { await apiBridge.writeSettings(APP_SETTINGS); } catch(e) {}
 }
 
 async function loadSettings() {
   try {
-    var s = await rendererApi.readSettings();
+    var s = await apiBridge.readSettings();
     if (s) APP_SETTINGS = s;
     // Тема: применяем только из нового набора (старые киберпанк-темы сбрасываются)
     if (APP_SETTINGS.theme) {
@@ -822,7 +822,7 @@ function setRes(val) {
 
 async function loadConfig() {
   try {
-    var data = await rendererApi.readConfig();
+    var data = await apiBridge.readConfig();
     var uaEl  = document.getElementById('cfg-ua');
     var resEl = document.getElementById('cfg-res');
     if (uaEl)  uaEl.value  = data.user_agent || '';
@@ -843,7 +843,7 @@ async function saveConfig() {
   if (ua)  data.user_agent = ua;
   if (res) data.resolution = res;
   try {
-    var r = await rendererApi.writeConfig(data);
+    var r = await apiBridge.writeConfig(data);
     if (r && r.ok) showToast('config.json сохранён! Настройки применятся при следующем запуске браузера.', 'ok');
     else showToast('Ошибка: ' + (r ? r.msg : '?'), 'err');
   } catch(e) { showToast('Ошибка моста API', 'err'); }
@@ -893,7 +893,7 @@ async function loadHostsDomains() {
   var statusEl = document.getElementById('hosts-status');
   if (statusEl) statusEl.textContent = 'Читаю hosts...';
   try {
-    var r = await rendererApi.hostsRead();
+    var r = await apiBridge.hostsRead();
     if (r.ok) {
       HOSTS_DOMAINS = r.domains || [];
       renderHostsList();
@@ -972,13 +972,13 @@ async function applyHosts() {
   var statusEl = document.getElementById('hosts-status');
   if (statusEl) { statusEl.style.color = 'var(--tx2)'; statusEl.textContent = 'Применяю...'; }
   try {
-    var r = await rendererApi.hostsWrite(HOSTS_DOMAINS);
+    var r = await apiBridge.hostsWrite(HOSTS_DOMAINS);
     if (r.ok) {
       if (statusEl) { statusEl.style.color = 'var(--grn)'; statusEl.textContent = '✓ Применено! ' + HOSTS_DOMAINS.length + ' доменов заблокировано.'; }
       showToast('🛡️ Hosts обновлён! ' + HOSTS_DOMAINS.length + ' доменов', 'ok');
     } else if (r.needAdmin) {
       if (statusEl) statusEl.textContent = 'Нужны права администратора — запрашиваю UAC...';
-      var r2 = await rendererApi.hostsWriteAdmin(HOSTS_DOMAINS);
+      var r2 = await apiBridge.hostsWriteAdmin(HOSTS_DOMAINS);
       if (r2.ok) {
         if (statusEl) { statusEl.style.color = 'var(--grn)'; statusEl.textContent = '✓ Применено через UAC! ' + HOSTS_DOMAINS.length + ' доменов.'; }
         showToast('🛡️ Hosts обновлён (admin)!', 'ok');
@@ -999,7 +999,7 @@ async function initAdblock() {
   var sel = document.getElementById('ublock-profile');
   if (sel) {
     var list = [];
-    try { list = await rendererApi.listProfiles(); } catch(e) {}
+    try { list = await apiBridge.listProfiles(); } catch(e) {}
     sel.textContent = '';
     if (list.length) {
       list.forEach(function(pr) { sel.appendChild(afEl('option', { text: pr, attrs: { value: pr } })); });
@@ -1009,7 +1009,7 @@ async function initAdblock() {
   }
   // проверяем наличие assets/ublock
   try {
-    var chk = await rendererApi.ublockCheck();
+    var chk = await apiBridge.ublockCheck();
     var statusEl = document.getElementById('ublock-status');
     if (chk.hasManifest) {
       if (statusEl) { statusEl.style.color = 'var(--grn)'; statusEl.textContent = '✓ uBlock найден в assets/ublock/ — версия ' + (chk.version || '?'); }
@@ -1027,7 +1027,7 @@ async function installUblock() {
   if (!sel || !sel.value) { showToast('Выбери профиль', 'err'); return; }
   // сначала проверяем папку
   try {
-    var chk = await rendererApi.ublockCheck();
+    var chk = await apiBridge.ublockCheck();
     if (!chk.hasManifest) {
       var msg = chk.exists
         ? 'В assets\\ublock\\ нет manifest.json — распакуй CRX внутрь папки (не в подпапку!)'
@@ -1038,7 +1038,7 @@ async function installUblock() {
   } catch(e) {}
   if (statusEl) { statusEl.style.color = 'var(--tx2)'; statusEl.textContent = 'Устанавливаю...'; }
   try {
-    var r = await rendererApi.ublockInstall(sel.value);
+    var r = await apiBridge.ublockInstall(sel.value);
     if (r.ok) {
       if (statusEl) { statusEl.style.color = 'var(--grn)'; statusEl.textContent = '✓ uBlock v' + r.version + ' установлен в профиль "' + sel.value + '"\n→ ' + r.dst; }
       showToast('🧩 uBlock установлен в ' + sel.value + '!', 'ok');
@@ -1050,10 +1050,10 @@ async function installUblock() {
 }
 
 function openUblockLink() {
-  rendererApi.openExternal('https://github.com/gorhill/uBlock/releases/latest');
+  apiBridge.openExternal('https://github.com/gorhill/uBlock/releases/latest');
 }
 function openUblockFolder() {
-  rendererApi.openFolder('assets');
+  apiBridge.openFolder('assets');
 }
 
 // =====================================================
@@ -1162,7 +1162,7 @@ async function diagCheck() {
     diagRenderList();
     diagProgress(Math.round((i/total)*80)+5, c.name + '...');
     try {
-      var r = await rendererApi.diagCheck({ component: c.id, pkg: c.pkg });
+      var r = await apiBridge.diagCheck({ component: c.id, pkg: c.pkg });
       diagResults[c.id] = r;
       diagLog((r.status==='ok'?'✓':'✗') + ' ' + c.name + (r.version?' — '+r.version:'') + (r.note?' ('+r.note+')':''), r.status==='ok'?'ok':r.status==='warn'?'warn':'err');
     } catch(e) {
@@ -1235,8 +1235,8 @@ async function diagInstallAll() {
   // Вешаем слушатели один раз глобально
   if (!DIAG_LISTENERS_ADDED) {
     DIAG_LISTENERS_ADDED = true;
-    rendererApi.onDiagLog(function(d) { diagLogGlobal(d.msg, d.type||'info'); });
-    rendererApi.onDiagProgress(function(d) { diagProgressGlobal(d.pct, d.label); });
+    apiBridge.onDiagLog(function(d) { diagLogGlobal(d.msg, d.type||'info'); });
+    apiBridge.onDiagProgress(function(d) { diagProgressGlobal(d.pct, d.label); });
   }
 
   var toInstall = DIAG_COMPONENTS.filter(function(c){
@@ -1247,7 +1247,7 @@ async function diagInstallAll() {
   diagProgressGlobal(5, 'Запуск...');
 
   try {
-    var res = await rendererApi.diagInstall({ components: toInstall.map(function(c){return c.id;}) });
+    var res = await apiBridge.diagInstall({ components: toInstall.map(function(c){return c.id;}) });
     diagLogGlobal(res.ok ? '✓ Готово!' : '✗ ' + res.msg, res.ok ? 'ok' : 'err');
   } catch(e) {
     diagLogGlobal('✗ ' + e.message, 'err');
@@ -1267,7 +1267,7 @@ async function diagInstallAll() {
 var ALL_LOGS = [];
 
 // Живые обновления — когда открыта вкладка логов
-rendererApi.onLogEntry(function(entries) {
+apiBridge.onLogEntry(function(entries) {
   if (!Array.isArray(entries)) return;
   entries.forEach(function(e) {
     // Не дублируем
@@ -1291,7 +1291,7 @@ rendererApi.onLogEntry(function(entries) {
 async function initLogs() {
   // Загружаем все логи из main процесса
   try {
-    var logs = await rendererApi.readLogs();
+    var logs = await apiBridge.readLogs();
     if (Array.isArray(logs)) ALL_LOGS = logs;
   } catch(e) {}
   var wrap = document.getElementById('logs-wrap');
@@ -1343,7 +1343,7 @@ function renderLogsDOM(wrap) {
 }
 
 async function clearLogs() {
-  try { await rendererApi.clearLogs(); } catch(e) {}
+  try { await apiBridge.clearLogs(); } catch(e) {}
   ALL_LOGS = [];
   renderLogs();
   showToast('Логи очищены');
@@ -1361,7 +1361,7 @@ async function initFpProfileSelect() {
   var sel = document.getElementById('fp-profile');
   if (!sel) return;
   var list = [];
-  try { list = await rendererApi.listProfiles(); } catch (e) { list = []; }
+  try { list = await apiBridge.listProfiles(); } catch (e) { list = []; }
   var keep = sel.value;
   sel.textContent = '';
   if (!list.length) {
@@ -1377,7 +1377,7 @@ async function rerollFingerprint() {
   var sel = document.getElementById('fp-profile');
   var prof = sel ? sel.value : '';
   if (!prof) { showToast('Сначала создай профиль', 'err'); return; }
-  var r = await rendererApi.rerollProfile(prof);
+  var r = await apiBridge.rerollProfile(prof);
   if (r && r.ok) {
     showToast('🎲 Отпечаток профиля «' + prof + '» будет новым', 'ok');
     previewFingerprint();
@@ -1422,7 +1422,7 @@ async function previewFingerprint() {
   var sel  = document.getElementById('fp-profile');
   var prof = (sel && sel.value) ? sel.value : null;
   var res = {};
-  try { res = await rendererApi.previewProfile(prof) || {}; } catch (e) { res = {}; }
+  try { res = await apiBridge.previewProfile(prof) || {}; } catch (e) { res = {}; }
 
   el.textContent = '';
   var fp = res.fingerprint || {};
@@ -1496,7 +1496,7 @@ var CBN_TARGETS = [
 async function initCheburnet() {
   // Загружаем настройки
   try {
-    var s = await rendererApi.readSettings();
+    var s = await apiBridge.readSettings();
     if (s && s.cheburnet) CBN_SETTINGS = s.cheburnet;
   } catch(e) {}
   // Восстанавливаем UI
@@ -1553,11 +1553,11 @@ async function cheburnetRunTests() {
 
   // TCP ping с повторной попыткой при неудаче — убирает ложные срабатывания
   async function tcpCheck(target) {
-    var r1 = await rendererApi.cbnPing({ host: target.host, port: target.port || 443 }).catch(function(){ return { ok: false }; });
+    var r1 = await apiBridge.cbnPing({ host: target.host, port: target.port || 443 }).catch(function(){ return { ok: false }; });
     if (r1.ok) return r1;
     // Первый раз не прошёл — ждём 800мс и пробуем ещё раз
     await new Promise(function(r){ setTimeout(r, 800); });
-    var r2 = await rendererApi.cbnPing({ host: target.host, port: target.port || 443 }).catch(function(){ return { ok: false }; });
+    var r2 = await apiBridge.cbnPing({ host: target.host, port: target.port || 443 }).catch(function(){ return { ok: false }; });
     return r2;
   }
 
@@ -1616,7 +1616,7 @@ function startCbnMonitor() {
   var interval = (CBN_SETTINGS.interval || 30) * 1000;
   CBN_MONITOR_TIMER = setInterval(function() {
     // Проверяем YouTube по TCP — надёжный индикатор
-    rendererApi.cbnPing({ host: 'www.youtube.com', port: 443 }).then(function(r) {
+    apiBridge.cbnPing({ host: 'www.youtube.com', port: 443 }).then(function(r) {
       if (!r.ok && CBN_SETTINGS.autorestart) {
         zapretStart();
         showToast('Чебурнет — Zapret запущен', 'ok');
@@ -1635,7 +1635,7 @@ async function cheburnetApplyDns() {
   var st = document.getElementById('cbn-dns-status');
   if (st) { st.textContent = '⏳ Применяем DNS...'; st.style.color = 'var(--ac)'; }
   try {
-    var r = await rendererApi.cbnSetDns({ dns1: dns1, dns2: dns2 });
+    var r = await apiBridge.cbnSetDns({ dns1: dns1, dns2: dns2 });
     if (st) { st.textContent = r.ok ? '✓ DNS успешно изменён на ' + dns1 + ' / ' + dns2 : '✗ Ошибка: ' + r.msg; st.style.color = r.ok ? 'var(--grn)' : 'var(--red)'; }
     if (r.ok) showToast('🔒 DNS изменён: ' + dns1, 'ok');
   } catch(e) { if(st) { st.textContent = '✗ ' + e.message; st.style.color='var(--red)'; } }
@@ -1645,7 +1645,7 @@ async function cheburnetResetDns() {
   var st = document.getElementById('cbn-dns-status');
   if (st) { st.textContent = '⏳ Сбрасываем DNS...'; st.style.color='var(--ac)'; }
   try {
-    var r = await rendererApi.cbnResetDns();
+    var r = await apiBridge.cbnResetDns();
     if (st) { st.textContent = r.ok ? '✓ DNS сброшен (автоматический от провайдера)' : '✗ ' + r.msg; st.style.color = r.ok ? 'var(--grn)' : 'var(--red)'; }
   } catch(e) { if(st) { st.textContent='✗ '+e.message; st.style.color='var(--red)'; } }
 }
@@ -1663,16 +1663,16 @@ async function cheburnetEmergency() {
   }
   eLog('🆘 Аварийный режим активирован...', 'var(--red)');
   eLog('■ Останавливаем текущий Zapret...', 'var(--tx2)');
-  await rendererApi.zapretStop().catch(()=>{});
+  await apiBridge.zapretStop().catch(()=>{});
   await new Promise(r => setTimeout(r, 500));
   eLog('▶ Перезапускаем Zapret...', 'var(--ac)');
-  await rendererApi.zapretStart().catch(()=>{});
+  await apiBridge.zapretStart().catch(()=>{});
   eLog('🔒 Меняем DNS на Cloudflare (1.1.1.1)...', 'var(--ac)');
-  var dnsR = await rendererApi.cbnSetDns({ dns1:'1.1.1.1', dns2:'1.0.0.1' }).catch(()=>({ok:false}));
+  var dnsR = await apiBridge.cbnSetDns({ dns1:'1.1.1.1', dns2:'1.0.0.1' }).catch(()=>({ok:false}));
   eLog(dnsR.ok ? '✓ DNS изменён' : '⚠ DNS не удалось изменить (нужны права)', dnsR.ok ? 'var(--grn)' : 'var(--ylw)');
   await new Promise(r => setTimeout(r, 1000));
   eLog('🌐 Проверяем доступность...', 'var(--tx2)');
-  var ping = await rendererApi.cbnPing({ host:'www.google.com', port:443 }).catch(()=>({ok:false}));
+  var ping = await apiBridge.cbnPing({ host:'www.google.com', port:443 }).catch(()=>({ok:false}));
   eLog(ping.ok ? '✅ Соединение восстановлено!' : '⚠ Соединение всё ещё ограничено. Попробуй VPN.', ping.ok ? 'var(--grn)' : 'var(--ylw)');
   showToast(ping.ok ? '✅ Аварийный режим — OK' : '⚠ Частичное восстановление', ping.ok ? 'ok' : '');
 }
@@ -1717,7 +1717,7 @@ function zuShow(cardId) {
 async function initZapretUpdate() {
   // Читаем текущую версию из version.txt внутри папки Zapret
   try {
-    var r = await rendererApi.zapretVersion();
+    var r = await apiBridge.zapretVersion();
     var el = document.getElementById('zu-current');
     var pe = document.getElementById('zu-path');
     if (el) el.textContent = r.version || 'Не определена';
@@ -1740,7 +1740,7 @@ async function zapretCheckUpdate() {
   zuLog('🔍 Запрос к GitHub API...', 'info');
 
   try {
-    var res = await rendererApi.zapretCheckUpdate();
+    var res = await apiBridge.zapretCheckUpdate();
     if (!res.ok) {
       zuLog('✗ Ошибка: ' + res.msg, 'err');
       zuProgress(0, 'Ошибка');
@@ -1800,7 +1800,7 @@ async function zapretDoUpdate() {
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Обновляем...'; }
 
   // Останавливаем Zapret
-  try { await rendererApi.zapretStop(); } catch(e) {}
+  try { await apiBridge.zapretStop(); } catch(e) {}
 
   zuShow('zu-status-card');
   var logBox = document.getElementById('zu-log');
@@ -1810,13 +1810,13 @@ async function zapretDoUpdate() {
 
   // Слушаем прогресс скачивания
   if (ZU_PROGRESS_OFF) { ZU_PROGRESS_OFF(); ZU_PROGRESS_OFF = null; }
-  ZU_PROGRESS_OFF = rendererApi.onZapretProgress(function(d) {
+  ZU_PROGRESS_OFF = apiBridge.onZapretProgress(function(d) {
     zuProgress(5 + Math.round(d.pct * 0.7), 'Скачиваем... ' + d.downloaded + ' / ' + d.total);
     zuLog('↓ ' + d.downloaded + ' МБ / ' + d.total + ' МБ (' + Math.round(d.pct) + '%)', 'info');
   });
 
   try {
-    var res = await rendererApi.zapretDoUpdate({ tag: ZU_STATE.latestTag, assetName: ZU_STATE.assetName });
+    var res = await apiBridge.zapretDoUpdate({ tag: ZU_STATE.latestTag, assetName: ZU_STATE.assetName });
     if (ZU_PROGRESS_OFF) { ZU_PROGRESS_OFF(); ZU_PROGRESS_OFF = null; }
 
     if (!res.ok) {
@@ -1874,13 +1874,13 @@ document.addEventListener('keydown', function(e) {
 async function initialLoad() {
   // Иконка приходит из main как data:URL — никаких file:// в рендерере
   try {
-    var iconUrl = await rendererApi.getIconUrl();
+    var iconUrl = await apiBridge.getIconUrl();
     var img = document.getElementById('logo-img');
     if (img && iconUrl && /^data:image\//.test(iconUrl)) img.src = iconUrl;
   } catch(e) { afReportError('icon', e.message); }
 
   // Статус приложения из main (админ-права, живой Zapret, режим sandbox)
-  rendererApi.onBootstrap(function(info) {
+  apiBridge.onBootstrap(function(info) {
     if (!info) return;
     document.documentElement.setAttribute('data-platform', info.platform || 'unknown');
     if (info.zapretRunning) { zapretActive = true; syncZapretUI(); }
@@ -1913,20 +1913,20 @@ if (document.readyState === 'complete' || document.readyState === 'interactive')
 //   Каждое действие — чистая функция без eval/строк.
 // =====================================================
 
-function winMin()    { rendererApi.winAct('minimize'); }
-function winHide()   { rendererApi.winAct('hide'); }
-function winMax()    { rendererApi.toggleMaximize(); }
-function openFolder(which) { rendererApi.openFolder(which); }
-function zapretService()   { rendererApi.zapretService(); }
+function winMin()    { apiBridge.winAct('minimize'); }
+function winHide()   { apiBridge.winAct('hide'); }
+function winMax()    { apiBridge.toggleMaximize(); }
+function openFolder(which) { apiBridge.openFolder(which); }
+function zapretService()   { apiBridge.zapretService(); }
 function clearDiagLog()    { var l = document.getElementById('diag-log'); if (l) l.textContent = ''; }
 
 async function closeBrowsers() {
-  var r = await rendererApi.closeBrowsers();
+  var r = await apiBridge.closeBrowsers();
   showToast(r && r.ok ? 'Браузеры закрыты' : 'Не удалось закрыть браузеры', r && r.ok ? 'ok' : 'err');
 }
 
 async function killWinws() {
-  var r = await rendererApi.killWinws();
+  var r = await apiBridge.killWinws();
   showToast(r && r.ok ? 'winws.exe остановлен' : 'winws.exe не найден', r && r.ok ? 'err' : '');
 }
 

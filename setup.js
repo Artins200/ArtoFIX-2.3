@@ -3,8 +3,8 @@
    sandbox + contextIsolation, никаких require() — только window.api. */
 
 // Use a separate name: top-level var api would overwrite the read-only preload bridge.
-var rendererApi = window.api || null;
-if (!rendererApi || rendererApi.ready !== true) {
+var apiBridge = window.api || null;
+if (!apiBridge || apiBridge.ready !== true) {
   document.addEventListener('DOMContentLoaded', function () {
     var el = document.getElementById('error-msg');
     if (el) { el.textContent = '✗ Мост API не загружен — перезапусти установщик'; el.classList.add('show'); }
@@ -15,7 +15,7 @@ if (!rendererApi || rendererApi.ready !== true) {
 var SETUP_ACTIONS = {
   skipSetup: skipSetup,        // кнопка «Пропустить» и крестик в титлбаре
   launchApp: launchApp,        // «Запустить Artofix»
-  restartApp: function () { if (rendererApi) rendererApi.winAct('restart'); },
+  restartApp: function () { if (apiBridge) apiBridge.winAct('restart'); },
 };
 document.addEventListener('click', function (ev) {
   var el = ev.target && ev.target.closest ? ev.target.closest('[data-af-on]') : null;
@@ -45,13 +45,13 @@ function updateSteps(pct) {
   });
 }
 
-rendererApi.onSetupStep(function(d) {
+apiBridge.onSetupStep(function(d) {
   document.getElementById('step-label').textContent = '⏳ ' + d.text;
   document.getElementById('progress-bar').style.width = d.pct + '%';
   updateSteps(d.pct);
 });
 
-rendererApi.onSetupLog(function(d) {
+apiBridge.onSetupLog(function(d) {
   var box = document.getElementById('log-box');
   if (typeof d === 'string') {
     // raw stdout
@@ -71,7 +71,7 @@ rendererApi.onSetupLog(function(d) {
   box.scrollTop = box.scrollHeight;
 });
 
-rendererApi.onSetupError(function(msg) {
+apiBridge.onSetupError(function(msg) {
   var el = document.getElementById('error-msg');
   el.textContent = '✗ ' + msg;
   el.classList.add('show');
@@ -79,7 +79,7 @@ rendererApi.onSetupError(function(msg) {
   document.getElementById('btn-skip').textContent = 'Пропустить';
 });
 
-rendererApi.onSetupRestart(function(msg) {
+apiBridge.onSetupRestart(function(msg) {
   var el = document.getElementById('restart-msg');
   el.textContent = '↺ ' + msg;
   el.classList.add('show');
@@ -88,15 +88,15 @@ rendererApi.onSetupRestart(function(msg) {
   document.getElementById('btn-skip').style.display = 'none';
 });
 
-rendererApi.onSetupDone(function() {
+apiBridge.onSetupDone(function() {
   document.getElementById('progress-bar').style.width = '100%';
   document.getElementById('step-label').textContent = '✓ Готово!';
   document.getElementById('done-msg').classList.add('show');
   document.getElementById('btn-launch').style.display = '';
   document.getElementById('btn-skip').style.display = 'none';
   updateSteps(100);
-  if (rendererApi) rendererApi.setupOpenMain();
+  if (apiBridge) apiBridge.setupOpenMain();
 });
 
-function launchApp() { if (rendererApi) rendererApi.setupOpenMain(); }
-function skipSetup() { if (rendererApi) { rendererApi.skipSetup(); rendererApi.setupOpenMain(); } }
+function launchApp() { if (apiBridge) apiBridge.setupOpenMain(); }
+function skipSetup() { if (apiBridge) { apiBridge.skipSetup(); apiBridge.setupOpenMain(); } }
