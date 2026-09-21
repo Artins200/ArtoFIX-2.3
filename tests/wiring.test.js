@@ -50,7 +50,10 @@ test('в HTML нет ссылок на внешние CDN (шрифты/CDN-ск
 });
 
 // ── 2. data-af-action → AF_ACTIONS рендерера ──
-function loadRenderer(file, apiStub) {
+// frozenApi моделирует contextBridge.exposeInMainWorld('api', …): в реальном
+// Electron свойство window.api read-only и не конфигурируемое, поэтому любой
+// «var api = …» в строгом режиме бросает TypeError. Раньше это роняло весь рендерер.
+function loadRenderer(file, apiStub, frozenApi) {
   const listeners = {};
   const stubEl = () => ({
     style: {}, classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } },
@@ -96,6 +99,16 @@ function loadRenderer(file, apiStub) {
     setTimeout, clearTimeout, setInterval, clearInterval, console, Math, JSON, Object, Array, String, Number,
     Date, Promise, Error, RegExp, isNaN, parseFloat, parseInt, encodeURIComponent, decodeURIComponent,
   }));
+  if (frozenApi) {
+    // как contextBridge.exposeInMainWorld('api', Object.freeze(…)):
+    // чтение работает, а присваивание read-only свойству в строгом режиме бросает
+    Object.defineProperty(ctx, 'api', {
+      get() { return apiStub; },
+      set() { throw new TypeError("Cannot assign to read only property 'api' of object '#<Window>'"); },
+      configurable: false,
+      enumerable: true,
+    });
+  }
   vm.runInContext(fs.readFileSync(path.join(ROOT, file), 'utf-8'), ctx, { filename: file });
   return ctx;
 }
@@ -121,6 +134,15 @@ function apiStub() {
 let rendererCtx;
 test('app.js загружается без Node и без исключений', () => {
   rendererCtx = loadRenderer('app.js', apiStub());
+});
+
+// Регрессия: contextBridge делает window.api read-only. «var api = window.api» в строгом
+// режиме бросает «Cannot assign to read only property 'api'» и ронял весь рендерер.
+test('рендереры не перезаписывают read-only мост window.api', () => {
+  for (const f of ['app.js', 'setup.js']) {
+    assert.doesNotThrow(() => loadRenderer(f, apiStub(), true),
+      f + ': попытка присвоить read-only window.api (TypeError)');
+  }
 });
 
 test('каждое data-af-action из index.html есть в AF_ACTIONS', () => {
@@ -225,10 +247,10 @@ test('preload отдаёт ровно один мост window.api', () => {
 test('все api.* вызовы рендерера есть в preload', () => {
   const used = new Set();
   for (const f of ['app.js', 'setup.js']) {
-    // только вызовы вида api.method( — и не внутри строк-доменов вроде 'api.amplitude.com'
-    const re = /(?:^|[^'"\w.])api\.([A-Za-z_$][\w$]*)\s*\(/g;
+    // только вызовы вида apiBridge.method( / api.method( — и не внутри строк-доменов вроде 'api.amplitude.com'
+    const re = /(?:^|[^'"\w.])apiBridge\.([A-Za-z_$][\w$]*)\s*\(|(?:^|[^'"\w.])api\.([A-Za-z_$][\w$]*)\s*\(/g;
     let m;
-    while ((m = re.exec(read(f)))) used.add(m[1]);
+    while ((m = re.exec(read(f)))) used.add(m[1] || m[2]);
   }
   const missing = [...used].filter((u) => bridge.obj[u] === undefined);
   assert.deepStrictEqual(missing, [], 'preload не отдаёт: ' + missing.join(', '));
