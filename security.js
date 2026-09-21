@@ -201,6 +201,31 @@ function sanitizeBrowseUrl(raw) {
 }
 
 // ─────────────────────────────────────────────
+//  ПУТИ К ЛОКАЛЬНЫМ ПРИЛОЖЕНИЯМ (бинды типа «app»)
+// ─────────────────────────────────────────────
+const APP_PATH_EXT = /\.(exe|lnk|url)$/i;
+
+/**
+ * Абсолютный путь к приложению/ярлыку для биндов: только .exe/.lnk/.url,
+ * только абсолютные пути (диск Windows, UNC или posix), без shell-метасимволов
+ * и «..». Всё остальное (file://, bat-скрипты, относительные пути) — null.
+ */
+function sanitizeAppPath(raw) {
+  if (typeof raw !== 'string') return null;
+  const s = raw.trim().replace(/^"(.*)"$/, '$1');
+  if (!s || s.length > 512) return null;
+  if (/[\u0000-\u001f\u007f]/.test(s)) return null;
+  if (/[&|<>^%`$;]/.test(s)) return null;          // shell-метасимволы не нужны
+  if (s.includes('..')) return null;                // никакого traversal
+  if (!APP_PATH_EXT.test(s)) return null;
+  const isDrive = /^[A-Za-z]:[\\/]/.test(s);        // C:\Games\app.exe
+  const isUnc = s.startsWith('\\\\');               // \\host\share\app.exe
+  const isPosix = s.startsWith('/');                // /opt/app (не Windows, но валидно)
+  if (!isDrive && !isUnc && !isPosix) return null;  // относительные пути запрещены
+  return s;
+}
+
+// ─────────────────────────────────────────────
 //  СЕТЕВЫЕ ЗАПРОСЫ (обновление Zapret)
 // ─────────────────────────────────────────────
 const UPDATE_HOSTS = new Set([
@@ -347,6 +372,7 @@ module.exports = {
   sanitizePort,
   sanitizeExternalUrl,
   sanitizeBrowseUrl,
+  sanitizeAppPath,
   isLocalHost,
   isAllowedUpdateHost,
   sanitizeUpdateUrl,

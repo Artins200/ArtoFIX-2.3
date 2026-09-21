@@ -37,6 +37,18 @@
   --mono: 'Cascadia Code',Consolas,'Courier New',monospace;
   --radius: 18px;
   --sidebar-w: 232px;
+
+  /* ── ОКНО: форма и «стекло» ──
+     Окно в main.js прозрачное (transparent:true), форму рисует #app:
+     --win-radius — радиус скругления ВСЕГО окна (настраивается ползунком),
+     --win-alpha  — непрозрачность фона окна (ползунок «Прозрачность»),
+     --win-inset  — прозрачная кайма вокруг #app, чтобы скругления и тень
+                     были реально видны на фоне рабочего стола.
+     Значения переопределяются инлайном из app.js (applyWindowStyle). */
+  --bg-rgb: 237,240,247;
+  --win-radius: 20px;
+  --win-alpha: 1;
+  --win-inset: 8px;
 }
 
 /* ── АЦЕНТНЫЕ ТЕМЫ (светлые) ── */
@@ -47,6 +59,7 @@ body.th-rose  { --ac:#e11d48; --acr:225,29,72;   --ac2:#f472b6; --ac2r:244,114,1
 
 /* ── ТЕМНАЯ ТЕМА «НОЧЬ» — чистый тёмный, без неона ── */
 body.th-night {
+  --bg-rgb:13,19,32;
   --bg:#0d1320; --panel:#111827; --card:#161f31;
   --card-br:#243049; --divider:#1c2537;
   --tx:#e7ecf5; --tx2:#94a0b6; --tx3:#5f6c85;
@@ -65,13 +78,14 @@ html, body {
   width:100%; height:100%; overflow:hidden;
   color:var(--tx); font-family:var(--font); font-size:13px;
 }
-body {
-  background:
-    radial-gradient(1100px 460px at 80% -10%, rgba(var(--acr),.075), transparent 62%),
-    radial-gradient(900px 420px at -12% 110%, rgba(var(--ac2r),.055), transparent 60%),
-    var(--bg);
-  transition: background .35s ease;
-}
+/* Фон окна рисует только #app (со скруглениями и прозрачностью),
+   а html/body прозрачные — иначе углы окна были бы залиты сплошным
+   цветом и скругления не было бы видно. */
+html, body { background: transparent; }
+
+/* Развёрнутое окно: без каймы и скруглений (перебивает инлайновые
+   переменные :root, т.к. объявлены на самом body). */
+body.is-max { --win-radius: 0px; --win-inset: 0px; }
 button  { cursor:pointer; font-family:var(--font); color:inherit; }
 input, select, textarea { font-family:var(--mono); user-select:text; cursor:text; color:var(--tx); }
 select  { cursor:pointer; }
@@ -82,16 +96,34 @@ select  { cursor:pointer; }
    APP SHELL
    ========================================= */
 #app {
-  position:relative; z-index:2; width:100vw; height:100vh;
-  background:var(--bg); display:flex; flex-direction:column;
-  animation: appBoot .45s cubic-bezier(.22,1,.36,1) both;
-  border-radius:18px; overflow:hidden;
-  box-shadow:0 10px 40px rgba(0,0,0,.15);
+  position:relative; z-index:2;
+  width:calc(100vw - var(--win-inset, 8px) * 2);
+  height:calc(100vh - var(--win-inset, 8px) * 2);
+  margin:var(--win-inset, 8px);
+  /* фон окна: мягкие градиенты + базовый цвет с настраиваемой прозрачностью */
+  background:
+    radial-gradient(1100px 460px at 80% -10%, rgba(var(--acr),.075), transparent 62%),
+    radial-gradient(900px 420px at -12% 110%, rgba(var(--ac2r),.055), transparent 60%),
+    rgba(var(--bg-rgb, 237,240,247), var(--win-alpha, 1));
+  display:flex; flex-direction:column;
+  animation: appBoot .45s cubic-bezier(.22,1,.36,1);
+  /* ВСЁ окно скруглено полностью — радиус задаёт пользователь (ползунок
+     «Скругление углов»), контур подсвечен акцентом, чтобы форма читалась
+     на любом фоне рабочего стола. */
+  border-radius:var(--win-radius, 20px);
+  overflow:hidden;
+  border:1px solid rgba(var(--acr),.38);
+  box-shadow:
+    0 16px 48px rgba(9,12,20,.32),
+    0 3px 12px rgba(9,12,20,.20),
+    inset 0 0 0 1px rgba(255,255,255,.22);
+  transition: background .35s ease, border-radius .18s ease;
 }
 @keyframes appBoot {
   from { opacity:0; transform:translateY(10px) scale(.99); }
   to   { opacity:1; transform:translateY(0)    scale(1);   }
 }
+body.is-max #app { border-color:transparent; box-shadow:none; }
 
 /* =========================================
    TITLEBAR
@@ -103,7 +135,9 @@ select  { cursor:pointer; }
   display:flex; align-items:center; justify-content:space-between;
   padding:0 14px 0 18px; -webkit-app-region:drag;
   position:relative; z-index:10;
-  border-top-left-radius:18px; border-top-right-radius:18px;
+  /* верх окна скруглён вместе со всем #app */
+  border-top-left-radius:var(--win-radius, 20px);
+  border-top-right-radius:var(--win-radius, 20px);
 }
 
 #logo {
@@ -480,7 +514,9 @@ select.af-input option { background:var(--card); color:var(--tx); }
    TOASTS
    ========================================= */
 #toasts {
-  position:fixed; bottom:18px; right:18px;
+  /* absolute внутри #app: тосты не вылетают за скруглённую форму окна
+     (fixed игнорировал бы overflow:hidden и border-radius у #app) */
+  position:absolute; bottom:18px; right:18px;
   display:flex; flex-direction:column-reverse; gap:8px;
   z-index:8000; pointer-events:none;
 }
@@ -503,7 +539,12 @@ select.af-input option { background:var(--card); color:var(--tx); }
    MODAL
    ========================================= */
 #modal-overlay {
-  position:fixed; inset:0; z-index:8888;
+  position:fixed;
+  /* повторяет форму окна: затемнение не вылезает за скругления */
+  inset:var(--win-inset, 8px);
+  border-radius:var(--win-radius, 20px);
+  overflow:hidden;
+  z-index:8888;
   background:rgba(13,19,32,.45);
   -webkit-backdrop-filter:blur(5px); backdrop-filter:blur(5px);
   display:none; align-items:center; justify-content:center;
@@ -811,6 +852,7 @@ body.th-night .sys-banner {
     </div>
     <div id="winbtns">
       <div class="winbtn" title="Свернуть" data-af-on="click" data-af-action="winMin">─</div>
+      <div class="winbtn" id="winbtn-max" title="Развернуть / восстановить" data-af-on="click" data-af-action="winMax">□</div>
       <div class="winbtn" id="winbtn-close" title="Скрыть в трей" data-af-on="click" data-af-action="winHide">✕</div>
     </div>
   </div>
@@ -995,10 +1037,14 @@ body.th-night .sys-banner {
   <!-- Форма создания бинда -->
   <div class="af-card" style="margin-bottom:14px">
     <div class="section-title">Создать бинд</div>
+    <div class="color-row" style="margin-bottom:12px">
+      <label style="font-size:11.5px;color:var(--tx);font-weight:600">⚡ Авто-обход без VPN — Zapret включается сам при запуске биндов и при выборе страны профиля</label>
+      <label class="toggle-sw"><input type="checkbox" id="auto-bypass" checked data-af-on="change" data-af-action="saveAutoBypass"><span class="toggle-knob"></span></label>
+    </div>
     <div class="grid-2" style="margin-bottom:0">
       <div>
-        <label class="field-label">URL или путь к .exe / ярлыку</label>
-        <input class="af-input" id="bind-url" type="text" placeholder="https://... или C:\path\to\app.exe">
+        <label class="field-label">URL, схема приложения или путь к .exe / ярлыку</label>
+        <input class="af-input" id="bind-url" type="text" placeholder="https://… · steam://… · C:\Games\app.exe">
         <label class="field-label">Имя профиля браузера</label>
         <input class="af-input" id="bind-profile" type="text" placeholder="my_profile (для браузера)">
       </div>
@@ -1184,6 +1230,39 @@ body.th-night .sys-banner {
         Меняет размер всего интерфейса — удобно для больших экранов или маленьких окон.
       </p>
     </div>
+  </div>
+
+  <!-- Окно: скругление и прозрачность -->
+  <div class="af-card" style="margin-bottom:14px">
+    <div class="section-title">Окно</div>
+    <div class="grid-2">
+      <div>
+        <div class="color-row">
+          <label>Скругление углов окна</label>
+          <span class="range-val"><span id="radius-display">20</span> px</span>
+        </div>
+        <div class="range-row" style="margin-top:6px">
+          <label></label>
+          <input type="range" id="win-radius" min="0" max="28" step="1" value="20"
+                 data-af-on="input" data-af-action="mirrorInput" data-af-args='["radius-display", "saveWin", false]'>
+        </div>
+      </div>
+      <div>
+        <div class="color-row">
+          <label>Прозрачность окна</label>
+          <span class="range-val"><span id="opacity-display">100</span>%</span>
+        </div>
+        <div class="range-row" style="margin-top:6px">
+          <label></label>
+          <input type="range" id="win-opacity" min="30" max="100" step="5" value="100"
+                 data-af-on="input" data-af-action="mirrorInput" data-af-args='["opacity-display", "saveWin", false]'>
+        </div>
+      </div>
+    </div>
+    <p style="font-size:10.5px;color:var(--tx3);line-height:1.6;margin-top:10px">
+      Окно скруглено полностью — форму и «стекло» видно сразу. Прозрачность делает фон
+      окна полупрозрачным (текст остаётся читаемым). В развёрнутом виде углы прямые.
+    </p>
   </div>
 </div>
 </template>

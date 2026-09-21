@@ -11,6 +11,7 @@ const steps = [
   { name: 'renderer-actions (исполнение UI-действий)', cmd: process.execPath, args: ['tests/renderer-actions.test.js'] },
   { name: 'pageinit (патчи антидетекта в браузере)', cmd: process.execPath, args: ['tests/pageinit.test.js'] },
   { name: 'main-smoke (запуск и IPC main-процесса)', cmd: process.execPath, args: ['tests/main-smoke.test.js'] },
+  { name: 'ui-integration (index.html + app.js в jsdom; без jsdom пропускается)', cmd: process.execPath, args: ['tests/ui-integration.test.js'] },
   { name: 'engine (py: запуск браузера)', cmd: process.env.PYTHON || 'python3', args: ['tests/engine_test.py'] },
 ];
 

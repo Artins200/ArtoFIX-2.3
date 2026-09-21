@@ -41,6 +41,7 @@ function makeNullApi() {
     ready: false, version: null, platform: null,
     getIconUrl: nulFalse,
     winAct: function () {}, toggleMaximize: function () {}, openFolder: function () {},
+    setZoom: function () {},
     zapretService: function () {}, refreshTray: function () {}, closeBrowsers: empty,
     killWinws: empty, runSafeCommand: empty, launchBrowser: empty, openExternal: empty,
     zapretStart: empty, zapretStop: empty, zapretVersion: obj, zapretCheckUpdate: obj,
@@ -56,6 +57,7 @@ function makeNullApi() {
     reportError: function () {},
     onLogEntry: off, onZapretStatus: off, onZapretProgress: off, onDiagLog: off,
     onDiagProgress: off, onTrayAction: off, onNavigate: off, onBootstrap: off,
+    onWinMaximized: off,
     onProfileThumb: off, platform: 'web',
   };
 }
@@ -257,7 +259,7 @@ function goTab(tabName, btn) {
   if (tabName === 'profiles') renderProfiles();
   if (tabName === 'settings') initSettingsTab();
   if (tabName === 'config')   { loadConfig(); loadSpoofConfig(); initFpProfileSelect(); }
-  if (tabName === 'binds')         renderBinds();
+  if (tabName === 'binds')         initBindsTab();
   if (tabName === 'adblock')       initAdblock();
   if (tabName === 'zapret-update') initZapretUpdate();
   if (tabName === 'cheburnet')     initCheburnet();
@@ -284,10 +286,12 @@ function openTG() {
 }
 
 // ── BROWSER LAUNCH ──
-// bypass=true/false — запускать ли zapret перед открытием
+// bypass=true/false — запускать ли обход (Zapret) перед открытием.
+// Авто-настройка: если обход не активен, он поднимается САМ — пользователю
+// не нужно вручную жать «Активировать» (см. ensureBypassAuto).
 async function launchBrowser(url, profile, browser, bypass) {
   if (browser === 'app') {
-    // Ярлыки и приложения (steam://, tg://, discord://) открывает main —
+    // Ярлыки и приложения (steam://, tg://, discord://, .exe/.lnk) открывает main —
     // он проверяет схему по белому списку, рендерер ничего не запускает сам.
     try {
       var appRes = await apiBridge.launchBrowser({ url: url, profile: profile, browser: 'app' });
@@ -296,15 +300,59 @@ async function launchBrowser(url, profile, browser, bypass) {
     } catch(e) { showToast('Ошибка: ' + e.message, 'err'); }
     return;
   }
-  if (bypass && !zapretActive) {
-    showToast('⚠ Запрет не активен — запуск без обхода', '');
-  }
+  if (bypass) await ensureBypassAuto(true);
   try {
     var res = await apiBridge.launchBrowser({ url: url, profile: profile, browser: browser });
     if (res && res.ok) showToast('▶ ' + browser + ': ' + profile, 'ok');
     else showToast('Ошибка: ' + (res ? res.msg : '?'), 'err');
   } catch(e) {
     showToast('Ошибка моста API: ' + e.message, 'err');
+  }
+}
+
+// ── АВТО-ОБХОД БЕЗ VPN ──
+// Zapret поднимается автоматически при выборе страны и при запуске
+// биндов/сайтов с меткой «С обходом». Отключается тумблером во вкладке «Бинды»
+// (APP_SETTINGS.autoBypass = false).
+var BYPASS_AUTOSTARTING = false;
+
+async function ensureBypassAuto(reason) {
+  if (zapretActive) return true;
+  if (APP_SETTINGS.autoBypass === false) {
+    if (reason) showToast('⚠ Zapret не активен — запуск без обхода', '');
+    return false;
+  }
+  if (BYPASS_AUTOSTARTING) return false;
+  BYPASS_AUTOSTARTING = true;
+  try {
+    if (reason) showToast('⚡ Включаю обход без VPN автоматически…', '');
+    var res = await apiBridge.zapretStart();
+    // «Уже запущен» — значит обход активен (например, стартовал из трея)
+    if (res && (res.ok || /уже запущен/i.test(res.msg || ''))) {
+      zapretActive = true;
+      syncZapretUI();
+      if (reason) showToast('⚡ Обход без VPN включён автоматически', 'ok');
+      return true;
+    }
+    if (reason) showToast('Не удалось включить обход: ' + ((res && res.msg) || '?'), 'err');
+  } catch (e) {
+    if (reason) showToast('Ошибка авто-обхода: ' + e.message, 'err');
+  } finally {
+    BYPASS_AUTOSTARTING = false;
+  }
+  return false;
+}
+
+/** Авто-настройка биндов: все бинды профиля переводим в режим «С обходом». */
+async function enableBindsBypassForProfile(prof) {
+  if (!prof || !SAVED_BINDS.length) return;
+  var changed = false;
+  SAVED_BINDS.forEach(function (b) {
+    if (b.profile === prof && b.bypass !== true) { b.bypass = true; changed = true; }
+  });
+  if (changed) {
+    await saveBindsToFile();
+    renderBinds();
   }
 }
 
@@ -351,6 +399,16 @@ apiBridge.onTrayAction(function(a) {
   if (a === 'stop')   zapretStop();
   if (a === 'config') apiBridge.openFolder('Zapret');
 });
+
+// Состояние окна (развёрнуто/обычное): в развёрнутом виде скругления и отступы
+// снимаются через body.is-max (см. CSS в index.html).
+if (typeof apiBridge.onWinMaximized === 'function') {
+  apiBridge.onWinMaximized(function(isMax) {
+    try {
+      if (document.body && document.body.classList) document.body.classList.toggle('is-max', !!isMax);
+    } catch (_) {}
+  });
+}
 
 function syncZapretUI() {
   var dot    = document.getElementById('zapret-dot');
@@ -549,6 +607,12 @@ async function saveProfileCountryModal() {
       closeModal();
       showToast(code ? '🌍 ' + prof + ' → ' + code : '🌍 ' + prof + ' → авто', 'ok');
       renderProfiles();
+      // Авто-настройка обхода без VPN: страна выбрана → сами включаем Zapret
+      // и переводим бинды этого профиля в режим «С обходом».
+      if (code) {
+        await enableBindsBypassForProfile(prof);
+        await ensureBypassAuto(true);
+      }
     } else {
       showToast('Ошибка сохранения: ' + ((r && r.msg) || '?'), 'err');
     }
@@ -646,6 +710,8 @@ async function submitCreateProfile() {
       closeModal();
       showToast('✅ Профиль "' + safe + '" создан (' + _selectedBrowser + (country ? ', ' + country : '') + ')', 'ok');
       renderProfiles();
+      // Страна выбрана сразу при создании → обход без VPN включаем автоматически
+      if (country) await ensureBypassAuto(true);
     } else {
       showToast('Ошибка: ' + (res ? res.msg : '?'), 'err');
     }
@@ -751,6 +817,23 @@ function deleteBind(id) {
   showToast('Бинд удалён', 'err');
 }
 
+/** Тумблер «Авто-обход без VPN» на вкладке биндов. */
+function saveAutoBypass() {
+  var el = document.getElementById('auto-bypass');
+  APP_SETTINGS.autoBypass = !!(el && el.checked);
+  saveSettings();
+  showToast(APP_SETTINGS.autoBypass
+    ? '⚡ Авто-обход включён: Zapret стартует сам при выборе страны и запуске биндов'
+    : 'Авто-обход выключен — запускай Zapret вручную', APP_SETTINGS.autoBypass ? 'ok' : '');
+}
+
+/** Инициализация вкладки «Бинды»: список + состояние тумблера авто-обхода. */
+function initBindsTab() {
+  var el = document.getElementById('auto-bypass');
+  if (el) el.checked = APP_SETTINGS.autoBypass !== false;
+  renderBinds();
+}
+
 function renderBinds() {
   var grid = document.getElementById('binds-grid');
   if (!grid) return;
@@ -810,6 +893,38 @@ var AF_THEME_NAMES = {
   'th-night': 'Ночь',
 };
 
+// Акценты каждой темы — чтобы при смене темы подставлять их в color-input'ы
+// и чтобы кастомные цвета можно было менять поверх любой темы.
+var THEME_ACCENTS = {
+  '':         ['#4f46e5', '#8b5cf6'],
+  'th-mint':  ['#059669', '#14b8a6'],
+  'th-sky':   ['#0284c7', '#38bdf8'],
+  'th-amber': ['#d97706', '#f59e0b'],
+  'th-rose':  ['#e11d48', '#f472b6'],
+  'th-night': ['#8195f8', '#b39dfb'],
+};
+
+/** Пишет CSS-переменную на :root И инлайном на <body>.
+    Темы объявлены как body.th-*{--ac:…} — без инлайна на body пользовательский
+    цвет проигрывал теме, и после выбора темы цвета «не менялись». */
+function setCssVar(name, value) {
+  try {
+    var de = document.documentElement;
+    if (de && de.style && typeof de.style.setProperty === 'function') de.style.setProperty(name, value);
+    var b = document.body;
+    if (b && b.style && typeof b.style.setProperty === 'function') b.style.setProperty(name, value);
+  } catch (_) {}
+}
+
+function removeCssVar(name) {
+  try {
+    var de = document.documentElement;
+    if (de && de.style && typeof de.style.removeProperty === 'function') de.style.removeProperty(name);
+    var b = document.body;
+    if (b && b.style && typeof b.style.removeProperty === 'function') b.style.removeProperty(name);
+  } catch (_) {}
+}
+
 function previewColors() {
   var ac  = document.getElementById('color-accent')?.value  || '#4f46e5';
   var ac2 = document.getElementById('color-accent2')?.value || '#8b5cf6';
@@ -822,15 +937,19 @@ async function saveColors() {
   applyColors(ac, ac2);
   APP_SETTINGS.colors = { ac: ac, ac2: ac2 };
   await saveSettings();
-  showToast('✅ Цвета сохранены!', 'ok');
+  showToast('✅ Цвета сохранены! Работают поверх любой темы.', 'ok');
 }
 
 async function resetColors() {
-  var s = document.documentElement.style;
-  ['--ac','--acr','--ac2','--ac2r'].forEach(function(p){ s.removeProperty(p); });
+  ['--ac','--acr','--ac2','--ac2r'].forEach(removeCssVar);
   AF_THEMES.forEach(function(t){ document.body.classList.remove(t); });
   APP_SETTINGS.theme  = '';
   APP_SETTINGS.colors = null;
+  var acc = THEME_ACCENTS[''];
+  var acEl  = document.getElementById('color-accent');
+  var ac2El = document.getElementById('color-accent2');
+  if (acEl)  acEl.value  = acc[0];
+  if (ac2El) ac2El.value = acc[1];
   await saveSettings();
   showToast('↺ Сброс выполнен');
   var btn = document.querySelector('[data-tab="settings"]');
@@ -845,11 +964,12 @@ function hexToRgb(hex) {
 }
 
 function applyColors(ac, ac2) {
-  var s = document.documentElement.style;
-  s.setProperty('--ac',   ac);
-  s.setProperty('--acr',  hexToRgb(ac));
-  s.setProperty('--ac2',  ac2);
-  s.setProperty('--ac2r', hexToRgb(ac2));
+  if (typeof ac !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(ac)) ac = '#4f46e5';
+  if (typeof ac2 !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(ac2)) ac2 = '#8b5cf6';
+  setCssVar('--ac',   ac);
+  setCssVar('--acr',  hexToRgb(ac));
+  setCssVar('--ac2',  ac2);
+  setCssVar('--ac2r', hexToRgb(ac2));
 }
 
 // ── THEMES ──
@@ -858,6 +978,16 @@ function setTheme(cls) {
   AF_THEMES.forEach(function(t){ document.body.classList.remove(t); });
   if (cls) document.body.classList.add(cls);
   APP_SETTINGS.theme = cls;
+  // Смена темы убирает кастомные цвета, чтобы акценты темы было видно.
+  // Сразу после этого цвета снова можно менять — инлайновые переменные
+  // на <body> перебивают тему (см. setCssVar).
+  ['--ac','--acr','--ac2','--ac2r'].forEach(removeCssVar);
+  APP_SETTINGS.colors = null;
+  var acc = THEME_ACCENTS[cls] || THEME_ACCENTS[''];
+  var acEl  = document.getElementById('color-accent');
+  var ac2El = document.getElementById('color-accent2');
+  if (acEl)  acEl.value  = acc[0];
+  if (ac2El) ac2El.value = acc[1];
   saveSettings();
   // Подсветка карточки
   document.querySelectorAll('.theme-card').forEach(function(el) {
@@ -869,16 +999,53 @@ function setTheme(cls) {
 
 
 function applyScale(val) {
-  // zoom не работает в Electron — используем transform на #app
-  var app = document.getElementById('app');
-  if (app) {
-    var s = parseFloat(val);
-    app.style.transform = s === 1 ? '' : 'scale(' + s + ')';
-    app.style.transformOrigin = 'top left';
-    app.style.width  = s === 1 ? '' : Math.round(100/s) + 'vw';
-    app.style.height = s === 1 ? '' : Math.round(100/s) + 'vh';
+  // mirrorInput может вызвать без аргумента — берём значение из ползунка.
+  var el = document.getElementById('ui-scale');
+  if (val === undefined || val === null || val === '') {
+    val = (el && el.value !== '' && el.value !== undefined) ? el.value : (APP_SETTINGS.uiScale || '1');
   }
-  APP_SETTINGS.uiScale = val;
+  var s = parseFloat(val);
+  if (!Number.isFinite(s)) s = 1;                       // раньше тут был NaN → scale(NaN)
+  s = Math.min(2, Math.max(0.5, Math.round(s * 10) / 10));
+  // Настоящий Chromium-zoom через preload (webFrame.setZoomFactor):
+  // масштабирует весь интерфейс и не конфликтует с CSS-анимацией #app.
+  if (apiBridge && typeof apiBridge.setZoom === 'function') apiBridge.setZoom(s);
+  var disp = document.getElementById('scale-display');
+  if (disp) disp.textContent = s.toFixed(1);
+  APP_SETTINGS.uiScale = String(s);
+  saveSettings();
+}
+
+// ── ОКНО: скругление + прозрачность ──
+// Переменные пишем только на :root — у body.is-max своё объявление
+// (--win-radius:0), которое перебивает унаследованное значение.
+function applyWindowStyle() {
+  var op = parseFloat(APP_SETTINGS.winOpacity);
+  if (!Number.isFinite(op) || op < 0.3 || op > 1) op = 1;
+  var rad = parseFloat(APP_SETTINGS.winRadius);
+  if (!Number.isFinite(rad) || rad < 0 || rad > 28) rad = 20;
+  try {
+    var de = document.documentElement;
+    if (de && de.style && typeof de.style.setProperty === 'function') {
+      de.style.setProperty('--win-alpha', String(Math.round(op * 100) / 100));
+      de.style.setProperty('--win-radius', Math.round(rad) + 'px');
+    }
+  } catch (_) {}
+}
+
+/** Ползунки «Окно»: читаем оба, применяем и сохраняем. */
+function saveWindowStyle() {
+  var radEl = document.getElementById('win-radius');
+  var opEl  = document.getElementById('win-opacity');
+  if (radEl && radEl.value !== '' && radEl.value !== undefined) {
+    var r = parseFloat(radEl.value);
+    if (Number.isFinite(r)) APP_SETTINGS.winRadius = String(Math.min(28, Math.max(0, Math.round(r))));
+  }
+  if (opEl && opEl.value !== '' && opEl.value !== undefined) {
+    var o = parseFloat(opEl.value) / 100;               // ползунок в процентах
+    if (Number.isFinite(o)) APP_SETTINGS.winOpacity = String(Math.min(1, Math.max(0.3, Math.round(o * 100) / 100)));
+  }
+  applyWindowStyle();
   saveSettings();
 }
 
@@ -890,26 +1057,38 @@ function saveFx() {
 
 function initSettingsTab() {
   var s = APP_SETTINGS;
-  // Цвета
-  if (s.colors) {
-    var acEl  = document.getElementById('color-accent');
-    var ac2El = document.getElementById('color-accent2');
-    if (acEl)  acEl.value  = s.colors.ac  || '#4f46e5';
-    if (ac2El) ac2El.value = s.colors.ac2 || '#8b5cf6';
-  }
-  // Масштаб интерфейса
-  if (s.uiScale) {
-    var scEl = document.getElementById('ui-scale');
-    var scD  = document.getElementById('scale-display');
-    if (scEl) scEl.value = s.uiScale;
-    if (scD)  scD.textContent = parseFloat(s.uiScale).toFixed(1);
-  }
   // Активная тема
   var cur = (s.theme && AF_THEMES.indexOf(s.theme) !== -1) ? s.theme : '';
   document.querySelectorAll('.theme-card').forEach(function(el) {
     el.classList.remove('is-active');
     if (el.id === 'tc-' + cur) el.classList.add('is-active');
   });
+  // Цвета: сохранённые кастомные или акценты текущей темы
+  var acc = THEME_ACCENTS[cur] || THEME_ACCENTS[''];
+  var acEl  = document.getElementById('color-accent');
+  var ac2El = document.getElementById('color-accent2');
+  if (acEl)  acEl.value  = (s.colors && s.colors.ac)  || acc[0];
+  if (ac2El) ac2El.value = (s.colors && s.colors.ac2) || acc[1];
+  // Масштаб интерфейса
+  var scEl = document.getElementById('ui-scale');
+  var scD  = document.getElementById('scale-display');
+  var sc   = parseFloat(s.uiScale);
+  if (!Number.isFinite(sc)) sc = 1;
+  if (scEl) scEl.value = String(sc);
+  if (scD)  scD.textContent = sc.toFixed(1);
+  // Окно: скругление и прозрачность
+  var rad = parseFloat(s.winRadius);
+  if (!Number.isFinite(rad) || rad < 0 || rad > 28) rad = 20;
+  var op = parseFloat(s.winOpacity);
+  if (!Number.isFinite(op) || op < 0.3 || op > 1) op = 1;
+  var radEl = document.getElementById('win-radius');
+  var opEl  = document.getElementById('win-opacity');
+  var radD  = document.getElementById('radius-display');
+  var opD   = document.getElementById('opacity-display');
+  if (radEl) radEl.value = String(Math.round(rad));
+  if (opEl)  opEl.value  = String(Math.round(op * 100));
+  if (radD)  radD.textContent = String(Math.round(rad));
+  if (opD)   opD.textContent  = String(Math.round(op * 100));
 }
 
 async function saveSettings() {
@@ -919,7 +1098,7 @@ async function saveSettings() {
 async function loadSettings() {
   try {
     var s = await apiBridge.readSettings();
-    if (s) APP_SETTINGS = s;
+    if (s && typeof s === 'object') APP_SETTINGS = s;
     // Тема: применяем только из нового набора (старые киберпанк-темы сбрасываются)
     if (APP_SETTINGS.theme) {
       AF_THEMES.forEach(function(t){ document.body.classList.remove(t); });
@@ -930,6 +1109,8 @@ async function loadSettings() {
     if (APP_SETTINGS.colors) applyColors(APP_SETTINGS.colors.ac, APP_SETTINGS.colors.ac2);
     if (APP_SETTINGS.uiScale) applyScale(APP_SETTINGS.uiScale);
   } catch(e) {}
+  // Скругление/прозрачность окна применяем всегда (есть настройки или дефолты)
+  applyWindowStyle();
 }
 
 // ── CONFIG ──
@@ -1579,7 +1760,14 @@ async function saveFpCountry() {
     country: code,
   });
   if (r && r.ok) {
+    PROFILE_META_CACHE[prof] = Object.assign({}, PROFILE_META_CACHE[prof] || {}, { country: code });
     showToast(code ? '🌍 «' + prof + '» → страна ' + code : '🌍 «' + prof + '» → авто-страна', 'ok');
+    // Авто-настройка обхода без VPN: выбрали страну → Zapret включается сам,
+    // бинды профиля переводятся в режим «С обходом».
+    if (code) {
+      await enableBindsBypassForProfile(prof);
+      await ensureBypassAuto(true);
+    }
   } else {
     showToast('Не удалось сохранить страну: ' + ((r && r.msg) || '?'), 'err');
   }
@@ -1847,7 +2035,15 @@ async function consoleExec(raw) {
         cprint(rc && rc.ok ? '✓ «' + cprof + '» → страна ' + code + ' (гео/зона/язык — при следующем запуске)'
                            : '✗ ' + ((rc && rc.msg) || 'ошибка'),
                'color:' + (rc && rc.ok ? 'var(--grn)' : 'var(--red)'));
-        if (rc && rc.ok) cprint('  напоминание: IP меняется только прокси профиля той же страны', 'color:var(--ylw)');
+        if (rc && rc.ok) {
+          // Авто-настройка: страна выбрана → обход без VPN включается сам,
+          // бинды профиля переводятся в режим «С обходом».
+          PROFILE_META_CACHE[cprof] = Object.assign({}, PROFILE_META_CACHE[cprof] || {}, { country: code });
+          await enableBindsBypassForProfile(cprof);
+          var cBypass = await ensureBypassAuto(false);
+          cprint(cBypass ? '  ⚡ Обход без VPN (Zapret) включён автоматически'
+                         : '  напоминание: IP меняется только прокси профиля той же страны', 'color:var(--ylw)');
+        }
       } else {
         var cmeta2 = await apiBridge.readProfileMeta(cprof) || {};
         var rc2 = await apiBridge.writeProfileMeta(cprof, {
@@ -2520,8 +2716,10 @@ function mirrorInput(labelId, saverName, asFloat) {
   var label = document.getElementById(labelId);
   var val = this.value;
   if (label) label.textContent = asFloat ? parseFloat(val).toFixed(1) : val;
-  var savers = { saveFx: saveFx, saveCbn: saveCbn, saveScale: applyScale };
-  if (typeof savers[saverName] === 'function') savers[saverName]();
+  // saver получает значение: раньше вызов был без аргумента, и applyScale
+  // строил scale(NaN) — масштабирование «не работало».
+  var savers = { saveFx: saveFx, saveCbn: saveCbn, saveScale: applyScale, saveWin: saveWindowStyle };
+  if (typeof savers[saverName] === 'function') savers[saverName](val);
 }
 
 function goTabAction(name) {
@@ -2562,6 +2760,7 @@ AF_ACTIONS = {
   saveProfileCountryModal: saveProfileCountryModal,
   addBind: addBind,
   renderBinds: renderBinds,
+  saveAutoBypass: saveAutoBypass,
 
   // конфигурация
   setUA: setUA,
@@ -2585,6 +2784,7 @@ AF_ACTIONS = {
   saveColors: saveColors,
   resetColors: resetColors,
   saveFx: saveFx,
+  saveWindowStyle: saveWindowStyle,
 
   // adblock
   addPreset: addPreset,

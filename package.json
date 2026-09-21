@@ -13,7 +13,9 @@
     "test:wiring": "node tests/wiring.test.js",
     "test:actions": "node tests/renderer-actions.test.js",
     "test:pageinit": "node tests/pageinit.test.js",
-    "test:engine": "python3 tests/engine_test.py"
+    "test:ui": "node tests/ui-integration.test.js",
+    "test:engine": "python3 tests/engine_test.py",
+    "preview": "node preview/server.js"
   },
   "build": {
     "appId": "com.artofix.app",

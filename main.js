@@ -213,11 +213,14 @@ function rateLimited(key, ms) {
 }
 
 function createWindow() {
+  // Прозрачное бессистемное окно: скруглённую форму и «стекло» рисует CSS
+  // (см. --win-radius / --win-alpha в index.html), а не системная рамка.
   win = new BrowserWindow(Object.assign({
     width: 1100, height: 680,
     minWidth: 900, minHeight: 580,
     frame: false,
-    backgroundColor: '#edf0f7',
+    transparent: true,
+    hasShadow: false,
     show: false,
     resizable: true,
   }, { webPreferences: HARDENED_WEB_PREFS }));
@@ -226,7 +229,11 @@ function createWindow() {
   win.once('ready-to-show', () => {
     win.show();
     sendBootstrap();
+    send('win-maximized', win.isMaximized());
   });
+  // Состояние «развёрнуто» уходит в рендерер: там снимаются скругления и отступы
+  win.on('maximize', () => send('win-maximized', true));
+  win.on('unmaximize', () => send('win-maximized', false));
   if (DEV_MODE) win.webContents.openDevTools({ mode: 'detach' });
   win.on('close', (e) => { if (!isQuiting) { e.preventDefault(); win.hide(); } });
   win.on('closed', () => { win = null; });
@@ -236,7 +243,8 @@ function createSetupWindow() {
   setupWin = new BrowserWindow(Object.assign({
     width: 600, height: 640,
     resizable: false, frame: false,
-    backgroundColor: '#edf0f7',
+    transparent: true,
+    hasShadow: false,
     show: false, center: true,
   }, { webPreferences: HARDENED_WEB_PREFS }));
   setupWin.loadFile(path.join(__dirname, 'setup.html'));
@@ -317,7 +325,9 @@ app.on('web-contents-created', (_e, contents) => {
 function readBinds() {
   const raw = sec.readJsonSafe(dataPath('artofix_binds.json'));
   if (!Array.isArray(raw)) return [];
-  return raw.filter((b) => b && typeof b === 'object' && sec.sanitizeExternalUrl(b.url)).slice(0, 200);
+  return raw
+    .filter((b) => b && typeof b === 'object' && (sec.sanitizeExternalUrl(b.url) || sec.sanitizeAppPath(b.url)))
+    .slice(0, 200);
 }
 
 function buildTrayMenu() {
@@ -364,13 +374,22 @@ function createTray() {
 }
 
 function launchBindFromTray(bind) {
-  const url = sec.sanitizeBrowseUrl(bind.url);
   const browser = sec.sanitizeBrowser(bind.browser) || 'chrome';
-  if (!url) return;
+  // App-бинды (steam://, tg://, discord://, .exe/.lnk) — раньше отбивались
+  // проверкой sanitizeBrowseUrl до этой ветки и никогда не запускались.
   if (browser === 'app') {
     const ext = sec.sanitizeExternalUrl(bind.url);
-    if (ext) shell.openExternal(ext);
+    if (ext) { shell.openExternal(ext).catch(() => {}); return; }
+    const appPath = sec.sanitizeAppPath(bind.url);
+    if (appPath && fs.existsSync(appPath)) shell.openPath(appPath).catch(() => {});
     return;
+  }
+  const url = sec.sanitizeBrowseUrl(bind.url);
+  if (!url) return;
+  // Авто-обход: бинд с меткой «С обходом» сам поднимает Zapret — без ручной настройки
+  if (bind.bypass === true && !zapretProcess && IS_WIN) {
+    const r = zapretStart();
+    if (r && r.ok) send('zapret-status', { on: true, msg: '⚡ Обход включён автоматически (бинд)' });
   }
   launchBrowser({ url, profile: bind.profile || 'default', browser }).catch((e) => console.error('[tray] ' + e.message));
 }
@@ -504,6 +523,13 @@ function sanitizeSettings(input) {
   if (Number.isFinite(glow) && glow >= 0 && glow <= 200) out.glowIntensity = String(Math.floor(glow));
   const scale = Number(input.uiScale);
   if (Number.isFinite(scale) && scale >= 0.5 && scale <= 2) out.uiScale = String(scale);
+  // Окно: прозрачность (0.3–1), радиус скругления (0–28 px)
+  const wop = Number(input.winOpacity);
+  if (Number.isFinite(wop) && wop >= 0.3 && wop <= 1) out.winOpacity = String(Math.round(wop * 100) / 100);
+  const wrad = Number(input.winRadius);
+  if (Number.isFinite(wrad) && wrad >= 0 && wrad <= 28) out.winRadius = String(Math.floor(wrad));
+  // Авто-обход без VPN: включать Zapret сам при выборе страны / запуске биндов
+  if (typeof input.autoBypass === 'boolean') out.autoBypass = input.autoBypass;
   if (input.fingerprint && typeof input.fingerprint === 'object') {
     const f = {};
     for (const key of ['webgl', 'platform', 'canvas', 'resolution', 'ua', 'audio', 'fonts', 'media', 'hw']) {
@@ -530,12 +556,13 @@ function sanitizeBinds(list) {
     return {
       id: Number.isFinite(Number(item.id)) ? Number(item.id) : Date.now() + Math.floor(Math.random() * 1000),
       label: sec.sanitizeLabel(item.label || item.url || '', 64),
-      url: sec.sanitizeExternalUrl(item.url) || '',
+      // app-бинды: либо разрешённая схема (steam/tg/discord/https), либо путь к .exe/.lnk/.url
+      url: sec.sanitizeExternalUrl(item.url) || sec.sanitizeAppPath(item.url) || '',
       profile: sec.sanitizeProfileName(item.profile) || '',
       browser: sec.sanitizeBrowser(item.browser) || 'chrome',
       bypass: item.bypass === true,
     };
-  }).filter((b) => b.url || b.browser === 'app');
+  }).filter((b) => !!b.url);   // мёртвые бинды без валидной ссылки не храним
 }
 
 // ═══════════════════════════════════════════
@@ -683,17 +710,32 @@ const MAX_BROWSER_CHILDREN = 12;
 
 async function launchBrowser({ url, profile, browser }) {
   const safeBrowser = sec.sanitizeBrowser(browser);
-  const safeUrl = sec.sanitizeBrowseUrl(url);
-  if (!safeBrowser || !safeUrl) return { ok: false, msg: 'Недопустимый URL или тип браузера' };
-  if (rateLimited('launch:' + safeBrowser, 1200)) return { ok: false, msg: 'Слишком часто — подожди секунду' };
+  if (!safeBrowser) return { ok: false, msg: 'Недопустимый тип браузера' };
 
-  // Запуск внешних приложений (steam://, tg://, discord://) — только по белому списку схем
+  // Запуск внешних приложений (steam://, tg://, discord://) и локальных ярлыков.
+  // ВАЖНО: проверяем ДО sanitizeBrowseUrl — тот знает только http(s), и раньше
+  // app-бинды отбивались как «Недопустимый URL», не доходя до этой ветки.
   if (safeBrowser === 'app') {
+    if (rateLimited('launch:app', 1200)) return { ok: false, msg: 'Слишком часто — подожди секунду' };
     const ext = sec.sanitizeExternalUrl(url);
-    if (!ext) return { ok: false, msg: 'Схема ссылки не разрешена (только http/https/steam/tg/discord)' };
-    try { await shell.openExternal(ext); return { ok: true }; }
-    catch (e) { return { ok: false, msg: e.message }; }
+    if (ext) {
+      try { await shell.openExternal(ext); return { ok: true }; }
+      catch (e) { return { ok: false, msg: e.message }; }
+    }
+    const appPath = sec.sanitizeAppPath(url);
+    if (appPath) {
+      if (!fs.existsSync(appPath)) return { ok: false, msg: 'Файл не найден: ' + appPath };
+      try {
+        const err = await shell.openPath(appPath);
+        return err ? { ok: false, msg: String(err) } : { ok: true };
+      } catch (e) { return { ok: false, msg: e.message }; }
+    }
+    return { ok: false, msg: 'Ссылка не разрешена: http/https/steam/tg/discord или абсолютный путь к .exe/.lnk/.url' };
   }
+
+  const safeUrl = sec.sanitizeBrowseUrl(url);
+  if (!safeUrl) return { ok: false, msg: 'Недопустимый URL или тип браузера' };
+  if (rateLimited('launch:' + safeBrowser, 1200)) return { ok: false, msg: 'Слишком часто — подожди секунду' };
 
   const dir = profileDir(profile);
   if (!dir) return { ok: false, msg: 'Недопустимое имя профиля' };
