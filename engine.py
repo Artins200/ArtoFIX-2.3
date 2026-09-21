@@ -30,6 +30,32 @@ import time
 
 
 # ─────────────────────────────────────────────
+#  КОНСОЛЬ БЕЗ UnicodeEncodeError
+#  Windows часто отдаёт stdout/stderr в кодовой
+#  странице cp1251/cp866, и символы вроде «→» или
+#  «✓» роняли процесс с UnicodeEncodeError.
+#  Принудительно UTF-8 + замена неприводимых символов.
+# ─────────────────────────────────────────────
+def _safe_console():
+    for name in ("stdout", "stderr"):
+        stream = getattr(sys, name, None)
+        if stream is None:
+            continue
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            try:
+                import io as _io
+                setattr(sys, name, _io.TextIOWrapper(
+                    stream.buffer, encoding="utf-8", errors="replace", line_buffering=True))
+            except Exception:
+                pass
+
+
+_safe_console()
+
+
+# ─────────────────────────────────────────────
 #  ЗАВИСИМОСТИ (ленивая установка, как раньше)
 # ─────────────────────────────────────────────
 def _pip(pkg):
@@ -959,9 +985,9 @@ class BrowserManager:
         ident = self.build_identity(cfg, name, b_type)
         print(f"[engine] profile={name} browser={b_type} tz={ident['timezone']} langs={','.join(ident['languages'])}")
         if ident.get("webgl"):
-            print(f"[engine] GPU → {ident['webgl'].get('renderer')}")
+            print(f"[engine] GPU -> {ident['webgl'].get('renderer')}")
         if ident.get("proxy"):
-            print(f"[engine] proxy → {ident['proxy'].get('server')}")
+            print(f"[engine] proxy -> {ident['proxy'].get('server')}")
 
         driver = None
         browser = (b_type or "chrome").lower()
