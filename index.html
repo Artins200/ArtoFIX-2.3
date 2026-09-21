@@ -814,6 +814,7 @@ body.th-night .sys-banner {
       <button class="nav-btn"           data-tab="settings" data-af-on="click" data-af-action="goTab" data-af-args='["settings"]'><span class="nav-icon">🎨</span>Внешний вид</button>
       <button class="nav-btn"           data-tab="config"   data-af-on="click" data-af-action="goTab" data-af-args='["config"]'><span class="nav-icon">⚙️</span>Конфигурация</button>
       <button class="nav-btn"           data-tab="cheburnet" data-af-on="click" data-af-action="goTab" data-af-args='["cheburnet"]'><span class="nav-icon">🌐</span>Чебурнет</button>
+      <button class="nav-btn"           data-tab="console"   data-af-on="click" data-af-action="goTab" data-af-args='["console"]'><span class="nav-icon">⌨️</span>Классика</button>
       <button class="nav-btn"           data-tab="logs"      data-af-on="click" data-af-action="goTab" data-af-args='["logs"]'><span class="nav-icon" id="logs-nav-icon">📋</span>Логи</button>
       <button class="nav-btn"           data-tab="diag"      data-af-on="click" data-af-action="goTab" data-af-args='["diag"]'><span class="nav-icon">🔧</span>Компоненты</button>
       <button class="nav-btn"           data-tab="zapret-update" data-af-on="click" data-af-action="goTab" data-af-args='["zapret-update"]'><span class="nav-icon">🔄</span>Обновление Zapret</button>
@@ -1292,7 +1293,16 @@ body.th-night .sys-banner {
           </div>
           <div style="margin-top:12px">
             <label class="field-label">Профиль для превью / смены личности</label>
-            <select class="af-input" id="fp-profile" style="margin-bottom:9px"></select>
+            <select class="af-input" id="fp-profile" style="margin-bottom:9px" data-af-on="change" data-af-action="loadFpCountry"></select>
+            <label class="field-label">🌍 Страна антидетекта (без VPN)</label>
+            <select class="af-input" id="fp-country" style="margin-bottom:6px" data-af-on="change" data-af-action="saveFpCountry">
+              <option value="">— авто (случайная связка) —</option>
+            </select>
+            <div id="fp-country-hint" style="font-size:9.5px;color:var(--tx2);line-height:1.5;margin-bottom:9px">
+              Без VPN-процесса: меняются зона, язык, валюта и координаты профиля (CDP).
+              Выходной IP браузеру не поменять — при выбранной стране поставь этому
+              профилю прокси той же страны (Аккаунты → профиль).
+            </div>
             <div class="grid-2">
               <button class="btn btn-glow" data-af-on="click" data-af-action="previewFingerprint">Предпросмотр</button>
               <button class="btn btn-secondary" data-af-on="click" data-af-action="rerollFingerprint">Новый отпечаток</button>
@@ -1333,6 +1343,28 @@ body.th-night .sys-banner {
     <div id="logs-wrap" class="log-view">
       <div style="color:var(--tx3)">Нет записей. Запусти браузер — здесь появятся логи.</div>
     </div>
+  </div>
+</div>
+</template>
+
+<!-- КЛАССИКА (консоль) -->
+<template id="tpl-console">
+<div class="tab-page">
+  <div class="page-title"><span class="page-title-accent">⌨️</span> Классика — консоль <div class="page-title-line"></div></div>
+  <div style="font-size:10.5px;color:var(--tx2);margin-bottom:10px;line-height:1.6">
+    Терминальный режим интерфейса. Это не системный shell (свободное выполнение команд
+    запрещено моделью безопасности — никаких <code>cmd</code>/<code>powershell</code> из приложения),
+    а командная обёртка над проверенными действиями Artofix. История строк — стрелки ↑/↓.
+  </div>
+  <div class="af-card" style="padding:0;overflow:hidden;margin-bottom:10px">
+    <div id="console-out" class="log-view" style="height:46vh;min-height:260px"></div>
+  </div>
+  <div style="display:flex;gap:8px;align-items:center">
+    <span style="color:var(--ac);font-family:var(--mono);font-size:13px;font-weight:700">›</span>
+    <input id="console-in" class="af-input" style="font-family:var(--mono);font-size:12px"
+      placeholder="help — список команд · open yt · country yt DE · preview yt" autocomplete="off" spellcheck="false">
+    <button class="btn btn-secondary" style="padding:8px 14px;font-size:11px" data-af-on="click" data-af-action="consoleRun">Выполнить</button>
+    <button class="btn btn-secondary" style="padding:8px 14px;font-size:11px" data-af-on="click" data-af-action="consoleClear">Очистить</button>
   </div>
 </div>
 </template>

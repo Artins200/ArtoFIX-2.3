@@ -746,6 +746,14 @@ class BrowserManager:
             "webrtc": ident.get("webrtc") or {"mode": "default"},
             "proxy": ident.get("proxy"),
             "vectors": ident.get("vectors") or {},
+            # Страна/гео: точка приходит только при явном выборе страны в UI
+            # (identity.geolocation). В авто-режиме её нет — не выдумываем гео,
+            # не совпадающее с реальным IP (см. docs/ANTI-DETECT.md §8).
+            "country_code": ident.get("country_code"),
+            "country_name": ident.get("country_name"),
+            "country_city": ident.get("country_city"),
+            "geo_source": ident.get("geo_source", "none"),
+            "geolocation": ident.get("geolocation"),
         }
 
         # Прокси-пароль приходит только через окружение — не из файла
@@ -940,14 +948,19 @@ class BrowserManager:
             except Exception:
                 pass
 
-        # 5) Гео (если у профиля заданы координаты)
+        # 5) Гео (только при явно выбранной стране; координаты стабильны у профиля)
         if ident.get("geolocation"):
             try:
                 g = ident["geolocation"]
+                lat = float(g["lat"]); lon = float(g["lon"])
+                if abs(lat) > 90 or abs(lon) > 180:
+                    raise ValueError("bad geo range")
+                acc = g.get("accuracy") or 100
                 driver.execute_cdp_cmd("Emulation.setGeolocationOverride",
-                                       {"latitude": g["lat"], "longitude": g["lon"], "accuracy": 100})
-            except Exception:
-                pass
+                                       {"latitude": lat, "longitude": lon,
+                                        "accuracy": max(10, min(int(acc), 1000))})
+            except Exception as e:
+                print(f"[engine] geolocation override warning: {e}")
 
     def _inject_init(self, driver, ident):
         script = build_page_init(ident)
@@ -984,6 +997,12 @@ class BrowserManager:
         cfg = self.load_config()
         ident = self.build_identity(cfg, name, b_type)
         print(f"[engine] profile={name} browser={b_type} tz={ident['timezone']} langs={','.join(ident['languages'])}")
+        if ident.get("geo_source") == "country" and ident.get("geolocation"):
+            g = ident["geolocation"]
+            print(f"[engine] country -> {ident.get('country_code')} ({ident.get('country_city') or ident.get('country_name')}) "
+                  f"geo={g['lat']},{g['lon']} ±{g.get('accuracy') or 100}m")
+            print("[engine] ВНИМАНИЕ: браузерные сигналы гео включены, но выходной IP не меняется — "
+                  "для полного антидетекта укажи прокси профиля той же страны")
         if ident.get("webgl"):
             print(f"[engine] GPU -> {ident['webgl'].get('renderer')}")
         if ident.get("proxy"):
