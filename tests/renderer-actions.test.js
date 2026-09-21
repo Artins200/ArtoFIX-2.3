@@ -82,7 +82,7 @@ function loadApp(file) {
   };
 
   const apiStub = {
-    ready: true, platform: 'win32', version: '2.3.1',
+    ready: true, platform: 'win32', version: '2.5.0',
     calls: {},                     // метод → массив аргументов (для проверки вызовов из консоли)
     _record(f, impl) {
       apiStub.calls[f] = [];
@@ -98,12 +98,13 @@ function loadApp(file) {
     'readLogs', 'clearLogs', 'closeBrowsers', 'killWinws', 'launchBrowser', 'openExternal',
     'openFolder', 'zapretService', 'zapretStart', 'zapretStop', 'zapretVersion', 'zapretCheckUpdate',
     'zapretDoUpdate', 'diagCheck', 'diagInstall', 'ublockCheck', 'ublockInstall', 'cbnPing',
-    'cbnSetDns', 'cbnResetDns', 'copyLogs', 'getIconUrl', 'refreshTray', 'listCountries'].forEach((f) => {
+    'cbnSetDns', 'cbnResetDns', 'cbnFixWarp', 'cbnTestWarp', 'copyLogs', 'getIconUrl', 'refreshTray', 'listCountries',
+    'setupConfirmInstall', 'skipSetup', 'setupOpenMain'].forEach((f) => {
       apiStub._record(f, () => Promise.resolve({ ok: true }));
     });
   ['onLogEntry', 'onZapretStatus', 'onZapretProgress', 'onDiagLog', 'onDiagProgress', 'onTrayAction',
     'onNavigate', 'onBootstrap', 'onSetupStep', 'onSetupLog', 'onSetupError', 'onSetupRestart',
-    'onSetupDone'].forEach((f) => { apiStub[f] = () => () => {}; });
+    'onSetupDone', 'onSetupHw', 'onSetupAskPerm'].forEach((f) => { apiStub[f] = () => () => {}; });
 
   const windowStub = {
     document: documentStub,
@@ -315,6 +316,36 @@ ctest('консоль: неизвестная команда не падает �
   const { ctx, out } = makeConsoleEnv();
   await ctx.consoleExec('definitely-not-a-command');
   assert.ok(lastLines(out, 2).includes('Неизвестная команда'));
+});
+
+ctest('консоль: warp fix и warp test дергают cbnFixWarp / cbnTestWarp', async () => {
+  const { ctx, apiStub } = makeConsoleEnv();
+  await ctx.consoleExec('warp fix');
+  assert.strictEqual(apiStub.calls.cbnFixWarp.length, 1);
+  await ctx.consoleExec('warp test');
+  assert.strictEqual(apiStub.calls.cbnTestWarp.length, 1);
+});
+
+ctest('AF_ACTIONS содержит новые действия cbnFixWarp, cbnTestWarp, open/saveProfileCountryModal', () => {
+  const { ctx } = loadApp('app.js');
+  assert.strictEqual(typeof ctx.AF_ACTIONS.cbnFixWarp, 'function');
+  assert.strictEqual(typeof ctx.AF_ACTIONS.cbnTestWarp, 'function');
+  assert.strictEqual(typeof ctx.AF_ACTIONS.openProfileCountryModal, 'function');
+  assert.strictEqual(typeof ctx.AF_ACTIONS.saveProfileCountryModal, 'function');
+});
+
+test('setup.js: SETUP_ACTIONS содержит confirmInstall, skip, skipSetup, launchApp', () => {
+  const { ctx } = loadApp('setup.js');
+  assert.strictEqual(typeof ctx.SETUP_ACTIONS.confirmInstall, 'function');
+  assert.strictEqual(typeof ctx.SETUP_ACTIONS.skip, 'function');
+  assert.strictEqual(typeof ctx.SETUP_ACTIONS.skipSetup, 'function');
+  assert.strictEqual(typeof ctx.SETUP_ACTIONS.launchApp, 'function');
+});
+
+test('setup.js: confirmInstall вызывает apiBridge.setupConfirmInstall', () => {
+  const { ctx, apiStub } = loadApp('setup.js');
+  ctx.SETUP_ACTIONS.confirmInstall();
+  assert.strictEqual(apiStub.calls.setupConfirmInstall.length, 1);
 });
 
 (async () => {

@@ -126,12 +126,12 @@ function apiStub() {
     'zapretVersion', 'zapretCheckUpdate', 'zapretDoUpdate', 'listProfiles', 'createProfile', 'deleteProfile',
     'readProfileMeta', 'writeProfileMeta', 'readConfig', 'writeConfig', 'readSettings', 'writeSettings',
     'readBinds', 'writeBinds', 'hostsRead', 'hostsWrite', 'hostsWriteAdmin', 'ublockCheck', 'ublockInstall',
-    'diagCheck', 'diagInstall', 'cbnPing', 'cbnSetDns', 'cbnResetDns', 'readLogs', 'clearLogs', 'copyLogs',
-    'previewProfile', 'rerollProfile', 'reportError', 'skipSetup', 'setupOpenMain'];
+    'diagCheck', 'diagInstall', 'cbnPing', 'cbnSetDns', 'cbnResetDns', 'cbnFixWarp', 'cbnTestWarp', 'readLogs', 'clearLogs', 'copyLogs',
+    'previewProfile', 'rerollProfile', 'reportError', 'skipSetup', 'setupOpenMain', 'setupConfirmInstall'];
   const subs = ['onLogEntry', 'onZapretStatus', 'onZapretProgress', 'onDiagLog', 'onDiagProgress',
     'onTrayAction', 'onNavigate', 'onBootstrap', 'onSetupStep', 'onSetupLog', 'onSetupError',
-    'onSetupRestart', 'onSetupDone'];
-  const api = { ready: true, platform: 'linux', version: '2.3.0' };
+    'onSetupRestart', 'onSetupDone', 'onSetupHw', 'onSetupAskPerm'];
+  const api = { ready: true, platform: 'linux', version: '2.5.0' };
   fns.forEach((f) => { api[f] = () => Promise.resolve({}); });
   subs.forEach((f) => { api[f] = () => () => {}; });
   return api;

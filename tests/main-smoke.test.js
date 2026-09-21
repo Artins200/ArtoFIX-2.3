@@ -32,7 +32,7 @@ function makeElectronStub() {
     on() {}, once() {}, quit() {}, exit() {}, relaunch() {},
     getPath: () => require('os').tmpdir(),
     setPath() {},
-    getVersion: () => '2.3.1',
+    getVersion: () => '2.5.0',
   };
   const webContentsStub = () => ({ on() {}, send() {}, setWindowOpenHandler() {}, closeDevTools() {} });
   class BrowserWindow {

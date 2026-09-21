@@ -127,6 +127,40 @@ test('тег релиза и имена файлов санитайзятся', 
   assert.strictEqual(sec.sanitizeFileName('.hidden'), null);
 });
 
+test('URL загрузки Python строго проверяется на официальный источник (защита 0-day)', () => {
+  assert.ok(sec.sanitizePythonDownloadUrl('https://www.python.org/ftp/python/3.13.2/python-3.13.2-amd64.exe'));
+  assert.ok(sec.sanitizePythonDownloadUrl('https://python.org/ftp/python/3.13.1/python-3.13.1.exe'));
+  assert.strictEqual(sec.sanitizePythonDownloadUrl('http://www.python.org/ftp/python/3.13.2/python-3.13.2-amd64.exe'), null, 'http запрещён');
+  assert.strictEqual(sec.sanitizePythonDownloadUrl('https://evil.org/ftp/python/3.13.2/python-3.13.2-amd64.exe'), null, 'левый домен');
+  assert.strictEqual(sec.sanitizePythonDownloadUrl('https://www.python.org.evil.com/ftp/python/3.13.2/python-3.13.2-amd64.exe'), null, 'подделка поддомена');
+  assert.strictEqual(sec.sanitizePythonDownloadUrl('https://www.python.org/malware.exe'), null, 'неверный путь');
+  assert.strictEqual(sec.sanitizePythonDownloadUrl('https://www.python.org/ftp/python/3.13.2/evil.bat'), null, 'не exe');
+});
+
+test('валидатор бинарника отбивает повреждённые, не-PE и недопустимые по размеру файлы', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'artofix-bin-test-'));
+  const smallPe = path.join(dir, 'small.exe');
+  fs.writeFileSync(smallPe, Buffer.from('MZ' + 'x'.repeat(100)));
+  const rSmall = sec.validateInstallerBinary(smallPe);
+  assert.strictEqual(rSmall.ok, false, 'слишком маленький файл');
+
+  const fakePe = path.join(dir, 'fake.exe');
+  const bigFake = Buffer.alloc(16 * 1024 * 1024);
+  bigFake.write('NOT_MZ', 0);
+  fs.writeFileSync(fakePe, bigFake);
+  const rFake = sec.validateInstallerBinary(fakePe);
+  assert.strictEqual(rFake.ok, false, 'нет сигнатуры MZ');
+
+  const validPe = path.join(dir, 'valid.exe');
+  const validBuf = Buffer.alloc(20 * 1024 * 1024);
+  validBuf[0] = 0x4D; validBuf[1] = 0x5A; // MZ
+  fs.writeFileSync(validPe, validBuf);
+  const rValid = sec.validateInstallerBinary(validPe);
+  assert.strictEqual(rValid.ok, true, 'валидный PE');
+
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) {}
+});
+
 // ─────────────────────────────────────────────
 //  ОТПЕЧАТОК
 // ─────────────────────────────────────────────

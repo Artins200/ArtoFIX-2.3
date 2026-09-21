@@ -1,6 +1,6 @@
 'use strict';
 /* =============================================================
-   ARTOFIX 2.3 — PRELOAD (единственный мост renderer ↔ main)
+   ARTOFIX 2.5 — PRELOAD (единственный мост renderer ↔ main)
    -------------------------------------------------------------
    Renderer работает в песочнице: nodeIntegration = false,
    contextIsolation = true, sandbox = true. Здесь мы выдаём ему
@@ -30,7 +30,7 @@ const WIN_ACTS = ['minimize', 'maximize', 'hide', 'restart'];
 const EVENTS = [
   'log-entry', 'zapret-status', 'zapret-dl-progress', 'diag-log', 'diag-progress',
   'tray-action', 'navigate', 'bootstrap', 'setup-step', 'setup-log', 'setup-error',
-  'setup-restart', 'setup-done',
+  'setup-restart', 'setup-done', 'setup-hw', 'setup-ask-perm',
 ];
 
 // ── гигиена аргументов ──
@@ -244,6 +244,8 @@ const api = {
     return call('api:cbn-set-dns', { dns1: d1, dns2: d2 });
   },
   cbnResetDns: function () { return call('api:cbn-reset-dns'); },
+  cbnFixWarp: function () { return call('api:cbn-fix-warp'); },
+  cbnTestWarp: function () { return call('api:cbn-test-warp'); },
 
   // ── логи ──
   readLogs: function () { return call('api:read-logs'); },
@@ -271,6 +273,7 @@ const api = {
   // ── установщик ──
   skipSetup: function () { ipcRenderer.send('api:setup-skip'); },
   setupOpenMain: function () { ipcRenderer.send('api:setup-open-main'); },
+  setupConfirmInstall: function () { ipcRenderer.send('api:setup-confirm-install'); },
 
   // ── подписки (main → renderer) ──
   onLogEntry: function (cb) { return subscribe('log-entry', cb); },
@@ -286,6 +289,8 @@ const api = {
   onSetupError: function (cb) { return subscribe('setup-error', cb); },
   onSetupRestart: function (cb) { return subscribe('setup-restart', cb); },
   onSetupDone: function (cb) { return subscribe('setup-done', cb); },
+  onSetupHw: function (cb) { return subscribe('setup-hw', cb); },
+  onSetupAskPerm: function (cb) { return subscribe('setup-ask-perm', cb); },
 };
 
 /** Текст для данных: обрезаем управляющие символы и длину. */

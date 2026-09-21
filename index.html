@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<title>ARTOFIX 2.3</title>
+<title>ARTOFIX 2.5</title>
 <style>
 
 /* =========================================
@@ -35,7 +35,7 @@
 
   --font: 'Segoe UI Variable Text','Segoe UI',system-ui,-apple-system,'Helvetica Neue',Arial,sans-serif;
   --mono: 'Cascadia Code',Consolas,'Courier New',monospace;
-  --radius: 16px;
+  --radius: 18px;
   --sidebar-w: 232px;
 }
 
@@ -85,6 +85,8 @@ select  { cursor:pointer; }
   position:relative; z-index:2; width:100vw; height:100vh;
   background:var(--bg); display:flex; flex-direction:column;
   animation: appBoot .45s cubic-bezier(.22,1,.36,1) both;
+  border-radius:18px; overflow:hidden;
+  box-shadow:0 10px 40px rgba(0,0,0,.15);
 }
 @keyframes appBoot {
   from { opacity:0; transform:translateY(10px) scale(.99); }
@@ -101,6 +103,7 @@ select  { cursor:pointer; }
   display:flex; align-items:center; justify-content:space-between;
   padding:0 14px 0 18px; -webkit-app-region:drag;
   position:relative; z-index:10;
+  border-top-left-radius:18px; border-top-right-radius:18px;
 }
 
 #logo {
@@ -290,7 +293,7 @@ body.th-night #zapret-dot { background:#39445c; }
    BUTTONS
    ========================================= */
 .btn {
-  display:inline-block; padding:9px 16px; border:none; border-radius:10px;
+  display:inline-block; padding:9px 16px; border:none; border-radius:12px;
   font-size:11.5px; font-weight:700; letter-spacing:.4px;
   font-family:var(--font); transition:all .18s; cursor:pointer;
   border:1px solid transparent;
@@ -336,7 +339,7 @@ body.th-night #zapret-dot { background:#39445c; }
    INPUTS
    ========================================= */
 .af-input {
-  width:100%; padding:10px 12px; border-radius:10px;
+  width:100%; padding:10px 12px; border-radius:12px;
   border:1px solid var(--card-br);
   background:var(--input-bg); color:var(--tx); font-size:12.5px;
   outline:none; transition:all .18s;
@@ -367,7 +370,7 @@ select.af-input option { background:var(--card); color:var(--tx); }
    ========================================= */
 .profile-card {
   background:var(--card); border:1px solid var(--card-br);
-  border-radius:14px; padding:14px;
+  border-radius:16px; padding:14px;
   display:flex; align-items:center; gap:13px;
   box-shadow:0 1px 2px rgba(20,24,44,.04);
   transition:all .2s; cursor:pointer;
@@ -379,7 +382,7 @@ select.af-input option { background:var(--card); color:var(--tx); }
 }
 
 .profile-ava {
-  width:44px; height:44px; border-radius:12px; flex-shrink:0;
+  width:44px; height:44px; border-radius:14px; flex-shrink:0;
   background:rgba(var(--acr),.09);
   border:1px solid rgba(var(--acr),.18);
   display:flex; align-items:center; justify-content:center;
@@ -388,6 +391,15 @@ select.af-input option { background:var(--card); color:var(--tx); }
 .profile-card:hover .profile-ava { transform:scale(1.05); }
 .profile-name { font-size:13.5px; font-weight:700; margin-bottom:2px; color:var(--tx); }
 .profile-meta { font-size:10.5px; color:var(--tx3); font-family:var(--mono); }
+.profile-country-badge {
+  display:inline-flex; align-items:center; gap:4px;
+  font-size:10px; font-weight:600; padding:3px 8px; border-radius:8px;
+  background:rgba(var(--acr),.08); color:var(--ac); border:1px solid rgba(var(--acr),.18);
+  margin-top:4px; cursor:pointer; width:fit-content; transition:.15s;
+}
+.profile-country-badge:hover {
+  background:rgba(var(--acr),.18); border-color:rgba(var(--acr),.35); transform:translateY(-1px);
+}
 .profile-del {
   margin-left:auto; width:28px; height:28px; border-radius:8px; flex-shrink:0;
   background:transparent; border:1px solid transparent;
@@ -397,7 +409,7 @@ select.af-input option { background:var(--card); color:var(--tx); }
 .profile-del:hover { background:rgba(var(--redr),.1); border-color:rgba(var(--redr),.25); color:var(--red); }
 
 .profile-add {
-  border:1.5px dashed var(--card-br); border-radius:14px;
+  border:1.5px dashed var(--card-br); border-radius:16px;
   padding:20px; display:flex; align-items:center; justify-content:center;
   gap:10px; color:var(--tx3); font-size:11.5px; font-weight:600;
   transition:all .2s; cursor:pointer; min-height:72px;
@@ -499,7 +511,7 @@ select.af-input option { background:var(--card); color:var(--tx); }
 #modal-overlay.is-open { display:flex; }
 .modal-box {
   background:var(--card); border:1px solid var(--card-br);
-  border-radius:18px; padding:24px; width:460px; max-width:92vw;
+  border-radius:22px; padding:24px; width:460px; max-width:92vw;
   box-shadow:0 30px 80px rgba(13,19,32,.4);
   animation:modalIn .24s cubic-bezier(.22,1,.36,1);
 }
@@ -795,7 +807,7 @@ body.th-night .sys-banner {
   <div id="titlebar">
     <div id="logo">
       <div id="logo-box"><img id="logo-img" src="" width="20" height="20" style="display:block"></div>
-      ARTOFIX <span class="logo-accent">2.3</span>
+      ARTOFIX <span class="logo-accent">2.5</span>
     </div>
     <div id="winbtns">
       <div class="winbtn" title="Свернуть" data-af-on="click" data-af-action="winMin">─</div>
@@ -940,6 +952,19 @@ body.th-night .sys-banner {
         <button data-af-on="click" data-af-action="launchBrowser" data-af-args="[&quot;https://instagram.com&quot;, &quot;ig_e&quot;, &quot;msedge&quot;, true]">Edge</button>
         <button data-af-on="click" data-af-action="launchBrowser" data-af-args="[&quot;https://instagram.com&quot;, &quot;ig_f&quot;, &quot;firefox&quot;, true]">Firefox</button>
         <button data-af-on="click" data-af-action="launchBrowser" data-af-args="[&quot;https://instagram.com&quot;, &quot;ig_y&quot;, &quot;yandex&quot;, true]">Яндекс</button>
+      </div>
+    </div>
+
+    <div class="af-card site-card">
+      <div class="site-card-header">
+        <div class="site-icon" style="background:#fef3e2">🧠</div>
+        <div class="site-name">Claude AI</div>
+      </div>
+      <div class="home-site-btns">
+        <button data-af-on="click" data-af-action="launchBrowser" data-af-args="[&quot;https://claude.ai&quot;, &quot;claude&quot;, &quot;chrome&quot;, true]">Chrome</button>
+        <button data-af-on="click" data-af-action="launchBrowser" data-af-args="[&quot;https://claude.ai&quot;, &quot;claude_e&quot;, &quot;msedge&quot;, true]">Edge</button>
+        <button data-af-on="click" data-af-action="launchBrowser" data-af-args="[&quot;https://claude.ai&quot;, &quot;claude_f&quot;, &quot;firefox&quot;, true]">Firefox</button>
+        <button data-af-on="click" data-af-action="launchBrowser" data-af-args="[&quot;https://claude.ai&quot;, &quot;claude_y&quot;, &quot;yandex&quot;, true]">Яндекс</button>
       </div>
     </div>
 
@@ -1476,6 +1501,7 @@ body.th-night .sys-banner {
       <div>
         <label class="field-label">Первичный DNS</label>
         <select class="af-input" id="cbn-dns1" data-af-on="change" data-af-action="saveCbn">
+          <option value="162.159.192.1">162.159.192.1 — Cloudflare WARP (Антиблок)</option>
           <option value="1.1.1.1">1.1.1.1 — Cloudflare</option>
           <option value="8.8.8.8">8.8.8.8 — Google</option>
           <option value="9.9.9.9">9.9.9.9 — Quad9</option>
@@ -1484,6 +1510,7 @@ body.th-night .sys-banner {
         </select>
         <label class="field-label">Резервный DNS</label>
         <select class="af-input" id="cbn-dns2" data-af-on="change" data-af-action="saveCbn">
+          <option value="162.159.193.1">162.159.193.1 — Cloudflare WARP Alt (Антиблок)</option>
           <option value="1.0.0.1">1.0.0.1 — Cloudflare Alt</option>
           <option value="8.8.4.4">8.8.4.4 — Google Alt</option>
           <option value="149.112.112.112">149.112.112.112 — Quad9 Alt</option>
@@ -1509,6 +1536,21 @@ body.th-night .sys-banner {
       <button class="btn btn-secondary" data-af-on="click" data-af-action="cheburnetResetDns">Сбросить DNS</button>
     </div>
     <div id="cbn-dns-status" style="font-size:10.5px;color:var(--tx3);font-family:var(--mono);margin-top:9px;min-height:16px"></div>
+  </div>
+
+  <!-- Cloudflare WARP в Чебурнете -->
+  <div class="af-card" style="margin-bottom:14px">
+    <div class="section-title">🛡️ Cloudflare WARP в Чебурнете</div>
+    <p style="font-size:11px;color:var(--tx2);line-height:1.7;margin-bottom:12px">
+      В РФ стандартные адреса Cloudflare WARP (1.1.1.1 / 162.159.192.1:2408) блокируются ТСПУ.
+      Функция «Починить WARP» тестирует незаблокированные чистые эндпоинты Cloudflare,
+      активирует зашифрованный DoH в обход блокировок и сбрасывает сетевой кэш.
+    </p>
+    <div class="grid-2">
+      <button class="btn btn-primary btn-full" data-af-on="click" data-af-action="cbnFixWarp">⚡ Починить WARP</button>
+      <button class="btn btn-secondary btn-full" data-af-on="click" data-af-action="cbnTestWarp">🔍 Проверить эндпоинты WARP</button>
+    </div>
+    <div id="cbn-warp-status" style="font-size:10.5px;color:var(--tx3);font-family:var(--mono);margin-top:9px;min-height:16px"></div>
   </div>
 
   <!-- Аварийный режим -->
@@ -1608,8 +1650,8 @@ body.th-night .sys-banner {
   <div class="page-title"><span class="page-title-accent">ℹ️</span> О программе <div class="page-title-line"></div></div>
   <div class="grid-auto">
     <div class="af-card">
-      <div class="section-title">Artofix 2.3</div>
-      <div class="data-row"><span class="data-label">Версия</span><span class="data-value">2.3</span></div>
+      <div class="section-title">Artofix 2.5</div>
+      <div class="data-row"><span class="data-label">Версия</span><span class="data-value">2.5.0</span></div>
       <div class="data-row"><span class="data-label">Тип</span><span class="data-value">Freedom Tool</span></div>
       <div class="data-row"><span class="data-label">Движок</span><span class="data-value">Electron</span></div>
       <div class="data-row"><span class="data-label">Backend</span><span class="data-value">Python + Selenium</span></div>

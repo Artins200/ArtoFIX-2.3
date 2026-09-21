@@ -1,6 +1,6 @@
 {
   "name": "artofix",
-  "version": "2.3.1",
+  "version": "2.5.0",
   "description": "Artofix Freedom Tool — anti-detect browser profiles with hardened Electron shell",
   "main": "main.js",
   "scripts": {
