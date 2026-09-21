@@ -162,6 +162,24 @@ test('chrome.runtime добавлен (в автоматизированном C
   assert.ok(dom.win.chrome.runtime && typeof dom.win.chrome.runtime.connect === 'function');
 });
 
+test('chrome.csi и chrome.loadTimes присутствуют (детект Cloudflare/Turnstile/Claude)', () => {
+  assert.strictEqual(typeof dom.win.chrome.csi, 'function');
+  assert.strictEqual(typeof dom.win.chrome.loadTimes, 'function');
+  const lt = dom.win.chrome.loadTimes();
+  assert.ok(lt && lt.startLoadTime > 0);
+  assert.strictEqual(typeof dom.win.chrome.app, 'object');
+});
+
+test('navigator.plugins и mimeTypes эмулируют плагины Chrome PDF', () => {
+  assert.ok(dom.win.navigator.plugins.length >= 2);
+  assert.strictEqual(dom.win.navigator.plugins[0].name, 'PDF Viewer');
+  assert.ok(dom.win.navigator.mimeTypes.length >= 2);
+});
+
+test('document.hasFocus возвращает true для прохождения проверок активности', () => {
+  assert.strictEqual(dom.win.document.hasFocus(), true);
+});
+
 // отчёт
 const failed = results.filter((r) => r[0] === 'fail');
 results.forEach((r) => console.log((r[0] === 'ok' ? '  ✓ ' : '  ✗ ') + r[1]));

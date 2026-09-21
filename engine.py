@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-ARTOFIX 2.3 — BROWSER ENGINE
+ARTOFIX 2.5 — BROWSER ENGINE
 =============================================================
 Запускает браузер профиля и применяет к нему отпечаток, который
 посчитал main-процесс (config.json → identity, схема v2).
@@ -276,15 +276,115 @@ PAGE_INIT_TEMPLATE = r"""
     } catch (e) {}
   });
 
-  // chrome.runtime отсутствует при автоматизации — добавляем правдоподобную заглушку
+  // ── 1.1 Обход защиты Claude / Cloudflare Turnstile: window.chrome ──
   try {
-    if (window.chrome && !window.chrome.runtime) {
-      var noop = function () { return undefined; };
-      window.chrome.runtime = {
-        id: undefined,
-        connect: noop, sendMessage: noop, onMessage: { addListener: noop, removeListener: noop },
-        getPlatformInfo: noop,
-      };
+    if (window.chrome) {
+      if (!window.chrome.runtime) {
+        var noop = function () { return undefined; };
+        window.chrome.runtime = {
+          id: undefined,
+          connect: noop, sendMessage: noop, onMessage: { addListener: noop, removeListener: noop },
+          getPlatformInfo: noop,
+        };
+      }
+      if (!window.chrome.csi) {
+        var startMs = Date.now();
+        window.chrome.csi = markNative(function () {
+          return { startE: startMs, onloadT: startMs + 120, pageT: 120.4, tran: 15 };
+        }, 'csi');
+      }
+      if (!window.chrome.loadTimes) {
+        window.chrome.loadTimes = markNative(function () {
+          var nowSec = Date.now() / 1000;
+          return {
+            requestTime: nowSec - 0.25,
+            startLoadTime: nowSec - 0.2,
+            commitLoadTime: nowSec - 0.1,
+            finishDocumentLoadTime: nowSec,
+            finishLoadTime: nowSec + 0.05,
+            firstPaintTime: nowSec - 0.04,
+            firstPaintAfterLoadTime: 0,
+            navigationType: 'Other',
+            wasFetchedViaSpdy: true,
+            wasNpnNegotiated: true,
+            npnNegotiatedProtocol: 'h2',
+            wasAlternateProtocolAvailable: false,
+            connectionInfo: 'h2',
+          };
+        }, 'loadTimes');
+      }
+      if (!window.chrome.app) {
+        window.chrome.app = {
+          isInstalled: false,
+          InstallState: { DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' },
+          RunningState: { CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running' },
+          getIsInstalled: markNative(function () { return false; }, 'getIsInstalled'),
+          getDetails: markNative(function () { return null; }, 'getDetails'),
+          installState: markNative(function (cb) { if (typeof cb === 'function') cb('not_installed'); }, 'installState'),
+          runningState: markNative(function () { return 'cannot_run'; }, 'runningState'),
+        };
+      }
+    }
+  } catch (e) {}
+
+  // ── 1.2 Обход защиты Claude / Turnstile: plugins и mimeTypes ──
+  try {
+    if (!navigator.plugins || navigator.plugins.length === 0) {
+      var fakePluginsList = [
+        { name: 'PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+        { name: 'Chrome PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+        { name: 'Chromium PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+        { name: 'Microsoft Edge PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+        { name: 'WebKit built-in PDF', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+      ];
+      var fakeMimesList = [
+        { type: 'application/pdf', suffixes: 'pdf', description: 'Portable Document Format' },
+        { type: 'text/pdf', suffixes: 'pdf', description: 'Portable Document Format' },
+      ];
+      var pluginArrProto = typeof PluginArray !== 'undefined' ? PluginArray.prototype : Object.prototype;
+      var pluginProto = typeof Plugin !== 'undefined' ? Plugin.prototype : Object.prototype;
+      var mimeArrProto = typeof MimeTypeArray !== 'undefined' ? MimeTypeArray.prototype : Object.prototype;
+      var mimeProto = typeof MimeType !== 'undefined' ? MimeType.prototype : Object.prototype;
+
+      var fakePlugins = Object.create(pluginArrProto);
+      fakePluginsList.forEach(function (p, i) {
+        var pl = Object.create(pluginProto);
+        pl.name = p.name;
+        pl.filename = p.filename;
+        pl.description = p.description;
+        pl.length = fakeMimesList.length;
+        fakePlugins[i] = pl;
+        fakePlugins[p.name] = pl;
+      });
+      fakePlugins.length = fakePluginsList.length;
+      fakePlugins.item = markNative(function (idx) { return this[idx] || null; }, 'item');
+      fakePlugins.namedItem = markNative(function (name) { return this[name] || null; }, 'namedItem');
+      fakePlugins.refresh = markNative(function () {}, 'refresh');
+      defineGetter(Object.getPrototypeOf(navigator), 'plugins', function () { return fakePlugins; });
+
+      var fakeMimes = Object.create(mimeArrProto);
+      fakeMimesList.forEach(function (m, i) {
+        var mi = Object.create(mimeProto);
+        mi.type = m.type;
+        mi.suffixes = m.suffixes;
+        mi.description = m.description;
+        mi.enabledPlugin = fakePlugins[0];
+        fakeMimes[i] = mi;
+        fakeMimes[m.type] = mi;
+      });
+      fakeMimes.length = fakeMimesList.length;
+      fakeMimes.item = markNative(function (idx) { return this[idx] || null; }, 'item');
+      fakeMimes.namedItem = markNative(function (name) { return this[name] || null; }, 'namedItem');
+      defineGetter(Object.getPrototypeOf(navigator), 'mimeTypes', function () { return fakeMimes; });
+    }
+  } catch (e) {}
+
+  // ── 1.3 Обход защиты Claude / Turnstile: document.hasFocus и visibility ──
+  try {
+    if (document) {
+      document.hasFocus = markNative(function () { return true; }, 'hasFocus');
+      defineGetter(document, 'hidden', function () { return false; });
+      defineGetter(document, 'visibilityState', function () { return 'visible'; });
     }
   } catch (e) {}
 
@@ -746,6 +846,14 @@ class BrowserManager:
             "webrtc": ident.get("webrtc") or {"mode": "default"},
             "proxy": ident.get("proxy"),
             "vectors": ident.get("vectors") or {},
+            # Страна/гео: точка приходит только при явном выборе страны в UI
+            # (identity.geolocation). В авто-режиме её нет — не выдумываем гео,
+            # не совпадающее с реальным IP (см. docs/ANTI-DETECT.md §8).
+            "country_code": ident.get("country_code"),
+            "country_name": ident.get("country_name"),
+            "country_city": ident.get("country_city"),
+            "geo_source": ident.get("geo_source", "none"),
+            "geolocation": ident.get("geolocation"),
         }
 
         # Прокси-пароль приходит только через окружение — не из файла
@@ -787,12 +895,12 @@ class BrowserManager:
         else:
             opt.add_argument("--window-size=1920,1080")
 
-        # убираем самые грубые признаки автоматизации
+        # убираем самые грубые признаки автоматизации и блокировки Cloudflare ECH (нужно для Claude/Turnstile в РФ)
         opt.add_argument("--disable-blink-features=AutomationControlled")
         opt.add_argument("--no-first-run")
         opt.add_argument("--no-default-browser-check")
         opt.add_argument("--disable-infobars")
-        opt.add_argument("--disable-features=ChromeWhatsNewUI,PrivacySandboxConsentDecisionMigration")
+        opt.add_argument("--disable-features=ChromeWhatsNewUI,PrivacySandboxConsentDecisionMigration,EncryptedClientHello")
         opt.add_argument("--disable-session-crashed-bubble")
 
         opt.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
@@ -940,14 +1048,19 @@ class BrowserManager:
             except Exception:
                 pass
 
-        # 5) Гео (если у профиля заданы координаты)
+        # 5) Гео (только при явно выбранной стране; координаты стабильны у профиля)
         if ident.get("geolocation"):
             try:
                 g = ident["geolocation"]
+                lat = float(g["lat"]); lon = float(g["lon"])
+                if abs(lat) > 90 or abs(lon) > 180:
+                    raise ValueError("bad geo range")
+                acc = g.get("accuracy") or 100
                 driver.execute_cdp_cmd("Emulation.setGeolocationOverride",
-                                       {"latitude": g["lat"], "longitude": g["lon"], "accuracy": 100})
-            except Exception:
-                pass
+                                       {"latitude": lat, "longitude": lon,
+                                        "accuracy": max(10, min(int(acc), 1000))})
+            except Exception as e:
+                print(f"[engine] geolocation override warning: {e}")
 
     def _inject_init(self, driver, ident):
         script = build_page_init(ident)
@@ -984,6 +1097,12 @@ class BrowserManager:
         cfg = self.load_config()
         ident = self.build_identity(cfg, name, b_type)
         print(f"[engine] profile={name} browser={b_type} tz={ident['timezone']} langs={','.join(ident['languages'])}")
+        if ident.get("geo_source") == "country" and ident.get("geolocation"):
+            g = ident["geolocation"]
+            print(f"[engine] country -> {ident.get('country_code')} ({ident.get('country_city') or ident.get('country_name')}) "
+                  f"geo={g['lat']},{g['lon']} ±{g.get('accuracy') or 100}m")
+            print("[engine] ВНИМАНИЕ: браузерные сигналы гео включены, но выходной IP не меняется — "
+                  "для полного антидетекта укажи прокси профиля той же страны")
         if ident.get("webgl"):
             print(f"[engine] GPU -> {ident['webgl'].get('renderer')}")
         if ident.get("proxy"):

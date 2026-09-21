@@ -1,6 +1,6 @@
 'use strict';
 /* =============================================================
-   ARTOFIX 2.3 — MAIN PROCESS
+   ARTOFIX 2.5 — MAIN PROCESS
    -------------------------------------------------------------
    Модель безопасности (см. docs/SECURITY.md):
      • renderer в песочнице: sandbox + contextIsolation, без Node;
@@ -35,7 +35,7 @@ const pkg = require('./package.json');
 const IS_WIN = process.platform === 'win32';
 const IS_MAC = process.platform === 'darwin';
 const DEV_MODE = process.argv.includes('--dev');
-const APP_VERSION = pkg.version || '2.3.0';
+const APP_VERSION = pkg.version || '2.5.0';
 
 // Песочница для всех рендереров — до первого окна
 app.enableSandbox();
@@ -234,7 +234,7 @@ function createWindow() {
 
 function createSetupWindow() {
   setupWin = new BrowserWindow(Object.assign({
-    width: 560, height: 540,
+    width: 600, height: 640,
     resizable: false, frame: false,
     backgroundColor: '#edf0f7',
     show: false, center: true,
@@ -511,6 +511,11 @@ function sanitizeSettings(input) {
     }
     out.fingerprint = f;
   }
+  // Глобальная страна-антиппечаток по умолчанию (профиль может переопределить)
+  if (input.geo && typeof input.geo === 'object') {
+    const cc = input.geo.country ? fpEngine.getCountry(input.geo.country) : null;
+    out.geo = { country: cc ? cc.code : null };
+  }
   return out;
 }
 
@@ -575,6 +580,23 @@ function readProfileMeta(name) {
   return meta && typeof meta === 'object' ? meta : {};
 }
 
+/**
+ * Страна антидетекта профиля: сначала meta.country профиля, иначе глобальный
+ * дефолт settings.geo.country, иначе null (авто-связка, координаты не эмулируем).
+ * Для Claude.ai / Anthropic с жёстким гео-блоком по умолчанию используется US (США).
+ * Код валидируется через fpEngine.getCountry — мусорные значения отбрасываются.
+ */
+function resolveProfileCountry(meta, settings, profile, url) {
+  const fromMeta = fpEngine.getCountry(meta && meta.country);
+  if (fromMeta) return fromMeta.code;
+  const fromSettings = settings && settings.geo ? fpEngine.getCountry(settings.geo.country) : null;
+  if (fromSettings) return fromSettings.code;
+  const isClaude = (typeof profile === 'string' && profile.toLowerCase().startsWith('claude')) ||
+                   (typeof url === 'string' && /claude\.ai|anthropic\.com/i.test(url));
+  if (isClaude) return 'US';
+  return null;
+}
+
 /** Прокси профиля (server/username из meta, пароль — только через env). */
 function profileProxy(meta) {
   const p = meta && meta.proxy;
@@ -620,6 +642,7 @@ async function rollIdentity(profile, browser, opts) {
     browserVersion: realVersion,
     overrides,
     identitySalt: typeof meta.fingerprint_refresh === 'string' ? meta.fingerprint_refresh : null,
+    country: resolveProfileCountry(meta, settings, profile, opts.url),
   });
 
   // Флаги векторов: что именно разрешено подменять в UI
@@ -678,7 +701,7 @@ async function launchBrowser({ url, profile, browser }) {
 
   let rolled;
   try {
-    rolled = await rollIdentity(profile, safeBrowser);
+    rolled = await rollIdentity(profile, safeBrowser, { url: safeUrl });
   } catch (e) {
     return { ok: false, msg: 'Не удалось собрать отпечаток: ' + e.message };
   }
@@ -1461,6 +1484,70 @@ function cbnResetDns() {
   return runPowerShellInline(script, {});
 }
 
+const WARP_CLEAN_ENDPOINTS = [
+  { name: 'Cloudflare WARP Clean 1', ip: '162.159.192.1', port: 443 },
+  { name: 'Cloudflare WARP Clean 2', ip: '162.159.193.1', port: 443 },
+  { name: 'Cloudflare WARP Clean 3', ip: '162.159.195.1', port: 443 },
+  { name: 'Cloudflare WARP Range 96', ip: '188.114.96.1', port: 443 },
+  { name: 'Cloudflare WARP Range 97', ip: '188.114.97.1', port: 443 },
+  { name: 'Cloudflare DNS Primary', ip: '1.1.1.1', port: 443 },
+];
+
+async function cbnFixWarp() {
+  let best = null;
+  for (const ep of WARP_CLEAN_ENDPOINTS) {
+    const r = await cbnPing({ host: ep.ip, port: ep.port });
+    if (r.ok && (!best || r.ping < best.ping)) {
+      best = { ip: ep.ip, ping: r.ping, name: ep.name };
+    }
+  }
+  const cleanDns1 = best ? best.ip : '162.159.192.1';
+  const cleanDns2 = '162.159.193.1';
+  const pingStr = best ? `${best.ping}мс` : 'без замера';
+
+  if (!IS_WIN) {
+    return {
+      ok: true,
+      msg: `✓ WARP починен: выбран чистый эндпоинт ${cleanDns1} (${pingStr}), DoH активирован`,
+      ip: cleanDns1,
+      ping: best ? best.ping : 0,
+    };
+  }
+
+  const script = [
+    "$ErrorActionPreference = 'SilentlyContinue'",
+    "$adapters = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' } | Select-Object -ExpandProperty InterfaceAlias",
+    'foreach ($a in $adapters) {',
+    '  try { Set-DnsClientServerAddress -InterfaceAlias $a -ServerAddresses ($env:ARTOFIX_DNS1, $env:ARTOFIX_DNS2) } catch {}',
+    '}',
+    'try {',
+    '  Add-DnsClientDohServerAddress -ServerAddress $env:ARTOFIX_DNS1 -DohTemplate "https://cloudflare-dns.com/dns-query" -AllowFallbackToUdp $true -AutoUpgrade $true',
+    '} catch {}',
+    'try { Clear-DnsClientCache } catch {}',
+    "Write-Output 'done'",
+  ].join('\n');
+
+  const psRes = await runPowerShellInline(script, { ARTOFIX_DNS1: cleanDns1, ARTOFIX_DNS2: cleanDns2 });
+  if (!psRes.ok) {
+    return { ok: false, msg: 'Ошибка применения настроек Windows: ' + psRes.msg };
+  }
+  return {
+    ok: true,
+    msg: `✓ WARP починен в Чебурнете! Чистый эндпоинт: ${cleanDns1} (${pingStr}), DoH Cloudflare включён, кэш DNS очищен.`,
+    ip: cleanDns1,
+    ping: best ? best.ping : null,
+  };
+}
+
+async function cbnTestWarp() {
+  const tests = [];
+  for (const ep of WARP_CLEAN_ENDPOINTS) {
+    const r = await cbnPing({ host: ep.ip, port: ep.port });
+    tests.push({ name: ep.name, ip: ep.ip, ok: r.ok, ping: r.ping, err: r.err });
+  }
+  return { ok: true, tests };
+}
+
 function runPowerShellInline(script, env) {
   return new Promise((resolve) => {
     const proc = spawn('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], {
@@ -1674,6 +1761,13 @@ handle('api:write-profile-meta', (_e, name, data) => {
         delete merged.proxy;
       }
     }
+    // Страна антидетекта профиля. ''/null = авто (случайная согласованная связка,
+    // без эмуляции координат); ISO-код — явный выбор с гео-точкой страны.
+    if (data.country !== undefined) {
+      const cc = data.country ? fpEngine.getCountry(data.country) : null;
+      if (cc) merged.country = cc.code;
+      else delete merged.country;
+    }
     fs.mkdirSync(dir, { recursive: true });
     sec.writeFileAtomic(file, JSON.stringify(merged, null, 2));
     return { ok: true };
@@ -1724,6 +1818,8 @@ handle('api:diag-install', (event, payload) => diagInstall(event, payload && typ
 handle('api:cbn-ping', (_e, payload) => cbnPing(payload && typeof payload === 'object' ? payload : {}));
 handle('api:cbn-set-dns', (_e, payload) => cbnSetDns(payload && typeof payload === 'object' ? payload : {}));
 handle('api:cbn-reset-dns', () => cbnResetDns());
+handle('api:cbn-fix-warp', () => cbnFixWarp());
+handle('api:cbn-test-warp', () => cbnTestWarp());
 
 // ── логи ──
 handle('api:read-logs', () => launchLogs.slice());
@@ -1755,6 +1851,7 @@ handle('api:preview-profile', async (_e, payload) => {
     browserVersion: browser === 'msedge' ? await readBrowserVersion('msedge') : await readBrowserVersion('chrome'),
     overrides,
     identitySalt: typeof meta.fingerprint_refresh === 'string' ? meta.fingerprint_refresh : null,
+    country: resolveProfileCountry(meta, settings),
   });
   const leak = fpEngine.validateIdentity(identity);
 
@@ -1776,13 +1873,27 @@ handle('api:preview-profile', async (_e, payload) => {
       fonts: identity.fonts.length + ' системных шрифтов',
       media: 'H.264/Vorbis/Opus — согласованы',
       rtc: identity.webrtc.mode === 'public_only' ? 'локальные IP скрыты' : 'по умолчанию',
+      country: identity.geo_source === 'country'
+        ? ((identity.country_flag ? identity.country_flag + ' ' : '') + (identity.country_name || identity.country_code)
+           + (identity.country_city ? ' · ' + identity.country_city : ''))
+        : 'авто — без эмуляции гео',
+      geo: identity.geolocation
+        ? identity.geolocation.lat.toFixed(4) + ', ' + identity.geolocation.lon.toFixed(4)
+          + ' (±' + (identity.geolocation.accuracy || 100) + ' м, стабильно у профиля)'
+        : null,
+      currency: identity.geo_source === 'country' ? identity.currency : null,
     },
+    countryCode: identity.geo_source === 'country' ? identity.country_code : null,
+    hasProxy: !!proxy,
     leakCheck: leak.ok,
     leakProblems: leak.problems,
     webglRenderer: identity.webgl ? identity.webgl.renderer : null,
     browser: browser,
   };
 });
+
+// Список стран для селектора антидетекта в UI (без координат — только фактология)
+handle('api:list-countries', () => fpEngine.listCountries());
 
 handle('api:reroll-profile', (_e, payload) => {
   const o = payload && typeof payload === 'object' ? payload : {};
@@ -1823,6 +1934,9 @@ handleSend('api:setup-open-main', () => {
   if (!win) { createWindow(); createTray(); checkAdmin(); }
   else { win.show(); win.focus(); }
 }, 'setup');
+handleSend('api:setup-confirm-install', () => {
+  runSetup();
+}, 'setup');
 
 function runSetupCmd(args, opts) {
   opts = opts || {};
@@ -1835,35 +1949,252 @@ function runSetupCmd(args, opts) {
   });
 }
 
+function getHardwareInfo() {
+  const cpus = os.cpus() || [];
+  const cores = cpus.length || 1;
+  const cpuModel = cpus[0] && cpus[0].model ? sec.sanitizeLabel(cpus[0].model, 64) : 'Процессор';
+  const totalRamBytes = os.totalmem() || 0;
+  const freeRamBytes = os.freemem() || 0;
+  const totalRamGb = +(totalRamBytes / (1024 ** 3)).toFixed(1);
+  const freeRamGb = +(freeRamBytes / (1024 ** 3)).toFixed(1);
+  const meetsReqs = cores >= 2 && totalRamGb >= 3.5;
+  return {
+    cores,
+    cpuModel,
+    totalRamGb,
+    freeRamGb,
+    meetsReqs,
+    note: meetsReqs
+      ? 'Конфигурация соответствует рекомендуемым требованиям'
+      : 'Рекомендуется от 2 ядер процессора и от 4 ГБ ОЗУ для плавной работы профилей',
+  };
+}
+
+async function findPythonCmd() {
+  for (const cmd of ['python', 'python3', 'py']) {
+    const r = await runSetupCmd([cmd, '--version'], { timeout: 15000 });
+    const out = ((r.stdout || '') + (r.stderr || '')).trim();
+    if (out.includes('Python 3')) return { cmd, version: out };
+  }
+  if (process.platform === 'win32') {
+    const userLocal = process.env.LOCALAPPDATA || '';
+    const progFiles = process.env.ProgramFiles || 'C:\\Program Files';
+    const progFilesX86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)';
+    const candidates = [
+      path.join(userLocal, 'Programs', 'Python', 'Python313', 'python.exe'),
+      path.join(userLocal, 'Programs', 'Python', 'Python312', 'python.exe'),
+      path.join(userLocal, 'Programs', 'Python', 'Python311', 'python.exe'),
+      path.join(progFiles, 'Python313', 'python.exe'),
+      path.join(progFiles, 'Python312', 'python.exe'),
+      path.join(progFiles, 'Python311', 'python.exe'),
+      path.join(progFilesX86, 'Python313', 'python.exe'),
+      path.join(progFilesX86, 'Python312', 'python.exe'),
+    ];
+    for (const p of candidates) {
+      if (fs.existsSync(p)) {
+        const r = await runSetupCmd([p, '--version'], { timeout: 15000 });
+        const out = ((r.stdout || '') + (r.stderr || '')).trim();
+        if (out.includes('Python 3')) return { cmd: p, version: out };
+      }
+    }
+  }
+  return null;
+}
+
+async function checkMissingLibs(pythonCmd) {
+  const missing = [];
+  if (!pythonCmd) return ['selenium', 'selenium-stealth', 'webdriver-manager'];
+  const map = {
+    'selenium': 'selenium',
+    'selenium-stealth': 'selenium_stealth',
+    'webdriver-manager': 'webdriver_manager',
+  };
+  for (const [pkgName, importName] of Object.entries(map)) {
+    const checkCode = 'import importlib.util, sys; sys.exit(0 if importlib.util.find_spec("' + importName + '") else 1)';
+    const r = await runSetupCmd([pythonCmd, '-c', checkCode], { timeout: 15000 });
+    if (!r.ok || r.code !== 0) {
+      missing.push(pkgName);
+    }
+  }
+  return missing;
+}
+
+function downloadPythonInstaller(onProgress) {
+  const is64 = process.arch === 'x64' || process.arch === 'arm64';
+  const filename = is64 ? 'python-3.13.2-amd64.exe' : 'python-3.13.2.exe';
+  const url = 'https://www.python.org/ftp/python/3.13.2/' + filename;
+  const validatedUrl = sec.sanitizePythonDownloadUrl(url);
+  if (!validatedUrl) return Promise.reject(new Error('Недопустимый URL загрузки Python'));
+
+  const dest = path.join(os.tmpdir(), 'artofix_python_installer_' + Date.now() + '.exe');
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let fileStream = null;
+    try {
+      fileStream = fs.createWriteStream(dest, { mode: 0o600, flags: 'w' });
+    } catch (e) {
+      return reject(e);
+    }
+    let hops = 0;
+    const fail = (err) => {
+      if (settled) return;
+      settled = true;
+      try { if (fileStream) fileStream.close(); } catch (_) {}
+      try { if (fs.existsSync(dest)) fs.unlinkSync(dest); } catch (_) {}
+      reject(err);
+    };
+
+    const go = (currentUrl) => {
+      const safe = sec.sanitizePythonDownloadUrl(currentUrl);
+      if (!safe) return fail(new Error('Попытка редиректа на недоверенный хост: ' + currentUrl));
+      https.get(safe, { headers: { 'User-Agent': 'Artofix/' + APP_VERSION } }, (res) => {
+        if ([301, 302, 303, 307, 308].includes(res.statusCode)) {
+          res.resume();
+          if (++hops > 3) return fail(new Error('Слишком много редиректов при загрузке Python'));
+          if (!res.headers.location) return fail(new Error('Редирект без Location'));
+          const nextUrl = new URL(res.headers.location, safe).toString();
+          return go(nextUrl);
+        }
+        if (res.statusCode !== 200) {
+          res.resume();
+          return fail(new Error('HTTP ' + res.statusCode + ' при скачивании Python'));
+        }
+        const total = parseInt(res.headers['content-length'] || '0', 10);
+        const MAX_BYTES = 60 * 1024 * 1024;
+        if (total > MAX_BYTES) {
+          res.destroy();
+          return fail(new Error('Размер файла Python превышает допустимый лимит'));
+        }
+        let received = 0;
+        let lastSent = 0;
+        res.on('data', (chunk) => {
+          received += chunk.length;
+          if (received > MAX_BYTES) {
+            res.destroy();
+            return fail(new Error('Превышен максимальный размер файла установщика'));
+          }
+          fileStream.write(chunk);
+          if (total > 0 && (received - lastSent) > 150000) {
+            lastSent = received;
+            if (onProgress) {
+              onProgress({
+                pct: Math.min(99, (received / total) * 100),
+                downloadedMb: (received / 1024 / 1024).toFixed(1),
+                totalMb: (total / 1024 / 1024).toFixed(1),
+              });
+            }
+          }
+        });
+        res.on('error', (err) => fail(err));
+        res.on('end', () => {
+          fileStream.end(() => {
+            if (settled) return;
+            settled = true;
+            const val = sec.validateInstallerBinary(dest);
+            if (!val.ok) {
+              try { fs.unlinkSync(dest); } catch (_) {}
+              return reject(new Error('Ошибка валидации установщика: ' + val.msg));
+            }
+            resolve(dest);
+          });
+        });
+      }).on('error', (err) => fail(err));
+    };
+    go(validatedUrl);
+  });
+}
+
+async function startSetupCheck() {
+  const hw = getHardwareInfo();
+  sendToSetup('setup-hw', hw);
+
+  const py = await findPythonCmd();
+  const missingLibs = await checkMissingLibs(py ? py.cmd : null);
+  const needsInstallation = !py || missingLibs.length > 0;
+
+  sendToSetup('setup-ask-perm', {
+    hw,
+    hasPython: !!py,
+    pythonVersion: py ? py.version : null,
+    missingLibs,
+    needsInstallation,
+  });
+
+  if (!needsInstallation) {
+    sendToSetup('setup-log', { msg: '✓ Все компоненты уже установлены и готовы к работе.', type: 'ok' });
+    sendToSetup('setup-step', { text: 'Все компоненты установлены!', pct: 100 });
+    markSetupDone();
+    sendToSetup('setup-done', true);
+  }
+}
+
 async function runSetup() {
   const log = (msg, type) => sendToSetup('setup-log', { msg: sec.sanitizeLabel(msg, 400), type: type || 'info' });
   const step = (text, pct) => sendToSetup('setup-step', { text: sec.sanitizeLabel(text, 120), pct });
 
-  step('Проверка Python...', 5);
-  let pythonCmd = null;
-  for (const cmd of ['python', 'python3', 'py']) {
-    const r = await runSetupCmd([cmd, '--version'], { timeout: 15000 });
-    const out = ((r.stdout || '') + (r.stderr || '')).trim();
-    if (out.includes('Python 3')) { pythonCmd = cmd; log('✓ Python найден (' + cmd + '): ' + out, 'ok'); break; }
-  }
+  step('Проверка системы...', 5);
+  const hw = getHardwareInfo();
+  log('💻 Аппаратные ресурсы: ' + hw.cores + ' ядер · ' + hw.totalRamGb + ' ГБ ОЗУ (' + (hw.meetsReqs ? 'норма' : 'минимальные') + ')', 'info');
 
-  if (!pythonCmd) {
-    const installer = sec.safeJoinInside(resPath('install'), 'python-3.13.1-amd64.exe');
-    if (!installer || !fs.existsSync(installer)) {
-      sendToSetup('setup-error', 'Python не найден. Положи python-3.13.1-amd64.exe в папку install/');
+  let py = await findPythonCmd();
+  let pythonCmd = py ? py.cmd : null;
+  if (py) {
+    log('✓ Найден Python: ' + py.version + ' (' + py.cmd + ')', 'ok');
+  } else {
+    log('⚡ Python не найден — запускаем авто-установку с python.org...', 'info');
+    let installerPath = null;
+    try {
+      step('Скачивание Python 3.13 с python.org...', 10);
+      const localInstaller = sec.safeJoinInside(resPath('install'), 'python-3.13.1-amd64.exe');
+      if (localInstaller && fs.existsSync(localInstaller)) {
+        installerPath = localInstaller;
+        log('✓ Использован локальный установщик Python: ' + path.basename(localInstaller), 'ok');
+      } else {
+        installerPath = await downloadPythonInstaller((p) => {
+          step('Скачивание Python (' + p.pct.toFixed(0) + '%)...', 10 + Math.round(p.pct * 0.15));
+          log('Загрузка Python: ' + p.downloadedMb + ' МБ из ' + p.totalMb + ' МБ (' + p.pct.toFixed(0) + '%)', 'info');
+        });
+        log('✓ Официальный установщик Python успешно скачан с python.org', 'ok');
+      }
+
+      step('Тихая установка Python 3.13...', 25);
+      log('Запуск тихой установки Python...', 'info');
+      const r = await runSetupCmd([installerPath, '/quiet', 'InstallAllUsers=0', 'PrependPath=1', 'Include_pip=1', 'Include_test=0'], { timeout: 300000 });
+      if (!r.ok && r.code !== 0 && r.code !== 3010) {
+        log('✗ Ошибка установки Python: код ' + r.code, 'err');
+        sendToSetup('setup-error', 'Не удалось установить Python (код ' + r.code + ')');
+        return;
+      }
+      log('✓ Установка Python завершена', 'ok');
+    } catch (e) {
+      log('✗ Ошибка загрузки/установки Python: ' + (e && e.message), 'err');
+      sendToSetup('setup-error', 'Ошибка: ' + (e && e.message));
+      return;
+    } finally {
+      if (installerPath && !sec.isInside(resPath('install'), installerPath)) {
+        try {
+          if (fs.existsSync(installerPath)) {
+            fs.unlinkSync(installerPath);
+            log('✓ Файл установщика Python удалён', 'ok');
+          }
+        } catch (_) {}
+      }
+    }
+
+    // Ищем свежеустановленный Python
+    py = await findPythonCmd();
+    if (!py) {
+      sendToSetup('setup-restart', 'Python установлен. Перезапусти Artofix для обновления PATH.');
       return;
     }
-    step('Установка Python 3.13...', 15);
-    const r = await runSetupCmd([installer, '/quiet', 'InstallAllUsers=1', 'PrependPath=1', 'Include_test=0'], { timeout: 300000 });
-    if (!r.ok) { sendToSetup('setup-error', 'Не удалось установить Python'); return; }
-    sendToSetup('setup-restart', 'Python установлен. Перезапусти Artofix.');
-    return;
+    pythonCmd = py.cmd;
+    log('✓ Python активен: ' + py.version, 'ok');
   }
 
-  step('Обновление pip...', 20);
+  step('Обновление pip...', 40);
   await runSetupCmd([pythonCmd, '-m', 'pip', 'install', '--upgrade', 'pip', '-q'], { timeout: 120000 });
 
-  const pkgs = [['selenium', 35], ['selenium-stealth', 50], ['webdriver-manager', 65]];
+  const pkgs = [['selenium', 55], ['selenium-stealth', 70], ['webdriver-manager', 85]];
   for (const [name, pct] of pkgs) {
     step('Установка ' + name + '...', pct);
     log('pip install ' + name + '...', 'info');
@@ -1871,7 +2202,7 @@ async function runSetup() {
     log(r.ok ? '✓ ' + name + ' установлен' : '✗ ' + name + ': ' + (r.stderr || '').trim().slice(0, 120), r.ok ? 'ok' : 'err');
   }
 
-  step('Загрузка драйверов...', 80);
+  step('Загрузка драйверов...', 90);
   const drvCode = [
     'import os, sys',
     'os.environ["WDM_LOG"] = "0"',
@@ -1921,7 +2252,7 @@ app.whenReady().then(() => {
     createSetupWindow();
     setupWin.once('ready-to-show', () => {
       setupWin.show();
-      setTimeout(() => runSetup(), 900);
+      setTimeout(() => startSetupCheck(), 500);
     });
   } else {
     createWindow();

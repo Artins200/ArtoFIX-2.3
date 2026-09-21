@@ -66,6 +66,7 @@ function makeFakeDom() {
     $cdc_asdjflasutopfhvcZLmcfl_: {},
     cdc_adoQpoasnfa76pfcZLmcfl_Array: function () {},
     fonts: { check() { return false; } },
+    hasFocus: function () { return false; },
   };
 
   const win = {

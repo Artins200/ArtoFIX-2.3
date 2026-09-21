@@ -127,6 +127,40 @@ test('тег релиза и имена файлов санитайзятся', 
   assert.strictEqual(sec.sanitizeFileName('.hidden'), null);
 });
 
+test('URL загрузки Python строго проверяется на официальный источник (защита 0-day)', () => {
+  assert.ok(sec.sanitizePythonDownloadUrl('https://www.python.org/ftp/python/3.13.2/python-3.13.2-amd64.exe'));
+  assert.ok(sec.sanitizePythonDownloadUrl('https://python.org/ftp/python/3.13.1/python-3.13.1.exe'));
+  assert.strictEqual(sec.sanitizePythonDownloadUrl('http://www.python.org/ftp/python/3.13.2/python-3.13.2-amd64.exe'), null, 'http запрещён');
+  assert.strictEqual(sec.sanitizePythonDownloadUrl('https://evil.org/ftp/python/3.13.2/python-3.13.2-amd64.exe'), null, 'левый домен');
+  assert.strictEqual(sec.sanitizePythonDownloadUrl('https://www.python.org.evil.com/ftp/python/3.13.2/python-3.13.2-amd64.exe'), null, 'подделка поддомена');
+  assert.strictEqual(sec.sanitizePythonDownloadUrl('https://www.python.org/malware.exe'), null, 'неверный путь');
+  assert.strictEqual(sec.sanitizePythonDownloadUrl('https://www.python.org/ftp/python/3.13.2/evil.bat'), null, 'не exe');
+});
+
+test('валидатор бинарника отбивает повреждённые, не-PE и недопустимые по размеру файлы', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'artofix-bin-test-'));
+  const smallPe = path.join(dir, 'small.exe');
+  fs.writeFileSync(smallPe, Buffer.from('MZ' + 'x'.repeat(100)));
+  const rSmall = sec.validateInstallerBinary(smallPe);
+  assert.strictEqual(rSmall.ok, false, 'слишком маленький файл');
+
+  const fakePe = path.join(dir, 'fake.exe');
+  const bigFake = Buffer.alloc(16 * 1024 * 1024);
+  bigFake.write('NOT_MZ', 0);
+  fs.writeFileSync(fakePe, bigFake);
+  const rFake = sec.validateInstallerBinary(fakePe);
+  assert.strictEqual(rFake.ok, false, 'нет сигнатуры MZ');
+
+  const validPe = path.join(dir, 'valid.exe');
+  const validBuf = Buffer.alloc(20 * 1024 * 1024);
+  validBuf[0] = 0x4D; validBuf[1] = 0x5A; // MZ
+  fs.writeFileSync(validPe, validBuf);
+  const rValid = sec.validateInstallerBinary(validPe);
+  assert.strictEqual(rValid.ok, true, 'валидный PE');
+
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) {}
+});
+
 // ─────────────────────────────────────────────
 //  ОТПЕЧАТОК
 // ─────────────────────────────────────────────
@@ -198,6 +232,63 @@ test('окно профиля не больше его экрана', () => {
     assert.ok(id.screen.window_width <= id.screen.width, 'окно шире экрана');
     assert.ok(id.screen.window_height <= id.screen.avail_height, 'окно выше рабочей области');
   }
+});
+
+// ── Страна антидетекта (без VPN: CDP гео/зона/локаль) ──
+test('в авто-режиме координаты НЕ эмулируются (не выдумываем гео против IP)', () => {
+  for (let i = 0; i < 10; i++) {
+    const id = fp.generateIdentity('a' + i, 'i', { browser: 'chrome' });
+    assert.strictEqual(id.geolocation, null);
+    assert.strictEqual(id.geo_source, 'none');
+  }
+});
+
+test('каждая страна даёт согласованную identity (зона ↔ локаль ↔ гео ↔ валюта)', () => {
+  const list = fp.listCountries();
+  assert.ok(list.length >= 30, 'мало стран для антидетекта: ' + list.length);
+  for (const c of list) {
+    for (let i = 0; i < 5; i++) {
+      const id = fp.generateIdentity('t' + i, 'i' + c.code, { browser: 'chrome', country: c.code });
+      assert.strictEqual(id.leak_check.ok, true, c.code + ': ' + id.leak_check.problems.join('; '));
+      assert.strictEqual(id.country_code, c.code);
+      assert.ok(id.geolocation, c.code + ': нет гео-точки при выбранной стране');
+      assert.ok(Math.abs(id.geolocation.lat) <= 90 && Math.abs(id.geolocation.lon) <= 180);
+    }
+  }
+});
+
+test('гео профиля стабильна, у разных профилей одной страны — разная (анти-склейка)', () => {
+  const a1 = fp.generateIdentity('p1', 'i', { browser: 'chrome', country: 'DE' });
+  const a2 = fp.generateIdentity('p1', 'i', { browser: 'chrome', country: 'DE' });
+  assert.deepStrictEqual(a1.geolocation, a2.geolocation, 'один профиль получил разные координаты');
+  const b = fp.generateIdentity('p2', 'i', { browser: 'chrome', country: 'DE' });
+  assert.notDeepStrictEqual(a1.geolocation, b.geolocation, 'два профиля делят гео-точку');
+  // выбор страны не должен «уводить» железо: geo использует отдельный rng-поток
+  const noC = fp.generateIdentity('p1', 'i', { browser: 'chrome' });
+  void noC; // просто не падает
+});
+
+test('явно заданная страна с чужой зоной фиксируется как противоречие', () => {
+  const id = fp.generateIdentity('x', 'i', {
+    browser: 'chrome', country: 'DE',
+    overrides: { timezone: 'America/New_York', lang: 'en-US' },
+  });
+  assert.strictEqual(id.leak_check.ok, false);
+  assert.ok(id.leak_check.problems.some((p) => p.includes('America/New_York')));
+});
+
+test('ручной override зоны в авто-режиме не ломает проверку утечек', () => {
+  const id = fp.generateIdentity('l', 'i', {
+    browser: 'chrome', overrides: { timezone: 'Europe/Moscow', lang: 'de-DE,de' },
+  });
+  assert.strictEqual(id.leak_check.ok, true, JSON.stringify(id.leak_check.problems));
+});
+
+test('мусорный код страны игнорируется, а не ломает генерацию', () => {
+  const id = fp.generateIdentity('g', 'i', { browser: 'chrome', country: '<script>' });
+  assert.ok(id.leak_check.ok, JSON.stringify(id.leak_check.problems));
+  assert.strictEqual(id.geolocation, null);
+  assert.strictEqual(fp.getCountry('<script>'), null);
 });
 
 // ─────────────────────────────────────────────

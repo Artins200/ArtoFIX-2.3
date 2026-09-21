@@ -130,6 +130,9 @@ def _identity_v2():
                        "device_pixel_ratio": 1},
             "vectors": {"webgl": True, "canvas": True},
             "webrtc": {"mode": "public_only"},
+            "country_code": "DE", "country_name": "Германия", "country_city": "Берлин",
+            "geo_source": "country",
+            "geolocation": {"lat": 52.52, "lon": 13.405, "accuracy": 64},
         }
     }
     bm = engine.BrowserManager()
@@ -143,6 +146,19 @@ def _identity_v2():
     assert ident["window_width"] == 1880
     assert ident["webrtc"]["mode"] == "public_only"
     assert ident["vectors"]["webgl"] is True
+    # страна антидетекта: гео-точка доходит до браузера именно так, без обрезаний
+    assert ident["geo_source"] == "country"
+    assert ident["country_code"] == "DE"
+    assert ident["geolocation"] == {"lat": 52.52, "lon": 13.405, "accuracy": 64}
+
+
+@check("identity без выбора страны живёт без эмуляции гео")
+def _identity_v2_no_country():
+    engine = load_engine()
+    cfg = {"identity": {"schema": 2, "languages": ["ru-RU"], "timezone": "Europe/Moscow"}}
+    ident = engine.BrowserManager().build_identity(cfg, "alt", "chrome")
+    assert ident["geolocation"] is None
+    assert ident["geo_source"] == "none"
 
 
 @check("identity v1 (старый config.json) поддерживается")

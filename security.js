@@ -1,6 +1,6 @@
 'use strict';
 /* =============================================================
-   ARTOFIX 2.3 — SECURITY PRIMITIVES
+   ARTOFIX 2.5 — SECURITY PRIMITIVES
    -------------------------------------------------------------
    Единственное место, где живёт валидация входных данных от
    рендерера. Никакие значения отсюда не подставляются в командную
@@ -280,6 +280,53 @@ function readJsonSafe(file, maxBytes = 1024 * 1024) {
   } catch (_) { return null; }
 }
 
+/**
+ * Проверка URL загрузки Python с официального сайта:
+ * только https, только www.python.org, только официальные инсталлеры Python 3.
+ * Защита от 0-day подмены хоста, открытого редиректа и инъекций.
+ */
+function sanitizePythonDownloadUrl(raw) {
+  if (typeof raw !== 'string') return null;
+  const s = raw.trim();
+  if (!s || s.length > 256) return null;
+  if (/[\u0000-\u001f\u007f]/.test(s)) return null;
+  let u;
+  try { u = new URL(s); } catch (_) { return null; }
+  if (u.protocol !== 'https:') return null;
+  const host = u.hostname.toLowerCase();
+  if (host !== 'www.python.org' && host !== 'python.org') return null;
+  if (!/^\/ftp\/python\/3\.\d+\.\d+\/python-3\.\d+\.\d+(-amd64)?\.exe$/i.test(u.pathname)) {
+    return null;
+  }
+  return u.toString();
+}
+
+/**
+ * Валидация скачанного бинарника установщика перед запуском:
+ * проверка существования, допустимого размера (15–60 МБ) и наличия сигнатуры MZ (DOS/PE).
+ * Защита от запуска 0-day шелл-скриптов, повреждённых или подставных файлов.
+ */
+function validateInstallerBinary(filePath) {
+  try {
+    if (!filePath || typeof filePath !== 'string') return { ok: false, msg: 'Некорректный путь к файлу' };
+    if (!fs.existsSync(filePath)) return { ok: false, msg: 'Файл не найден' };
+    const stat = fs.statSync(filePath);
+    if (stat.size < 15 * 1024 * 1024 || stat.size > 60 * 1024 * 1024) {
+      return { ok: false, msg: 'Некорректный размер установщика: ' + stat.size + ' байт' };
+    }
+    const fd = fs.openSync(filePath, 'r');
+    const buf = Buffer.alloc(2);
+    fs.readSync(fd, buf, 0, 2, 0);
+    fs.closeSync(fd);
+    if (buf[0] !== 0x4D || buf[1] !== 0x5A) { // 'M', 'Z'
+      return { ok: false, msg: 'Отсутствует сигнатура MZ исполняемого файла' };
+    }
+    return { ok: true, size: stat.size };
+  } catch (err) {
+    return { ok: false, msg: err && err.message ? err.message : 'Ошибка валидации файла' };
+  }
+}
+
 /** Атомарная запись (temp + rename): не оставляем полусломанный файл при падении. */
 function writeFileAtomic(file, data) {
   const dir = path.dirname(file);
@@ -303,6 +350,8 @@ module.exports = {
   isLocalHost,
   isAllowedUpdateHost,
   sanitizeUpdateUrl,
+  sanitizePythonDownloadUrl,
+  validateInstallerBinary,
   sanitizeTag,
   sanitizeFileName,
   sanitizeBrowser,

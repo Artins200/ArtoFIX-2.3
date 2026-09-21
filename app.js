@@ -1,6 +1,6 @@
 'use strict';
 /* =============================================================
-   ARTOFIX 2.3 — RENDERER CORE
+   ARTOFIX 2.5 — RENDERER CORE
    -------------------------------------------------------------
    Среда исполнения:
      • nodeIntegration = false   → нет require(), process, Buffer
@@ -24,6 +24,7 @@
 var API_READY = !!(window.api && window.api.ready === true);
 // Use a separate name: top-level var api would overwrite the read-only preload bridge.
 var apiBridge = API_READY ? window.api : null;
+var CURRENT_COUNTRY_MODAL_PROFILE = null;
 
 /**
  * Заглушка на случай, если preload не загрузился.
@@ -49,8 +50,10 @@ function makeNullApi() {
     hostsRead: function () { return Promise.resolve({ ok: false, domains: [] }); },
     hostsWrite: empty, hostsWriteAdmin: empty, ublockCheck: obj, ublockInstall: empty,
     diagCheck: obj, diagInstall: empty, cbnPing: obj, cbnSetDns: empty, cbnResetDns: empty,
+    cbnFixWarp: empty, cbnTestWarp: obj,
     readLogs: nul, clearLogs: empty, copyLogs: empty,
-    fingerprintRoll: obj, previewProfile: obj, previewRoll: empty, reportError: function () {},
+    fingerprintRoll: obj, previewProfile: obj, previewRoll: empty, listCountries: nul,
+    reportError: function () {},
     onLogEntry: off, onZapretStatus: off, onZapretProgress: off, onDiagLog: off,
     onDiagProgress: off, onTrayAction: off, onNavigate: off, onBootstrap: off,
     onProfileThumb: off, platform: 'web',
@@ -88,13 +91,30 @@ function afReportError(kind, message, extra) {
   }
 }
 
+/**
+ * Кадр стека, где реально упал код.
+ *
+ * Без него в терминал main-процесса уходило «… (app.js:87)» — а 87 это строка
+ * console.error внутри afReportError, то есть место репортёра, а не падения.
+ * По такому логу баг не найти. Берём последний кадр с app.js: в стеке он
+ * соответствует самой внутренней точке (месту throw).
+ */
+function afErrFrame(err) {
+  if (!err || typeof err.stack !== 'string') return '';
+  var frames = err.stack.split('\n')
+    .map(function (s) { return s.trim(); })
+    .filter(function (s) { return /app\.js:\d+/.test(s); });
+  if (!frames.length) return '';
+  return frames[frames.length - 1].replace(/^at\s+/, '');
+}
+
 window.addEventListener('error', function (e) {
   afReportError('error', (e && e.message) || 'unknown', (e && e.filename ? e.filename.split('/').pop() + ':' + e.lineno : ''));
   showLocalErrorToast((e && e.message) || 'Unknown error');
 });
 window.addEventListener('unhandledrejection', function (e) {
   var r = e && e.reason;
-  afReportError('promise', (r && r.message) || String(r));
+  afReportError('promise', (r && r.message) || String(r), afErrFrame(r));
   showLocalErrorToast('Promise: ' + ((r && r.message) || r));
 });
 
@@ -152,7 +172,7 @@ function afDispatch(ev) {
   try {
     fn.apply(el, args.concat([ev, el]));
   } catch (err) {
-    afReportError('action', name + ': ' + err.message);
+    afReportError('action', name + ': ' + err.message, afErrFrame(err));
   }
 }
 
@@ -243,6 +263,7 @@ function goTab(tabName, btn) {
   if (tabName === 'cheburnet')     initCheburnet();
   if (tabName === 'logs')          initLogs();
   if (tabName === 'diag')          initDiag();
+  if (tabName === 'console')       initConsole();
 
   syncZapretUI();
 }
@@ -405,6 +426,19 @@ async function renderProfiles() {
         ava.textContent = icon || '🌐';
       }
 
+      var countryCode = meta.country || '';
+      var cObj = FP_COUNTRIES.find(function(c) { return c.code === countryCode; });
+      var countryLabel = cObj ? ((cObj.flag ? cObj.flag + ' ' : '') + cObj.name) : (countryCode ? ('🌍 ' + countryCode) : '🌐 Авто (CDP)');
+      var countryBadge = afEl('div', {
+        cls: 'profile-country-badge',
+        attrs: { title: 'Выбрать страну антидетекта (клик)' },
+        text: countryLabel
+      });
+      countryBadge.addEventListener('click', function(e) {
+        e.stopPropagation();
+        openProfileCountryModal(name);
+      });
+
       var del = afEl('div', { cls: 'profile-del', attrs: { title: 'Удалить' }, text: '🗑' });
       del.addEventListener('click', function(e) { e.stopPropagation(); deleteProfile(name); });
 
@@ -414,6 +448,7 @@ async function renderProfiles() {
         afEl('div', { style: 'flex:1;min-width:0' }, [
           afEl('div', { cls: 'profile-name', text: name }),
           afEl('div', { cls: 'profile-meta', text: browser + ' · profiles\\' + name }),
+          countryBadge,
         ]),
         del,
       ]);
@@ -435,6 +470,93 @@ async function loadProfileMetas() {
   } catch(e) {}
 }
 
+function populateCountrySelect(sel, selectedCode) {
+  if (!sel) return;
+  sel.textContent = '';
+  sel.appendChild(afEl('option', { text: '— авто (случайная связка, без гео) —', attrs: { value: '' } }));
+  FP_COUNTRIES.forEach(function (c) {
+    var opt = afEl('option', {
+      text: (c.flag ? c.flag + ' ' : '') + c.name + ' (' + c.code + ')',
+      attrs: { value: c.code },
+    });
+    if (selectedCode && c.code === selectedCode) {
+      opt.selected = true;
+    }
+    sel.appendChild(opt);
+  });
+  if (selectedCode) sel.value = selectedCode;
+}
+
+function openProfileCountryModal(profileName) {
+  CURRENT_COUNTRY_MODAL_PROFILE = profileName;
+  openModal(
+    '<div class="modal-title"><span>🌍</span> Страна антидетекта <span class="modal-close" data-af-on="click" data-af-action="closeModal">✕</span></div>' +
+    '<div id="pcm-profile-name" style="font-size:12.5px;font-weight:700;color:var(--ac);margin-bottom:8px"></div>' +
+    '<p style="font-size:11px;color:var(--tx2);line-height:1.6;margin-bottom:12px">' +
+      'Обход без VPN: браузерные сигналы (часовой пояс, язык, геопозиция города, валюта) подменяются через CDP до загрузки страницы.' +
+    '</p>' +
+    '<label class="field-label">Выбери страну</label>' +
+    '<select class="af-input" id="pcm-country" style="margin-bottom:12px"></select>' +
+    '<div id="pcm-hint" style="font-size:10px;color:var(--tx2);line-height:1.5;margin-bottom:14px"></div>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">' +
+      '<button class="btn btn-primary" data-af-on="click" data-af-action="saveProfileCountryModal">✓ Применить</button>' +
+      '<button class="btn btn-secondary" data-af-on="click" data-af-action="closeModal">Отмена</button>' +
+    '</div>'
+  );
+  var pNameEl = document.getElementById('pcm-profile-name');
+  if (pNameEl) pNameEl.textContent = 'Профиль: ' + profileName;
+
+  var meta = PROFILE_META_CACHE[profileName] || {};
+  initFpCountries().then(function() {
+    var sel = document.getElementById('pcm-country');
+    if (sel) {
+      populateCountrySelect(sel, meta.country || '');
+      sel.addEventListener('change', function() { updatePcmHint(sel.value); });
+      updatePcmHint(meta.country || '');
+    }
+  }).catch(function(){});
+}
+
+function updatePcmHint(code) {
+  var hint = document.getElementById('pcm-hint');
+  if (!hint) return;
+  if (!code) {
+    hint.style.color = 'var(--tx2)';
+    hint.textContent = 'Авто-режим: случайная связка зоны и языка из 40 стран, гео-точка не эмулируется.';
+    return;
+  }
+  var c = FP_COUNTRIES.find(function(x) { return x.code === code; });
+  hint.style.color = 'var(--ylw)';
+  hint.textContent = '⚠ ' + (c ? c.name : code) + ': сайты увидят зону, язык и гео этой страны. ' +
+    'Для полной маскировки IP свяжи профиль с резидентским прокси ' + code + '.';
+}
+
+async function saveProfileCountryModal() {
+  var prof = CURRENT_COUNTRY_MODAL_PROFILE;
+  if (!prof) return;
+  var sel = document.getElementById('pcm-country');
+  var code = sel ? sel.value : '';
+  var meta = {};
+  try { meta = await apiBridge.readProfileMeta(prof) || {}; } catch(e) { meta = {}; }
+  try {
+    var r = await apiBridge.writeProfileMeta(prof, {
+      browser: meta.browser || 'chrome',
+      note: meta.note || '',
+      country: code
+    });
+    if (r && r.ok) {
+      PROFILE_META_CACHE[prof] = Object.assign({}, PROFILE_META_CACHE[prof] || {}, { country: code });
+      closeModal();
+      showToast(code ? '🌍 ' + prof + ' → ' + code : '🌍 ' + prof + ' → авто', 'ok');
+      renderProfiles();
+    } else {
+      showToast('Ошибка сохранения: ' + ((r && r.msg) || '?'), 'err');
+    }
+  } catch(e) {
+    showToast('Ошибка: ' + e.message, 'err');
+  }
+}
+
 function openCreateProfileModal() {
   openModal(
     '<div class="modal-title"><span>👤</span> Создать профиль <span class="modal-close" data-af-on="click" data-af-action="closeModal">✕</span></div>' +
@@ -447,6 +569,8 @@ function openCreateProfileModal() {
       '<button class="btn btn-secondary mp-bro-btn" id="mpb-firefox" data-af-on="click" data-af-action="selectBrowser" data-af-args=\'["firefox"]\' style="display:flex;align-items:center;gap:8px;padding:10px 12px">' + BROWSER_ICONS.firefox + '<span>Firefox</span></button>' +
       '<button class="btn btn-secondary mp-bro-btn" id="mpb-yandex"  data-af-on="click" data-af-action="selectBrowser" data-af-args=\'["yandex"]\'  style="display:flex;align-items:center;gap:8px;padding:10px 12px">' + BROWSER_ICONS.yandex  + '<span>Яндекс</span></button>' +
     '</div>' +
+    '<label class="field-label">🌍 Страна антидетекта (без VPN)</label>' +
+    '<select class="af-input" id="mp-country" style="margin-bottom:12px"></select>' +
     '<label class="field-label">Заметка (необязательно)</label>' +
     '<input class="af-input" id="mp-note" type="text" placeholder="напр: основной акк YouTube" style="margin-bottom:12px">' +
     '<label class="field-label">Прокси профиля <span style="color:var(--tx2);font-size:9px">(необязательно — socks5://host:port)</span></label>' +
@@ -461,6 +585,10 @@ function openCreateProfileModal() {
     '</div>'
   );
   selectBrowser('chrome');
+  initFpCountries().then(function() {
+    var cSel = document.getElementById('mp-country');
+    if (cSel) populateCountrySelect(cSel, '');
+  }).catch(function(){});
   // фокус на поле имени
   setTimeout(function(){ var el = document.getElementById('mp-name'); if(el) el.focus(); }, 80);
 }
@@ -490,6 +618,9 @@ async function submitCreateProfile() {
   var safe = name.replace(/[^a-zA-Z0-9_\-]/g, '');
   if (!safe) { showToast('Только латиница, цифры, _ или -', 'err'); return; }
 
+  var countryEl = document.getElementById('mp-country');
+  var country = countryEl ? countryEl.value : '';
+
   var proxyEl = document.getElementById('mp-proxy');
   var proxyUserEl = document.getElementById('mp-proxy-user');
   var proxyPassEl = document.getElementById('mp-proxy-pass');
@@ -502,7 +633,7 @@ async function submitCreateProfile() {
   try {
     var res = await apiBridge.createProfile(safe);
     if (res && res.ok) {
-      var meta = { browser: _selectedBrowser, note: note, created: new Date().toISOString() };
+      var meta = { browser: _selectedBrowser, note: note, country: country, created: new Date().toISOString() };
       if (proxyServer) {
         meta.proxy = {
           server: proxyServer,
@@ -511,9 +642,9 @@ async function submitCreateProfile() {
         };
       }
       await apiBridge.writeProfileMeta(safe, meta);
-      PROFILE_META_CACHE[safe] = { browser: _selectedBrowser, note: note };
+      PROFILE_META_CACHE[safe] = { browser: _selectedBrowser, note: note, country: country };
       closeModal();
-      showToast('✅ Профиль "' + safe + '" создан (' + _selectedBrowser + ')', 'ok');
+      showToast('✅ Профиль "' + safe + '" создан (' + _selectedBrowser + (country ? ', ' + country : '') + ')', 'ok');
       renderProfiles();
     } else {
       showToast('Ошибка: ' + (res ? res.msg : '?'), 'err');
@@ -919,7 +1050,7 @@ function renderHostsList() {
   }
   el.textContent = '';
   HOSTS_DOMAINS.forEach(function(d, i) {
-    row_el = afEl('div', { cls: 'hosts-row' }, [
+    var row_el = afEl('div', { cls: 'hosts-row' }, [
       afEl('span', { style: 'color:var(--tx2)' }, [
         document.createTextNode('0.0.0.0 '),
         afEl('span', { text: d, style: 'color:var(--tx);font-weight:600' }),
@@ -1366,10 +1497,93 @@ async function initFpProfileSelect() {
   sel.textContent = '';
   if (!list.length) {
     sel.appendChild(afEl('option', { text: '— Нет профилей —', attrs: { value: '' } }));
+  } else {
+    list.forEach(function (pr) { sel.appendChild(afEl('option', { text: pr, attrs: { value: pr } })); });
+    if (keep && list.indexOf(keep) !== -1) sel.value = keep;
+  }
+  loadFpCountry();   // сама внутри подтянет список стран (once)
+}
+
+var FP_COUNTRIES = [];
+var FP_COUNTRIES_BUILT = false;
+
+/** Заполняем селектор стран антидетекта (список отдаёт main-процесс). Один раз — иначе перебор опций сотрёт уже выбранное значение. */
+async function initFpCountries() {
+  if (!FP_COUNTRIES_BUILT || !FP_COUNTRIES.length) {
+    var list = [];
+    try { list = await apiBridge.listCountries() || []; } catch (e) { list = []; }
+    FP_COUNTRIES = Array.isArray(list) ? list : [];
+    FP_COUNTRIES_BUILT = true;
+  }
+  var sel = document.getElementById('fp-country');
+  if (sel && (!sel.options || sel.options.length <= 1)) {
+    sel.textContent = '';
+    sel.appendChild(afEl('option', { text: '— авто (случайная связка, гео не эмулируется) —', attrs: { value: '' } }));
+    FP_COUNTRIES.forEach(function (c) {
+      sel.appendChild(afEl('option', {
+        text: (c.flag ? c.flag + ' ' : '') + c.name + ' (' + c.code + ')',
+        attrs: { value: c.code },
+      }));
+    });
+  }
+  return FP_COUNTRIES;
+}
+
+/** Пользователь переключил профиль — подтягиваем его страну в селектор. */
+async function loadFpCountry() {
+  var profSel = document.getElementById('fp-profile');
+  var countrySel = document.getElementById('fp-country');
+  if (!profSel || !countrySel) return;
+  // сначала опции стран, иначе value=«код» не встанет на пустой селектор
+  await initFpCountries();
+  var meta = {};
+  if (profSel.value) {
+    try { meta = await apiBridge.readProfileMeta(profSel.value) || {}; } catch (e) { meta = {}; }
+  }
+  countrySel.value = (typeof meta.country === 'string') ? meta.country : '';
+  updateFpCountryHint();
+}
+
+function updateFpCountryHint() {
+  var hint = document.getElementById('fp-country-hint');
+  var sel = document.getElementById('fp-country');
+  if (!hint || !sel) return;
+  if (!sel.value) {
+    hint.style.color = 'var(--tx2)';
+    hint.textContent = 'Без VPN-процесса: меняются зона, язык, валюта и координаты профиля (CDP). '
+      + 'Выходной IP браузеру не поменять — при выбранной стране поставь этому профилю прокси той же страны (Аккаунты → профиль).';
     return;
   }
-  list.forEach(function (pr) { sel.appendChild(afEl('option', { text: pr, attrs: { value: pr } })); });
-  if (keep && list.indexOf(keep) !== -1) sel.value = keep;
+  var c = FP_COUNTRIES.filter(function (x) { return x.code === sel.value; })[0];
+  hint.style.color = 'var(--ylw)';
+  hint.textContent = '⚠ ' + (c ? c.name : sel.value) + ': сайты увидят зону, язык и геопозицию этой страны. '
+    + 'IP по-прежнему реальный — свяжи профиль с прокси ' + sel.value + ', иначе GeoIP и геопозиция разойдутся.';
+}
+
+/** Сохраняем выбор страны в meta профиля (прокси НЕ трогаем — пароль хранится в meta без права чтения рендерером). */
+async function saveFpCountry() {
+  var profSel = document.getElementById('fp-profile');
+  var countrySel = document.getElementById('fp-country');
+  var prof = profSel ? profSel.value : '';
+  var code = countrySel ? countrySel.value : '';
+  if (!prof) {
+    showToast('Сначала создай профиль (вкладка «Аккаунты»)', 'err');
+    if (countrySel) countrySel.value = '';
+    return;
+  }
+  var meta = {};
+  try { meta = await apiBridge.readProfileMeta(prof) || {}; } catch (e) { meta = {}; }
+  var r = await apiBridge.writeProfileMeta(prof, {
+    browser: meta.browser || 'chrome',
+    note: meta.note || '',
+    country: code,
+  });
+  if (r && r.ok) {
+    showToast(code ? '🌍 «' + prof + '» → страна ' + code : '🌍 «' + prof + '» → авто-страна', 'ok');
+  } else {
+    showToast('Не удалось сохранить страну: ' + ((r && r.msg) || '?'), 'err');
+  }
+  updateFpCountryHint();
 }
 
 /** Смена «личности» профиля: следующий запуск получит новый стабильный отпечаток. */
@@ -1428,7 +1642,8 @@ async function previewFingerprint() {
   var fp = res.fingerprint || {};
   var W = { webgl: 'WebGL (GPU)', platform: 'Платформа', canvas: 'Canvas', audio: 'Audio', fonts: 'Шрифты',
             tz: 'Часовой пояс', lang: 'Языки', ua: 'User-Agent', screen: 'Экран', hw: 'Железо',
-            battery: 'Батарея', media: 'Медиакодеки', rtc: 'WebRTC' };
+            battery: 'Батарея', media: 'Медиакодеки', rtc: 'WebRTC',
+            country: 'Страна (брауз.)', geo: 'Геопозиция', currency: 'Валюта' };
   var rows = [];
 
   rows.push(['Профиль', res.profile ? res.profile + (res.profileExists ? '' : '  (будет создан)') : '—']);
@@ -1443,6 +1658,11 @@ async function previewFingerprint() {
 
   rows.push(['Canvas noise', fp.canvas_noise !== undefined ? fp.canvas_noise : '—']);
   rows.push(['Проверка утечек', res.leakCheck ? '✓ все векторы согласованы' : '✗ найдены противоречия']);
+  if (res.countryCode && res.hasProxy === false) {
+    rows.push(['⚠ IP', 'у профиля нет прокси: GeoIP провайдера покажет другую страну — поставь прокси ' + res.countryCode]);
+  } else if (res.countryCode) {
+    rows.push(['IP', 'прокси профиля активен — убедись, что его выходная страна ' + res.countryCode]);
+  }
 
   rows.forEach(function (pair) {
     el.appendChild(afEl('div', {}, [
@@ -1468,6 +1688,323 @@ async function previewFingerprint() {
 }
 
 // =====================================================
+//   КЛАССИКА — командная консоль интерфейса
+//   Это НЕ системный shell: свободное выполнение команд ОС запрещено
+//   моделью безопасности (docs/SECURITY.md §2.4). Консоль — текстовый
+//   режим управления теми же проверенными действиями моста API.
+// =====================================================
+var CONSOLE_HISTORY = [];
+var CONSOLE_HIST_POS = -1;
+var CONSOLE_COUNTRY_CACHE = null;
+
+function cprint(text, style) {
+  var out = document.getElementById('console-out');
+  if (!out) return;
+  String(text).split('\n').forEach(function (line) {
+    out.appendChild(afEl('div', {
+      text: line === '' ? ' ' : line,
+      style: 'white-space:pre-wrap;word-break:break-word' + (style ? ';' + style : ''),
+    }));
+  });
+  out.scrollTop = out.scrollHeight;
+}
+
+function cmdSplit(line) {
+  var out = [], m, re = /"([^"]*)"|(\S+)/g;
+  while ((m = re.exec(line))) out.push(m[1] !== undefined ? m[1] : m[2]);
+  return out;
+}
+
+function consoleCountries() {
+  if (CONSOLE_COUNTRY_CACHE) return Promise.resolve(CONSOLE_COUNTRY_CACHE);
+  return apiBridge.listCountries().then(function (list) {
+    CONSOLE_COUNTRY_CACHE = Array.isArray(list) ? list : [];
+    return CONSOLE_COUNTRY_CACHE;
+  }).catch(function () { CONSOLE_COUNTRY_CACHE = []; return CONSOLE_COUNTRY_CACHE; });
+}
+
+function consoleUsage() {
+  cprint('Команды (регистр не важен, аргументы с пробелами — в "кавычках"):', 'color:var(--tx2)');
+  [
+    ['help',                           'эта справка'],
+    ['clear',                          'очистить консоль'],
+    ['profiles',                       'список профилей'],
+    ['mkprofile <имя>',                'создать профиль'],
+    ['rmprofile <имя>',                'удалить профиль'],
+    ['meta <профиль>',                 'показать meta: браузер, страна, прокси'],
+    ['preview [профиль]',              'предпросмотр отпечатка (как кнопка в «Конфигурация»)'],
+    ['reroll <профиль>',               'новый отпечаток (смена личности)'],
+    ['countries [фильтр]',             'страны антидетекта (ISO-коды)'],
+    ['country <профиль> <ISO|->',      'страна антидетекта; «-» или Auto = авто'],
+    ['open <профиль> [url] [браузер]', 'запустить браузер профиля'],
+    ['close-all',                      'закрыть все браузеры профилей'],
+    ['killwinws',                      'остановить winws.exe (Zapret-движок)'],
+    ['zapret <start|stop|version>',    'управление Zapret'],
+    ['warp <fix|test>',                'починить/проверить WARP в Чебурнете'],
+    ['ping <host> [порт]',             'TCP-проверка хоста (как в «Чебурнет»)'],
+    ['logs',                           'последние логи запусков'],
+    ['version',                        'версия оболочки'],
+  ].forEach(function (c) {
+    cprint('  ' + c[0], 'color:var(--ac)');
+    cprint('      ' + c[1], 'color:var(--tx2)');
+  });
+}
+
+async function consoleExec(raw) {
+  var line = String(raw || '').trim();
+  var args = cmdSplit(line);
+  var cmd = (args.shift() || '').toLowerCase();
+  if (!cmd) return;
+  cprint('› ' + line, 'color:var(--ac);font-weight:700;margin-top:6px');
+
+  try {
+    if (cmd === 'help') { consoleUsage(); }
+
+    else if (cmd === 'clear') { consoleClear(); }
+
+    else if (cmd === 'version') {
+      cprint('Artofix ' + (apiBridge.version || '2.5.x') + ' · платформа ' + (apiBridge.platform || '?'), 'color:var(--tx2)');
+    }
+
+    else if (cmd === 'profiles') {
+      var list = await apiBridge.listProfiles();
+      if (!list || !list.length) cprint('(профилей нет — создай: mkprofile yt)', 'color:var(--tx2)');
+      else list.forEach(function (p) { cprint('  👤 ' + p); });
+    }
+
+    else if (cmd === 'mkprofile') {
+      if (!args[0]) return cprint('Нужно имя: mkprofile yt', 'color:var(--red)');
+      var r1 = await apiBridge.createProfile(args[0]);
+      cprint(r1 && r1.ok ? '✓ профиль «' + args[0] + '» создан' : '✗ ' + ((r1 && r1.msg) || 'ошибка'),
+             'color:' + (r1 && r1.ok ? 'var(--grn)' : 'var(--red)'));
+    }
+
+    else if (cmd === 'rmprofile') {
+      if (!args[0]) return cprint('Нужно имя: rmprofile yt', 'color:var(--red)');
+      var r2 = await apiBridge.deleteProfile(args[0]);
+      cprint(r2 && r2.ok ? '✓ профиль «' + args[0] + '» удалён' : '✗ ' + ((r2 && r2.msg) || 'ошибка'),
+             'color:' + (r2 && r2.ok ? 'var(--grn)' : 'var(--red)'));
+    }
+
+    else if (cmd === 'meta') {
+      if (!args[0]) return cprint('Нужен профиль: meta yt', 'color:var(--red)');
+      var mt = await apiBridge.readProfileMeta(args[0]) || {};
+      cprint('  браузер : ' + (mt.browser || 'chrome'));
+      cprint('  страна  : ' + (mt.country || 'авто (без эмуляции гео)'));
+      cprint('  прокси  : ' + (mt.proxy && mt.proxy.server ? mt.proxy.server : 'нет'));
+      cprint('  заметка : ' + (mt.note || '—'));
+    }
+
+    else if (cmd === 'preview') {
+      var prof = args[0] || null;
+      var pv = await apiBridge.previewProfile(prof) || {};
+      var f = pv.fingerprint || {};
+      cprint('  профиль : ' + (pv.profile || 'preview') + (pv.profileExists ? '' : ' (будет создан)'));
+      cprint('  страна  : ' + (f.country || 'авто — без эмуляции гео'));
+      if (f.geo) cprint('  гео     : ' + f.geo);
+      if (f.currency) cprint('  валюта  : ' + f.currency);
+      cprint('  зона    : ' + (f.tz || '—'));
+      cprint('  языки   : ' + (f.lang || '—'));
+      cprint('  GPU     : ' + (f.webgl || '—'));
+      cprint('  экран   : ' + (f.screen || '—'));
+      cprint('  железо  : ' + (f.hw || '—'));
+      if (pv.countryCode && pv.hasProxy === false) {
+        cprint('  ⚠ у профиля нет прокси: GeoIP провайдера покажет другую страну', 'color:var(--ylw)');
+      }
+      cprint(pv.leakCheck ? '✓ утечек нет — все векторы согласованы'
+                          : '✗ противоречия:\n  - ' + (pv.leakProblems || []).join('\n  - '),
+             'color:' + (pv.leakCheck ? 'var(--grn)' : 'var(--ylw)'));
+    }
+
+    else if (cmd === 'countries') {
+      var flt = (args[0] || '').toLowerCase();
+      var clist = await consoleCountries();
+      var shown = clist.filter(function (c) {
+        return !flt || c.code.toLowerCase().indexOf(flt) !== -1 || c.name.toLowerCase().indexOf(flt) !== -1;
+      });
+      if (!shown.length) cprint('Ничего не найдено по «' + flt + '»', 'color:var(--tx2)');
+      shown.forEach(function (c) {
+        cprint('  ' + c.code + '  ' + (c.flag || '') + ' ' + c.name + ' — ' + c.currency + ', городов: ' + c.cities);
+      });
+      cprint('Применение: country <профиль> <ISO>', 'color:var(--tx3)');
+    }
+
+    else if (cmd === 'country') {
+      var cprof = args[0];
+      var code = (args[1] || '').toUpperCase();
+      if (!cprof || !code) return cprint('Формат: country <профиль> <ISO|->  (например: country yt DE)', 'color:var(--red)');
+      if (code === '-' || code === 'AUTO' || code === '—') code = '';
+      if (code) {
+        var known = await consoleCountries();
+        var hit = known.filter(function (c) { return c.code === code; })[0];
+        if (!hit) return cprint('✗ Неизвестная страна «' + code + '» — смотри: countries', 'color:var(--red)');
+      }
+      if (code) {
+        var cmeta = await apiBridge.readProfileMeta(cprof) || {};
+        var rc = await apiBridge.writeProfileMeta(cprof, {
+          browser: cmeta.browser || 'chrome', note: cmeta.note || '', country: code,
+        });
+        cprint(rc && rc.ok ? '✓ «' + cprof + '» → страна ' + code + ' (гео/зона/язык — при следующем запуске)'
+                           : '✗ ' + ((rc && rc.msg) || 'ошибка'),
+               'color:' + (rc && rc.ok ? 'var(--grn)' : 'var(--red)'));
+        if (rc && rc.ok) cprint('  напоминание: IP меняется только прокси профиля той же страны', 'color:var(--ylw)');
+      } else {
+        var cmeta2 = await apiBridge.readProfileMeta(cprof) || {};
+        var rc2 = await apiBridge.writeProfileMeta(cprof, {
+          browser: cmeta2.browser || 'chrome', note: cmeta2.note || '', country: '',
+        });
+        cprint(rc2 && rc2.ok ? '✓ «' + cprof + '» → авто-страна' : '✗ ' + ((rc2 && rc2.msg) || 'ошибка'),
+               'color:' + (rc2 && rc2.ok ? 'var(--grn)' : 'var(--red)'));
+      }
+    }
+
+    else if (cmd === 'reroll') {
+      if (!args[0]) return cprint('Нужен профиль: reroll yt', 'color:var(--red)');
+      var rr = await apiBridge.rerollProfile(args[0]);
+      cprint(rr && rr.ok ? '🎲 Отпечаток «' + args[0] + '» будет новым при следующем запуске'
+                         : '✗ ' + ((rr && rr.msg) || 'ошибка'),
+             'color:' + (rr && rr.ok ? 'var(--grn)' : 'var(--red)'));
+    }
+
+    else if (cmd === 'open') {
+      var oprof = args[0];
+      var ourl = args[1] || 'about:blank';
+      var obro = args[2] || 'chrome';
+      if (!oprof) return cprint('Формат: open <профиль> [url] [браузер]', 'color:var(--red)');
+      if (['chrome', 'msedge', 'firefox', 'yandex'].indexOf(obro) === -1) {
+        return cprint('✗ браузер: chrome|msedge|firefox|yandex', 'color:var(--red)');
+      }
+      if (!/^(https?:\/\/|about:blank$)/i.test(ourl)) {
+        return cprint('✗ url: только http(s):// или about:blank', 'color:var(--red)');
+      }
+      cprint('Запускаю ' + obro + ' «' + oprof + '» → ' + ourl + ' ...', 'color:var(--tx2)');
+      var ro = await apiBridge.launchBrowser({ url: ourl, profile: oprof, browser: obro });
+      cprint(ro && ro.ok ? '▶ Запущен' : '✗ ' + ((ro && ro.msg) || 'ошибка запуска'),
+             'color:' + (ro && ro.ok ? 'var(--grn)' : 'var(--red)'));
+    }
+
+    else if (cmd === 'close-all') {
+      var rc3 = await apiBridge.closeBrowsers();
+      cprint(rc3 && rc3.ok ? '✓ браузеры закрыты' : '✗ ' + ((rc3 && rc3.msg) || 'ошибка'),
+             'color:' + (rc3 && rc3.ok ? 'var(--grn)' : 'var(--red)'));
+    }
+
+    else if (cmd === 'killwinws') {
+      var rk = await apiBridge.killWinws();
+      cprint(rk && rk.ok ? '✓ winws остановлен' : '✗ ' + ((rk && rk.msg) || 'ошибка'),
+             'color:' + (rk && rk.ok ? 'var(--grn)' : 'var(--red)'));
+    }
+
+    else if (cmd === 'zapret') {
+      var sub = (args[0] || '').toLowerCase();
+      if (sub === 'start') {
+        var rs = await apiBridge.zapretStart();
+        cprint(rs && rs.ok ? '✓ Zapret запущен' : '✗ ' + ((rs && rs.msg) || 'ошибка'),
+               'color:' + (rs && rs.ok ? 'var(--grn)' : 'var(--red)'));
+      } else if (sub === 'stop') {
+        var rt = await apiBridge.zapretStop();
+        cprint(rt && rt.ok ? '✓ Zapret остановлен' : '✗ ' + ((rt && rt.msg) || 'ошибка'),
+               'color:' + (rt && rt.ok ? 'var(--grn)' : 'var(--red)'));
+      } else if (sub === 'version') {
+        var rv = await apiBridge.zapretVersion();
+        cprint('Zapret: ' + ((rv && rv.version) || (rv && rv.msg) || 'нет данных'), 'color:var(--tx2)');
+      } else {
+        cprint('Формат: zapret start | stop | version', 'color:var(--red)');
+      }
+    }
+
+    else if (cmd === 'ping') {
+      if (!args[0]) return cprint('Формат: ping <host> [порт]', 'color:var(--red)');
+      var port = args[1] ? parseInt(args[1], 10) : 443;
+      if (!(port >= 1 && port <= 65535)) return cprint('✗ порт 1–65535', 'color:var(--red)');
+      var rp = await apiBridge.cbnPing({ host: args[0], port: port });
+      if (rp && rp.ok) cprint('✓ ' + args[0] + ':' + port + ' — ' + rp.ping + ' мс', 'color:var(--grn)');
+      else cprint('✗ ' + args[0] + ':' + port + ' недоступен' + (rp && rp.err ? ' (' + rp.err + ')' : ''), 'color:var(--red)');
+    }
+
+    else if (cmd === 'warp') {
+      var wSub = (args[0] || 'fix').toLowerCase();
+      if (wSub === 'fix') {
+        cprint('Чиним Cloudflare WARP в Чебурнете...', 'color:var(--ac)');
+        var rw = await apiBridge.cbnFixWarp();
+        cprint(rw && rw.ok ? (rw.msg || '✓ WARP починен') : '✗ ' + ((rw && rw.msg) || 'ошибка'),
+               'color:' + (rw && rw.ok ? 'var(--grn)' : 'var(--red)'));
+      } else if (wSub === 'test') {
+        cprint('Проверяем эндпоинты Cloudflare WARP...', 'color:var(--ac)');
+        var rwt = await apiBridge.cbnTestWarp();
+        if (rwt && rwt.ok && Array.isArray(rwt.tests)) {
+          rwt.tests.forEach(function (t) {
+            cprint('  ' + (t.ok ? '✓ ' : '✗ ') + t.name + ' (' + t.ip + ') — ' + (t.ok ? (t.ping + 'мс') : (t.err || 'блок')),
+                   'color:' + (t.ok ? 'var(--grn)' : 'var(--red)'));
+          });
+        }
+      } else {
+        cprint('Формат: warp fix | warp test', 'color:var(--red)');
+      }
+    }
+
+    else if (cmd === 'logs') {
+      var lg = await apiBridge.readLogs();
+      if (!lg || !lg.length) return cprint('(логов нет)', 'color:var(--tx2)');
+      lg.slice(-12).forEach(function (l) {
+        cprint('  [' + (l.browser || '?') + '/' + (l.profile || '?') + '] ' + l.msg,
+               /err|error|✗/i.test(l.msg) ? 'color:var(--red)' : 'color:var(--tx2)');
+      });
+      cprint('(показаны последние ' + Math.min(lg.length, 12) + ' — полный вид во вкладке «Логи»)', 'color:var(--tx3)');
+    }
+
+    else {
+      cprint('Неизвестная команда «' + cmd + '». Смотри: help', 'color:var(--red)');
+    }
+  } catch (e) {
+    cprint('✗ ' + (e && e.message ? e.message : e), 'color:var(--red)');
+  }
+}
+
+function consoleRun() {
+  var inp = document.getElementById('console-in');
+  if (!inp) return;
+  var line = inp.value.trim();
+  if (!line) return;
+  CONSOLE_HISTORY.push(line);
+  if (CONSOLE_HISTORY.length > 50) CONSOLE_HISTORY.shift();
+  CONSOLE_HIST_POS = -1;
+  inp.value = '';
+  consoleExec(line);
+}
+
+function consoleClear() {
+  var out = document.getElementById('console-out');
+  if (out) out.textContent = '';
+}
+
+function initConsole() {
+  var out = document.getElementById('console-out');
+  var inp = document.getElementById('console-in');
+  if (!out || !inp) return;
+  cprint('Artofix «Классика» v' + (apiBridge.version || '2.5') + ' — командный режим интерфейса.', 'color:var(--tx2)');
+  cprint('help — список команд. Все действия проходят проверку моста безопасности (shell нарочно недоступен).', 'color:var(--tx3)');
+  inp.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { consoleRun(); }
+    else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!CONSOLE_HISTORY.length) return;
+      if (CONSOLE_HIST_POS === -1) CONSOLE_HIST_POS = CONSOLE_HISTORY.length - 1;
+      else if (CONSOLE_HIST_POS > 0) CONSOLE_HIST_POS--;
+      inp.value = CONSOLE_HISTORY[CONSOLE_HIST_POS] || '';
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (CONSOLE_HIST_POS === -1) return;
+      if (CONSOLE_HIST_POS < CONSOLE_HISTORY.length - 1) {
+        CONSOLE_HIST_POS++;
+        inp.value = CONSOLE_HISTORY[CONSOLE_HIST_POS] || '';
+      } else { CONSOLE_HIST_POS = -1; inp.value = ''; }
+    }
+  });
+  try { inp.focus(); } catch (_) {}
+}
+
+// =====================================================
 //   ЗАПУСК БРАУЗЕРА (fingerprint применяет main-процесс атомарно)
 //   Рендерер больше не пишет config.json — только просит запуск.
 // =====================================================
@@ -1482,15 +2019,17 @@ var CBN_MONITOR_TIMER = null;
 // Проверяем TCP connect на порт 443, а не HTTP — надёжно и без ложных срабатываний.
 // host — реальный хост, port — порт (443 по умолч.), retries — сколько раз пробуем
 var CBN_TARGETS = [
-  { name: 'YouTube',    host: 'www.youtube.com',    port: 443, icon: '▶' },
-  { name: 'Discord',    host: 'discord.com',         port: 443, icon: '💬' },
-  { name: 'Instagram',  host: 'www.instagram.com',   port: 443, icon: '📷' },
-  { name: 'X (Twitter)',host: 'x.com',               port: 443, icon: '✖' },
-  { name: 'Spotify',    host: 'open.spotify.com',    port: 443, icon: '🎵' },
-  { name: 'Telegram',   host: 'web.telegram.org',    port: 443, icon: '✈️' },
-  { name: 'Twitch',     host: 'www.twitch.tv',       port: 443, icon: '🟣' },
-  { name: 'Google',     host: 'www.google.com',      port: 443, icon: '🔍' },
-  { name: 'GitHub',     host: 'github.com',          port: 443, icon: '💻' },
+  { name: 'YouTube',         host: 'www.youtube.com',    port: 443, icon: '▶' },
+  { name: 'Discord',         host: 'discord.com',         port: 443, icon: '💬' },
+  { name: 'Claude AI',       host: 'claude.ai',           port: 443, icon: '🧠' },
+  { name: 'Cloudflare WARP', host: '1.1.1.1',             port: 443, icon: '🛡️' },
+  { name: 'Instagram',       host: 'www.instagram.com',   port: 443, icon: '📷' },
+  { name: 'X (Twitter)',     host: 'x.com',               port: 443, icon: '✖' },
+  { name: 'Spotify',         host: 'open.spotify.com',    port: 443, icon: '🎵' },
+  { name: 'Telegram',        host: 'web.telegram.org',    port: 443, icon: '✈️' },
+  { name: 'Twitch',          host: 'www.twitch.tv',       port: 443, icon: '🟣' },
+  { name: 'Google',          host: 'www.google.com',      port: 443, icon: '🔍' },
+  { name: 'GitHub',          host: 'github.com',          port: 443, icon: '💻' },
 ];
 
 async function initCheburnet() {
@@ -1667,14 +2206,60 @@ async function cheburnetEmergency() {
   await new Promise(r => setTimeout(r, 500));
   eLog('▶ Перезапускаем Zapret...', 'var(--ac)');
   await apiBridge.zapretStart().catch(()=>{});
-  eLog('🔒 Меняем DNS на Cloudflare (1.1.1.1)...', 'var(--ac)');
-  var dnsR = await apiBridge.cbnSetDns({ dns1:'1.1.1.1', dns2:'1.0.0.1' }).catch(()=>({ok:false}));
-  eLog(dnsR.ok ? '✓ DNS изменён' : '⚠ DNS не удалось изменить (нужны права)', dnsR.ok ? 'var(--grn)' : 'var(--ylw)');
+  eLog('🛡️ Настраиваем чистый Cloudflare WARP / DoH в обход Чебурнета...', 'var(--ac)');
+  var warpR = await apiBridge.cbnFixWarp().catch(()=>({ok:false}));
+  if (warpR && warpR.ok) {
+    eLog(warpR.msg || '✓ WARP / DoH активирован', 'var(--grn)');
+  } else {
+    eLog('⚠ Пробуем резервный чистый DNS (162.159.192.1 / 162.159.193.1)...', 'var(--ylw)');
+    var dnsR = await apiBridge.cbnSetDns({ dns1:'162.159.192.1', dns2:'162.159.193.1' }).catch(()=>({ok:false}));
+    eLog(dnsR.ok ? '✓ Резервный DNS применён' : '⚠ DNS не удалось изменить (нужны права администратора)', dnsR.ok ? 'var(--grn)' : 'var(--ylw)');
+  }
   await new Promise(r => setTimeout(r, 1000));
   eLog('🌐 Проверяем доступность...', 'var(--tx2)');
   var ping = await apiBridge.cbnPing({ host:'www.google.com', port:443 }).catch(()=>({ok:false}));
-  eLog(ping.ok ? '✅ Соединение восстановлено!' : '⚠ Соединение всё ещё ограничено. Попробуй VPN.', ping.ok ? 'var(--grn)' : 'var(--ylw)');
+  eLog(ping.ok ? '✅ Соединение восстановлено!' : '⚠ Соединение всё ещё ограничено. Попробуй альтернативный режим Zapret.', ping.ok ? 'var(--grn)' : 'var(--ylw)');
   showToast(ping.ok ? '✅ Аварийный режим — OK' : '⚠ Частичное восстановление', ping.ok ? 'ok' : '');
+}
+
+async function cbnFixWarp() {
+  var st = document.getElementById('cbn-warp-status');
+  if (st) { st.textContent = '⏳ Тестируем чистые эндпоинты Cloudflare и настраиваем WARP / DoH...'; st.style.color = 'var(--ac)'; }
+  try {
+    var r = await apiBridge.cbnFixWarp();
+    if (st) {
+      st.textContent = r && r.ok ? r.msg : '✗ Ошибка: ' + ((r && r.msg) || 'не удалось настроить');
+      st.style.color = r && r.ok ? 'var(--grn)' : 'var(--red)';
+    }
+    showToast(r && r.ok ? '🛡️ WARP починен в Чебурнете!' : '✗ Ошибка настройки WARP', r && r.ok ? 'ok' : 'err');
+  } catch (e) {
+    if (st) { st.textContent = '✗ ' + e.message; st.style.color = 'var(--red)'; }
+    showToast('Ошибка: ' + e.message, 'err');
+  }
+}
+
+async function cbnTestWarp() {
+  var st = document.getElementById('cbn-warp-status');
+  if (st) { st.textContent = '⏳ Проверяем эндпоинты Cloudflare WARP...'; st.style.color = 'var(--ac)'; }
+  try {
+    var r = await apiBridge.cbnTestWarp();
+    if (r && r.ok && Array.isArray(r.tests)) {
+      var okCount = r.tests.filter(function (t) { return t.ok; }).length;
+      var msg = 'Доступно: ' + okCount + '/' + r.tests.length + ' эндпоинтов. ';
+      var details = r.tests.map(function (t) {
+        return (t.ok ? '✓ ' : '✗ ') + t.name + ' (' + (t.ok ? (t.ping + 'мс') : (t.err || 'блок')) + ')';
+      }).join(' · ');
+      if (st) {
+        st.textContent = msg + details;
+        st.style.color = okCount > 0 ? 'var(--grn)' : 'var(--red)';
+      }
+      showToast(msg, okCount > 0 ? 'ok' : 'err');
+    } else {
+      if (st) { st.textContent = '✗ ' + ((r && r.msg) || 'ошибка проверки'); st.style.color = 'var(--red)'; }
+    }
+  } catch (e) {
+    if (st) { st.textContent = '✗ ' + e.message; st.style.color = 'var(--red)'; }
+  }
 }
 
 async function cheburnetFullCheck() {
@@ -1973,6 +2558,8 @@ AF_ACTIONS = {
   launchBrowser: launchBrowser,
   selectBrowser: selectBrowser,
   submitCreateProfile: submitCreateProfile,
+  openProfileCountryModal: openProfileCountryModal,
+  saveProfileCountryModal: saveProfileCountryModal,
   addBind: addBind,
   renderBinds: renderBinds,
 
@@ -1987,6 +2574,10 @@ AF_ACTIONS = {
   saveFpConfig: saveFpConfig,
   previewFingerprint: previewFingerprint,
   rerollFingerprint: rerollFingerprint,
+  loadFpCountry: loadFpCountry,
+  saveFpCountry: saveFpCountry,
+  consoleRun: consoleRun,
+  consoleClear: consoleClear,
   previewColors: previewColors,
 
   // внешний вид
@@ -2010,6 +2601,8 @@ AF_ACTIONS = {
   cheburnetEmergency: cheburnetEmergency,
   cheburnetApplyDns: cheburnetApplyDns,
   cheburnetResetDns: cheburnetResetDns,
+  cbnFixWarp: cbnFixWarp,
+  cbnTestWarp: cbnTestWarp,
   saveCbn: saveCbn,
 
   // логи / диагностика

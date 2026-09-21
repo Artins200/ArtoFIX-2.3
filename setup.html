@@ -25,6 +25,8 @@ body {
   height:100vh; overflow:hidden;
   display:flex; flex-direction:column;
   user-select:none;
+  border-radius:18px;
+  box-shadow:0 10px 40px rgba(0,0,0,.15);
 }
 
 /* Titlebar */
@@ -33,6 +35,7 @@ body {
   border-bottom:1px solid var(--divider);
   display:flex; align-items:center; padding:0 14px;
   -webkit-app-region:drag; flex-shrink:0;
+  border-top-left-radius:18px; border-top-right-radius:18px;
 }
 #titlebar-title {
   font-size:12px; font-weight:700; color:var(--tx); letter-spacing:1.2px;
@@ -49,8 +52,8 @@ body {
 
 /* Content */
 #content {
-  flex:1; padding:24px 28px 20px;
-  display:flex; flex-direction:column; gap:16px; overflow:hidden;
+  flex:1; padding:20px 24px 18px;
+  display:flex; flex-direction:column; gap:12px; overflow-y:auto; overflow-x:hidden;
 }
 
 .logo-row {
@@ -65,6 +68,50 @@ body {
 }
 .logo-text { font-size:18px; font-weight:700; color:var(--tx); letter-spacing:1.6px; }
 .logo-sub  { font-size:11.5px; color:var(--tx3); margin-top:2px; }
+
+/* Cards */
+.setup-card {
+  background:var(--card); border:1px solid var(--card-br);
+  border-radius:14px; padding:12px 14px; display:flex; flex-direction:column; gap:8px;
+  box-shadow:0 2px 8px rgba(0,0,0,.03);
+}
+.setup-card-title {
+  display:flex; align-items:center; gap:8px; font-weight:700; font-size:12.5px; color:var(--tx);
+}
+.setup-card-icon { font-size:15px; }
+
+/* Hardware checker */
+.hw-badge {
+  margin-left:auto; font-size:10px; font-weight:700; padding:2px 8px; border-radius:12px;
+  text-transform:uppercase; letter-spacing:.5px;
+}
+.hw-badge.ok   { background:rgba(22,163,74,.12); color:var(--grn); }
+.hw-badge.warn { background:rgba(217,119,6,.12); color:var(--ylw); }
+.hw-grid {
+  display:grid; grid-template-columns:1fr 1fr; gap:8px;
+}
+.hw-item {
+  background:var(--input-bg); border-radius:10px; padding:7px 10px;
+  border:1px solid var(--divider);
+}
+.hw-label { font-size:10.5px; color:var(--tx3); font-weight:600; margin-bottom:2px; }
+.hw-val   { font-size:12px; font-weight:700; color:var(--tx); font-family:var(--mono); }
+.hw-note  { font-size:10.5px; color:var(--tx2); line-height:1.4; }
+
+/* Permission prompt */
+.perm-desc {
+  font-size:11.5px; color:var(--tx2); line-height:1.5;
+}
+.perm-list {
+  display:flex; flex-direction:column; gap:4px; margin:2px 0;
+}
+.perm-item {
+  display:flex; align-items:center; gap:6px; font-size:11px;
+  background:var(--input-bg); padding:5px 8px; border-radius:8px; border:1px solid var(--divider);
+}
+.perm-item-dot { width:6px; height:6px; border-radius:50%; }
+.perm-item-dot.needed { background:var(--ac); }
+.perm-item-dot.ok { background:var(--grn); }
 
 /* Step label */
 #step-label {
@@ -175,8 +222,44 @@ body {
   <div class="logo-row">
     <div class="logo-icon">⚡</div>
     <div>
-      <div class="logo-text">ARTOFIX <span style="color:var(--ac);font-size:13px">2.3</span></div>
+      <div class="logo-text">ARTOFIX <span style="color:var(--ac);font-size:13px">2.5</span></div>
       <div class="logo-sub">Установка компонентов</div>
+    </div>
+  </div>
+
+  <!-- Аппаратный чекер: ОЗУ и ядра -->
+  <div class="setup-card" id="hw-card">
+    <div class="setup-card-title">
+      <span class="setup-card-icon">💻</span>
+      <span>Аппаратные ресурсы</span>
+      <span class="hw-badge ok" id="hw-badge">Проверка...</span>
+    </div>
+    <div class="hw-grid">
+      <div class="hw-item">
+        <div class="hw-label">Ядра процессора:</div>
+        <div class="hw-val" id="hw-cores">—</div>
+      </div>
+      <div class="hw-item">
+        <div class="hw-label">Оперативная память:</div>
+        <div class="hw-val" id="hw-ram">—</div>
+      </div>
+    </div>
+    <div class="hw-note" id="hw-note">Определение характеристик системы...</div>
+  </div>
+
+  <!-- Разрешение пользователя на установку компонентов -->
+  <div class="setup-card" id="perm-card" style="display:none">
+    <div class="setup-card-title">
+      <span class="setup-card-icon">🛡️</span>
+      <span>Необходимые компоненты и библиотеки</span>
+    </div>
+    <div class="perm-list" id="perm-list"></div>
+    <div class="perm-desc">
+      Для работы программы требуется скачать Python 3 с официального сайта <b>python.org</b> и установить библиотеки (Selenium, Selenium-Stealth, WebDriver-Manager). Установщик запустится тихо и удалится сразу после завершения.
+    </div>
+    <div class="btn-row" style="margin-top:6px">
+      <button class="btn btn-primary" id="btn-perm-confirm" data-af-on="click" data-af-action="confirmInstall">✓ Разрешить установку</button>
+      <button class="btn btn-secondary" id="btn-perm-skip" data-af-on="click" data-af-action="skipSetup">Пропустить</button>
     </div>
   </div>
 
