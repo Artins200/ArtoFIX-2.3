@@ -73,19 +73,235 @@ const GPU_LIMITS = {
   },
 };
 
-/** Локаль ↔ TZ ↔ гео: несовпадение (язык ru, зона America/New_York) — прямой флаг бота. */
-const LOCALES = [
-  { tz: 'Europe/Moscow',      lang: 'ru-RU', langs: ['ru-RU', 'ru', 'en-US', 'en'], geo: null },
-  { tz: 'Europe/Kyiv',        lang: 'uk-UA', langs: ['uk-UA', 'uk', 'ru-RU', 'ru', 'en-US', 'en'], geo: null },
-  { tz: 'Europe/Berlin',      lang: 'de-DE', langs: ['de-DE', 'de', 'en-US', 'en'], geo: null },
-  { tz: 'Europe/Amsterdam',   lang: 'nl-NL', langs: ['nl-NL', 'nl', 'en-US', 'en'], geo: null },
-  { tz: 'Europe/Warsaw',      lang: 'pl-PL', langs: ['pl-PL', 'pl', 'en-US', 'en'], geo: null },
-  { tz: 'Europe/London',      lang: 'en-GB', langs: ['en-GB', 'en-US', 'en'], geo: null },
-  { tz: 'America/New_York',   lang: 'en-US', langs: ['en-US', 'en'], geo: null },
-  { tz: 'America/Chicago',    lang: 'en-US', langs: ['en-US', 'en'], geo: null },
-  { tz: 'Asia/Almaty',        lang: 'ru-RU', langs: ['ru-RU', 'ru', 'kk-KZ', 'kk', 'en-US', 'en'], geo: null },
-  { tz: 'Asia/Tbilisi',       lang: 'ru-RU', langs: ['ru-RU', 'ru', 'ka-GE', 'ka', 'en-US', 'en'], geo: null },
+/* ─────────────────────────────────────────────
+   СТРАНЫ: единая связка «страна → локаль → зона → город → координаты».
+
+   Антидетект по стране НЕ требует VPN-слоя процесса: сайты судят о стране
+   пользователя по браузерным сигналам — IANA-зоне, Accept-Language/ua-full
+   локали, а если сайту дали доступ к геопозиции — по координатам. Всё это
+   применяется через CDP (а не системный VPN): Emulation.setTimezoneOverride,
+   setLocaleOverride, setGeolocationOverride + --lang и intl.accept_languages.
+   Единственное, что браузерными средствами не поменять, — выходной IP:
+   поэтому IP-совпадение остаётся на прокси профиля (см. UI-подсказку).
+
+   Каждая зона: { tz, city, lat, lon, r } — город-«якорь» и радиус (в градусах),
+   внутри которого профиль получает СТАБИЛЬНУЮ случайную точку: два профиля
+   одной страны живут в разных местах (не «склеиваются»), а один профиль не
+   «прыгает» по городу между запусками.
+   ───────────────────────────────────────────── */
+const COUNTRIES = [
+  { code: 'RU', name: 'Россия',        flag: '🇷🇺', region: 'Europe',  currency: 'RUB', weekStart: 1,
+    langs: ['ru-RU', 'ru', 'en-US', 'en'],
+    zones: [
+      { tz: 'Europe/Moscow',        city: 'Москва',        lat: 55.7558, lon: 37.6173,  r: 0.28 },
+      { tz: 'Europe/Moscow',        city: 'Санкт-Петербург', lat: 59.9343, lon: 30.3351, r: 0.20 },
+      { tz: 'Europe/Samara',        city: 'Самара',        lat: 53.1959, lon: 50.1002,  r: 0.18 },
+      { tz: 'Asia/Yekaterinburg',   city: 'Екатеринбург',  lat: 56.8389, lon: 60.6057,  r: 0.20 },
+      { tz: 'Asia/Novosibirsk',     city: 'Новосибирск',   lat: 55.0084, lon: 82.9357,  r: 0.18 },
+    ] },
+  { code: 'UA', name: 'Украина',       flag: '🇺🇦', region: 'Europe',  currency: 'UAH', weekStart: 1,
+    langs: ['uk-UA', 'uk', 'ru-RU', 'ru', 'en-US', 'en'],
+    zones: [
+      { tz: 'Europe/Kyiv',          city: 'Киев',          lat: 50.4501, lon: 30.5234,  r: 0.18 },
+      { tz: 'Europe/Kyiv',          city: 'Харьков',       lat: 49.9935, lon: 36.2304,  r: 0.14 },
+    ] },
+  { code: 'BY', name: 'Беларусь',      flag: '🇧🇾', region: 'Europe',  currency: 'BYN', weekStart: 1,
+    langs: ['be-BY', 'be', 'ru-RU', 'ru', 'en-US', 'en'],
+    zones: [{ tz: 'Europe/Minsk',   city: 'Минск',         lat: 53.9045, lon: 27.5615,  r: 0.16 }] },
+  { code: 'KZ', name: 'Казахстан',     flag: '🇰🇿', region: 'Asia',    currency: 'KZT', weekStart: 1,
+    langs: ['ru-RU', 'ru', 'kk-KZ', 'kk', 'en-US', 'en'],
+    zones: [
+      { tz: 'Asia/Almaty',          city: 'Алматы',        lat: 43.2380, lon: 76.9450,  r: 0.16 },
+      { tz: 'Asia/Almaty',          city: 'Астана',        lat: 51.1694, lon: 71.4491,  r: 0.16 },
+    ] },
+  { code: 'GE', name: 'Грузия',        flag: '🇬🇪', region: 'Asia',    currency: 'GEL', weekStart: 1,
+    langs: ['ru-RU', 'ru', 'ka-GE', 'ka', 'en-US', 'en'],
+    zones: [{ tz: 'Asia/Tbilisi',   city: 'Тбилиси',       lat: 41.7151, lon: 44.8271,  r: 0.12 }] },
+  { code: 'AM', name: 'Армения',       flag: '🇦🇲', region: 'Asia',    currency: 'AMD', weekStart: 1,
+    langs: ['ru-RU', 'ru', 'hy-AM', 'hy', 'en-US', 'en'],
+    zones: [{ tz: 'Asia/Yerevan',   city: 'Ереван',        lat: 40.1872, lon: 44.5152,  r: 0.10 }] },
+  { code: 'AZ', name: 'Азербайджан',   flag: '🇦🇿', region: 'Asia',    currency: 'AZN', weekStart: 1,
+    langs: ['ru-RU', 'ru', 'az-AZ', 'az', 'en-US', 'en'],
+    zones: [{ tz: 'Asia/Baku',      city: 'Баку',          lat: 40.4093, lon: 49.8671,  r: 0.12 }] },
+  { code: 'KG', name: 'Киргизия',      flag: '🇰🇬', region: 'Asia',    currency: 'KGS', weekStart: 1,
+    langs: ['ru-RU', 'ru', 'ky-KG', 'ky', 'en-US', 'en'],
+    zones: [{ tz: 'Asia/Bishkek',   city: 'Бишкек',        lat: 42.8746, lon: 74.5698,  r: 0.12 }] },
+  { code: 'UZ', name: 'Узбекистан',    flag: '🇺🇿', region: 'Asia',    currency: 'UZS', weekStart: 1,
+    langs: ['ru-RU', 'ru', 'uz-UZ', 'uz', 'en-US', 'en'],
+    zones: [{ tz: 'Asia/Tashkent',  city: 'Ташкент',       lat: 41.2995, lon: 69.2401,  r: 0.16 }] },
+  { code: 'TR', name: 'Турция',        flag: '🇹🇷', region: 'Asia',    currency: 'TRY', weekStart: 1,
+    langs: ['tr-TR', 'tr', 'en-US', 'en'],
+    zones: [
+      { tz: 'Europe/Istanbul',      city: 'Стамбул',       lat: 41.0082, lon: 28.9784,  r: 0.20 },
+      { tz: 'Europe/Istanbul',      city: 'Анкара',        lat: 39.9334, lon: 32.8597,  r: 0.16 },
+    ] },
+  { code: 'DE', name: 'Германия',      flag: '🇩🇪', region: 'Europe',  currency: 'EUR', weekStart: 1,
+    langs: ['de-DE', 'de', 'en-US', 'en'],
+    zones: [
+      { tz: 'Europe/Berlin',        city: 'Берлин',        lat: 52.5200, lon: 13.4050,  r: 0.16 },
+      { tz: 'Europe/Berlin',        city: 'Гамбург',       lat: 53.5511, lon: 9.9937,   r: 0.12 },
+      { tz: 'Europe/Berlin',        city: 'Мюнхен',        lat: 48.1351, lon: 11.5820,  r: 0.12 },
+      { tz: 'Europe/Berlin',        city: 'Кёльн',         lat: 50.9375, lon: 6.9603,   r: 0.10 },
+    ] },
+  { code: 'NL', name: 'Нидерланды',    flag: '🇳🇱', region: 'Europe',  currency: 'EUR', weekStart: 1,
+    langs: ['nl-NL', 'nl', 'en-US', 'en'],
+    zones: [
+      { tz: 'Europe/Amsterdam',     city: 'Амстердам',     lat: 52.3676, lon: 4.9041,   r: 0.10 },
+      { tz: 'Europe/Amsterdam',     city: 'Роттердам',     lat: 51.9225, lon: 4.4792,   r: 0.08 },
+    ] },
+  { code: 'PL', name: 'Польша',        flag: '🇵🇱', region: 'Europe',  currency: 'PLN', weekStart: 1,
+    langs: ['pl-PL', 'pl', 'en-US', 'en'],
+    zones: [
+      { tz: 'Europe/Warsaw',        city: 'Варшава',       lat: 52.2297, lon: 21.0122,  r: 0.14 },
+      { tz: 'Europe/Warsaw',        city: 'Краков',        lat: 50.0647, lon: 19.9450,  r: 0.10 },
+    ] },
+  { code: 'CZ', name: 'Чехия',         flag: '🇨🇿', region: 'Europe',  currency: 'CZK', weekStart: 1,
+    langs: ['cs-CZ', 'cs', 'en-US', 'en'],
+    zones: [{ tz: 'Europe/Prague',  city: 'Прага',         lat: 50.0755, lon: 14.4378,  r: 0.10 }] },
+  { code: 'AT', name: 'Австрия',       flag: '🇦🇹', region: 'Europe',  currency: 'EUR', weekStart: 1,
+    langs: ['de-AT', 'de-DE', 'de', 'en-US', 'en'],
+    zones: [{ tz: 'Europe/Vienna',  city: 'Вена',          lat: 48.2082, lon: 16.3738,  r: 0.12 }] },
+  { code: 'CH', name: 'Швейцария',     flag: '🇨🇭', region: 'Europe',  currency: 'CHF', weekStart: 1,
+    langs: ['de-CH', 'de', 'fr-CH', 'fr', 'en-US', 'en'],
+    zones: [{ tz: 'Europe/Zurich',  city: 'Цюрих',         lat: 47.3769, lon: 8.5417,   r: 0.08 }] },
+  { code: 'FR', name: 'Франция',       flag: '🇫🇷', region: 'Europe',  currency: 'EUR', weekStart: 1,
+    langs: ['fr-FR', 'fr', 'en-US', 'en'],
+    zones: [
+      { tz: 'Europe/Paris',         city: 'Париж',         lat: 48.8566, lon: 2.3522,   r: 0.14 },
+      { tz: 'Europe/Paris',         city: 'Лион',          lat: 45.7640, lon: 4.8357,   r: 0.10 },
+    ] },
+  { code: 'IT', name: 'Италия',        flag: '🇮🇹', region: 'Europe',  currency: 'EUR', weekStart: 1,
+    langs: ['it-IT', 'it', 'en-US', 'en'],
+    zones: [
+      { tz: 'Europe/Rome',          city: 'Рим',           lat: 41.9028, lon: 12.4964,  r: 0.12 },
+      { tz: 'Europe/Rome',          city: 'Милан',         lat: 45.4642, lon: 9.1900,   r: 0.10 },
+    ] },
+  { code: 'ES', name: 'Испания',       flag: '🇪🇸', region: 'Europe',  currency: 'EUR', weekStart: 1,
+    langs: ['es-ES', 'es', 'en-US', 'en'],
+    zones: [
+      { tz: 'Europe/Madrid',        city: 'Мадрид',        lat: 40.4168, lon: -3.7038,  r: 0.14 },
+      { tz: 'Europe/Madrid',        city: 'Барселона',     lat: 41.3874, lon: 2.1686,   r: 0.10 },
+    ] },
+  { code: 'PT', name: 'Португалия',    flag: '🇵🇹', region: 'Europe',  currency: 'EUR', weekStart: 1,
+    langs: ['pt-PT', 'pt', 'en-US', 'en'],
+    zones: [{ tz: 'Europe/Lisbon',  city: 'Лиссабон',      lat: 38.7223, lon: -9.1393,  r: 0.10 }] },
+  { code: 'SE', name: 'Швеция',        flag: '🇸🇪', region: 'Europe',  currency: 'SEK', weekStart: 1,
+    langs: ['sv-SE', 'sv', 'en-US', 'en'],
+    zones: [{ tz: 'Europe/Stockholm', city: 'Стокгольм',   lat: 59.3293, lon: 18.0686,  r: 0.12 }] },
+  { code: 'FI', name: 'Финляндия',     flag: '🇫🇮', region: 'Europe',  currency: 'EUR', weekStart: 1,
+    langs: ['fi-FI', 'fi', 'en-US', 'en'],
+    zones: [{ tz: 'Europe/Helsinki', city: 'Хельсинки',    lat: 60.1699, lon: 24.9384,  r: 0.10 }] },
+  { code: 'NO', name: 'Норвегия',      flag: '🇳🇴', region: 'Europe',  currency: 'NOK', weekStart: 1,
+    langs: ['nb-NO', 'nb', 'no', 'en-US', 'en'],
+    zones: [{ tz: 'Europe/Oslo',    city: 'Осло',          lat: 59.9139, lon: 10.7522,  r: 0.10 }] },
+  { code: 'DK', name: 'Дания',          flag: '🇩🇰', region: 'Europe',  currency: 'DKK', weekStart: 1,
+    langs: ['da-DK', 'da', 'en-US', 'en'],
+    zones: [{ tz: 'Europe/Copenhagen', city: 'Копенгаген', lat: 55.6761, lon: 12.5683,  r: 0.10 }] },
+  { code: 'LV', name: 'Латвия',         flag: '🇱🇻', region: 'Europe',  currency: 'EUR', weekStart: 1,
+    langs: ['lv-LV', 'lv', 'ru-RU', 'ru', 'en-US', 'en'],
+    zones: [{ tz: 'Europe/Riga',    city: 'Рига',          lat: 56.9496, lon: 24.1052,  r: 0.08 }] },
+  { code: 'LT', name: 'Литва',          flag: '🇱🇹', region: 'Europe',  currency: 'EUR', weekStart: 1,
+    langs: ['lt-LT', 'lt', 'ru-RU', 'ru', 'en-US', 'en'],
+    zones: [{ tz: 'Europe/Vilnius', city: 'Вильнюс',       lat: 54.6872, lon: 25.2797,  r: 0.08 }] },
+  { code: 'EE', name: 'Эстония',        flag: '🇪🇪', region: 'Europe',  currency: 'EUR', weekStart: 1,
+    langs: ['et-EE', 'et', 'ru-RU', 'ru', 'en-US', 'en'],
+    zones: [{ tz: 'Europe/Tallinn', city: 'Таллинн',       lat: 59.4370, lon: 24.7536,  r: 0.07 }] },
+  { code: 'GB', name: 'Великобритания', flag: '🇬🇧', region: 'Europe',  currency: 'GBP', weekStart: 1,
+    langs: ['en-GB', 'en-US', 'en'],
+    zones: [
+      { tz: 'Europe/London',        city: 'Лондон',        lat: 51.5074, lon: -0.1278,  r: 0.16 },
+      { tz: 'Europe/London',        city: 'Манчестер',     lat: 53.4808, lon: -2.2426,  r: 0.10 },
+    ] },
+  { code: 'IE', name: 'Ирландия',       flag: '🇮🇪', region: 'Europe',  currency: 'EUR', weekStart: 1,
+    langs: ['en-IE', 'en-US', 'en'],
+    zones: [{ tz: 'Europe/Dublin',  city: 'Дублин',        lat: 53.3498, lon: -6.2603,  r: 0.08 }] },
+  { code: 'US', name: 'США',            flag: '🇺🇸', region: 'America', currency: 'USD', weekStart: 0,
+    langs: ['en-US', 'en'],
+    zones: [
+      { tz: 'America/New_York',     city: 'Нью-Йорк',      lat: 40.7128, lon: -74.0060, r: 0.16 },
+      { tz: 'America/Chicago',      city: 'Чикаго',        lat: 41.8781, lon: -87.6298, r: 0.14 },
+      { tz: 'America/Denver',       city: 'Денвер',        lat: 39.7392, lon: -104.9903, r: 0.12 },
+      { tz: 'America/Los_Angeles',  city: 'Лос-Анджелес',  lat: 34.0522, lon: -118.2437, r: 0.14 },
+      { tz: 'America/Los_Angeles',  city: 'Сан-Франциско', lat: 37.7749, lon: -122.4194, r: 0.10 },
+    ] },
+  { code: 'CA', name: 'Канада',         flag: '🇨🇦', region: 'America', currency: 'CAD', weekStart: 0,
+    langs: ['en-CA', 'en-US', 'en'],
+    zones: [
+      { tz: 'America/Toronto',      city: 'Торонто',       lat: 43.6532, lon: -79.3832, r: 0.12 },
+      { tz: 'America/Vancouver',    city: 'Ванкувер',      lat: 49.2827, lon: -123.1207, r: 0.10 },
+    ] },
+  { code: 'BR', name: 'Бразилия',       flag: '🇧🇷', region: 'America', currency: 'BRL', weekStart: 0,
+    langs: ['pt-BR', 'pt', 'en-US', 'en'],
+    zones: [{ tz: 'America/Sao_Paulo', city: 'Сан-Паулу',  lat: -23.5505, lon: -46.6333, r: 0.18 }] },
+  { code: 'AR', name: 'Аргентина',      flag: '🇦🇷', region: 'America', currency: 'ARS', weekStart: 0,
+    langs: ['es-AR', 'es', 'en-US', 'en'],
+    zones: [{ tz: 'America/Argentina/Buenos_Aires', city: 'Буэнос-Айрес', lat: -34.6037, lon: -58.3816, r: 0.14 }] },
+  { code: 'MX', name: 'Мексика',        flag: '🇲🇽', region: 'America', currency: 'MXN', weekStart: 0,
+    langs: ['es-MX', 'es', 'en-US', 'en'],
+    zones: [{ tz: 'America/Mexico_City', city: 'Мехико',   lat: 19.4326, lon: -99.1332, r: 0.14 }] },
+  { code: 'IN', name: 'Индия',          flag: '🇮🇳', region: 'Asia',    currency: 'INR', weekStart: 0,
+    langs: ['en-IN', 'en', 'hi-IN', 'hi', 'en-US'],
+    zones: [
+      { tz: 'Asia/Kolkata',         city: 'Мумбаи',        lat: 19.0760, lon: 72.8777,  r: 0.14 },
+      { tz: 'Asia/Kolkata',         city: 'Дели',          lat: 28.7041, lon: 77.1025,  r: 0.12 },
+    ] },
+  { code: 'JP', name: 'Япония',         flag: '🇯🇵', region: 'Asia',    currency: 'JPY', weekStart: 0,
+    langs: ['ja-JP', 'ja', 'en-US', 'en'],
+    zones: [
+      { tz: 'Asia/Tokyo',           city: 'Токио',         lat: 35.6762, lon: 139.6503, r: 0.14 },
+      { tz: 'Asia/Tokyo',           city: 'Осака',         lat: 34.6937, lon: 135.5023, r: 0.10 },
+    ] },
+  { code: 'KR', name: 'Южная Корея',    flag: '🇰🇷', region: 'Asia',    currency: 'KRW', weekStart: 0,
+    langs: ['ko-KR', 'ko', 'en-US', 'en'],
+    zones: [{ tz: 'Asia/Seoul',     city: 'Сеул',          lat: 37.5665, lon: 126.9780, r: 0.10 }] },
+  { code: 'SG', name: 'Сингапур',       flag: '🇸🇬', region: 'Asia',    currency: 'SGD', weekStart: 0,
+    langs: ['en-SG', 'en-US', 'en', 'zh-SG', 'zh'],
+    zones: [{ tz: 'Asia/Singapore', city: 'Сингапур',      lat: 1.3521,  lon: 103.8198, r: 0.05 }] },
+  { code: 'AE', name: 'ОАЭ',            flag: '🇦🇪', region: 'Asia',    currency: 'AED', weekStart: 0,
+    langs: ['ar-AE', 'ar', 'en-US', 'en'],
+    zones: [{ tz: 'Asia/Dubai',     city: 'Дубай',         lat: 25.2048, lon: 55.2708,  r: 0.08 }] },
+  { code: 'AU', name: 'Австралия',      flag: '🇦🇺', region: 'Australia', currency: 'AUD', weekStart: 0,
+    langs: ['en-AU', 'en-US', 'en'],
+    zones: [
+      { tz: 'Australia/Sydney',     city: 'Сидней',        lat: -33.8688, lon: 151.2093, r: 0.14 },
+      { tz: 'Australia/Melbourne',  city: 'Мельбурн',      lat: -37.8136, lon: 144.9631, r: 0.12 },
+    ] },
 ];
+
+const COUNTRY_BY_CODE = {};
+const CURRENCY_BY_CC = {};
+COUNTRIES.forEach((c) => { COUNTRY_BY_CODE[c.code] = c; CURRENCY_BY_CC[c.code] = c.currency; });
+
+function getCountry(code) { return COUNTRY_BY_CODE[String(code || '').trim().toUpperCase()] || null; }
+
+/** Список для UI-селектора: только то, что нужно отрисовать (без координат). */
+function listCountries() {
+  return COUNTRIES.map((c) => ({
+    code: c.code, name: c.name, flag: c.flag, region: c.region,
+    currency: c.currency, cities: c.zones.length,
+  }));
+}
+
+/**
+ * Локаль ↔ TZ ↔ гео: несовпадение (язык ru, зона America/New_York) — прямой
+ * флаг бота. Таблица выводится из COUNTRIES, поэтому любая случайная связка
+ * согласована по построению. geo здесь всегда null — координаты выдаются
+ * только при ЯВНОМ выборе страны (docs/ANTI-DETECT.md §8: не выдумывать гео,
+ * не совпадающее с выходным IP).
+ */
+const LOCALES = [];
+COUNTRIES.forEach((country) => {
+  country.zones.forEach((z) => {
+    LOCALES.push({
+      tz: z.tz,
+      lang: country.langs[0],
+      langs: country.langs.slice(),
+      geo: null,
+      country: country.code,
+      anchor: { lat: z.lat, lon: z.lon, r: z.r },
+    });
+  });
+});
 
 /** Популярные разрешения с частотой, как в реальной статистике. */
 const SCREENS = [
@@ -178,7 +394,10 @@ function buildUserAgent(browser, version, platformString) {
 /**
  * @param {string} profileName   имя профиля (стабильность отпечатка)
  * @param {string} installId     ID установки (чтобы профили разных ПК не совпадали)
- * @param {object} opts          {browser, browserVersion, resolution, spoof, overrides}
+ * @param {object} opts          {browser, browserVersion, resolution, spoof, overrides, country}
+ *   opts.country — ISO-код страны ('DE', 'US', …): локаль, зона и гео-точка
+ *   берутся только из этой страны и координаты эмулируются (CDP). Без кода —
+ *   случайная согласованная связка, гео не трогаем (см. COUNTRIES выше).
  */
 function generateIdentity(profileName, installId, opts) {
   opts = opts || {};
@@ -187,8 +406,12 @@ function generateIdentity(profileName, installId, opts) {
   const identitySeed = seedFrom('artofix|' + installId + '|' + profileName + '|' + browser + salt);
   const rng = makeRng(identitySeed);
 
+  const country = opts.country ? getCountry(opts.country) : null;
+
   const gpu    = pick(rng, GPU_BANK);
-  const locale = pick(rng, LOCALES);
+  const locale = country
+    ? pick(rng, LOCALES.filter((l) => l.country === country.code))
+    : pick(rng, LOCALES);
   const screen = pickWeighted(rng, SCREENS, 'weight');
   const hw     = pick(rng, HARDWARE);
 
@@ -205,6 +428,25 @@ function generateIdentity(profileName, installId, opts) {
   const scale = screen.w >= 2560 ? pick(rng, [1, 1.25, 1.5]) : 1;
 
   const ua = buildUserAgent(browser, fullVersion, 'Windows NT 10.0; Win64; x64');
+
+  /* Гео-точка профиля. Ток rng берётся из ОТДЕЛЬНОГО потока (не из общего rng),
+     чтобы включение/выключение выбора страны не сдвигало остальные векторы
+     (canvas-шум, экран, железо) — иначе у того же профиля «уедет» всё железо.
+     Джиттер в радиусе города: профиль стабильно живёт в одной точке, но два
+     профиля одной страны не сидят в одинаковых координатах (анти-«склейка»). */
+  let geoLocation = null;
+  let geoCity = null;
+  if (country) {
+    const geoRng = makeRng((identitySeed ^ 0x9e3779b9) >>> 0);
+    const zone = country.zones.filter((z) => z.tz === locale.tz)[0] || country.zones[0];
+    const jitterDeg = () => (geoRng() - 0.5) * 2 * zone.r;
+    geoLocation = {
+      lat: +(zone.lat + jitterDeg()).toFixed(6),
+      lon: +(zone.lon + jitterDeg()).toFixed(6),
+      accuracy: intBetween(geoRng, 32, 120),
+    };
+    geoCity = zone.city;
+  }
 
   const identity = {
     schema: 2,
@@ -234,7 +476,15 @@ function generateIdentity(profileName, installId, opts) {
     lang: locale.lang,
     languages: locale.langs.slice(),
     accept_language: locale.langs.join(','),
-    geolocation: locale.geo,
+    geolocation: geoLocation,
+    geo_source: country ? 'country' : 'none',
+    country_code: locale.country || null,
+    country_name: country ? country.name : null,
+    country_flag: country ? country.flag : null,
+    country_city: country ? geoCity : null,
+    region: String(locale.tz).split('/')[0],
+    currency: country ? country.currency : CURRENCY_BY_CC[locale.country] || null,
+    week_start: country ? country.weekStart : (COUNTRY_BY_CODE[locale.country] || {}).weekStart || 1,
 
     // ── GPU ──
     webgl: {
@@ -301,7 +551,30 @@ function generateIdentity(profileName, installId, opts) {
   if (ov.lang) { identity.lang = ov.lang; identity.languages = ov.lang.split(',').slice(0, 3); }
   if (ov.proxy_server) { identity.proxy = { server: ov.proxy_server, username: ov.proxy_username || null }; identity.webrtc.mode = 'public_only'; }
 
+  reconcileCountry(identity);
   identity.leak_check = validateIdentity(identity);
+  return identity;
+}
+
+/**
+ * После ручных override зоны/языка подчистим ИНФОРМАЦИОННЫЕ поля страны,
+ * но только в авто-режиме: если зона больше не принадлежит случайно выбранной
+ * связке, не показываем устаревшие код/валюту (иначе превью врёт).
+ * При явном выборе страны (geo_source === 'country') конфликт зоны и страны
+ * НЕ заметаем под ковёр — пусть leak_check покажет его пользователю.
+ */
+function reconcileCountry(identity) {
+  if (identity.geo_source !== 'country') {
+    const cc = identity.country_code && COUNTRY_BY_CODE[identity.country_code];
+    if (cc && identity.timezone && !cc.zones.some((z) => z.tz === identity.timezone)) {
+      identity.country_code = null;
+      identity.country_name = null;
+      identity.country_flag = null;
+      identity.country_city = null;
+      identity.currency = null;
+    }
+  }
+  identity.region = String(identity.timezone || '').split('/')[0] || identity.region;
   return identity;
 }
 
@@ -330,7 +603,13 @@ function validateIdentity(id) {
   // а вот de-DE с America/New_York — почти наверняка подделка.
   const LANG_CONTINENTS = {
     ru: ['Europe', 'Asia'], uk: ['Europe'], be: ['Europe'], kk: ['Asia'],
-    ka: ['Asia'], de: ['Europe'], nl: ['Europe'], pl: ['Europe'],
+    ka: ['Asia'], hy: ['Asia'], az: ['Asia'], ky: ['Asia'], uz: ['Asia'],
+    tr: ['Europe', 'Asia'], de: ['Europe'], nl: ['Europe'], pl: ['Europe'],
+    cs: ['Europe'], sv: ['Europe'], fi: ['Europe'], nb: ['Europe'],
+    da: ['Europe'], lv: ['Europe'], lt: ['Europe'], et: ['Europe'],
+    it: ['Europe'], fr: ['Europe'], es: ['Europe', 'America'],
+    pt: ['Europe', 'America'], hi: ['Asia'], ja: ['Asia'], ko: ['Asia'],
+    zh: ['Asia'], ar: ['Asia'],
     en: null,   // английский глобальный: зона может быть любой
   };
   if (id.timezone && id.lang) {
@@ -379,6 +658,44 @@ function validateIdentity(id) {
   if (id.battery) problems.push('battery-API отдаётся, хотя Chrome её удалил — это флаг бота');
   if (id.webdriver === true) problems.push('navigator.webdriver = true');
 
+  // 7. страна: гео ↔ зона ↔ локаль ↔ валюта
+  // Проверяется только когда страна выбрана ЯВНО (geo_source === 'country'):
+  // в авто-режиме поле country_code информационное, а ручные override зоны/языка
+  // из конфига — осознанное действие пользователя, не противоречие системы.
+  const cc = id.country_code && COUNTRY_BY_CODE[id.country_code];
+  if (cc && id.geo_source === 'country') {
+    // зона должна принадлежать этой стране
+    if (id.timezone) {
+      const zone = cc.zones.filter((z) => z.tz === id.timezone)[0];
+      if (!zone) problems.push('зона ' + id.timezone + ' не принадлежит стране ' + id.country_code);
+      if (zone && id.geolocation) {
+        // точка должна лежать у города-якоря этой страны (с запасом на джиттер)
+        const tol = Math.max(zone.r * 2.2, 1.2);
+        const dLat = Math.abs(id.geolocation.lat - zone.lat);
+        const dLon = Math.abs(id.geolocation.lon - zone.lon);
+        if (dLat > tol || dLon > tol) {
+          problems.push('гео-' + id.country_code + ' стоит в ' + id.geolocation.lat.toFixed(2)
+                        + ',' + id.geolocation.lon.toFixed(2) + ', а не у ' + zone.city);
+        }
+      }
+    }
+    // язык должен быть из набора страны (пустой массив = язык не заявлен страной)
+    if (id.lang && cc.langs.indexOf(id.lang) === -1 && id.geo_source === 'country') {
+      problems.push('язык (' + id.lang + ') не характерен для страны ' + id.country_code);
+    }
+    if (id.currency && cc.currency !== id.currency) {
+      problems.push('валюта ' + id.currency + ' не совпадает со страной ' + id.country_code);
+    }
+  }
+  if (id.geolocation) {
+    const g = id.geolocation;
+    if (typeof g.lat !== 'number' || Math.abs(g.lat) > 90 || typeof g.lon !== 'number' || Math.abs(g.lon) > 180) {
+      problems.push('невозможные координаты геопозиции');
+    }
+    if (!id.timezone) problems.push('есть геопозиция, но нет зоны — сайт сверит их и спалит несовпадение');
+  }
+  if (id.country_code && !cc) problems.push('неизвестный код страны: ' + id.country_code);
+
   return { ok: problems.length === 0, problems };
 }
 
@@ -390,6 +707,10 @@ module.exports = {
   GPU_BANK,
   GPU_LIMITS,
   LOCALES,
+  COUNTRIES,
+  COUNTRY_BY_CODE,
+  getCountry,
+  listCountries,
   SCREENS,
   HARDWARE,
   FONTS_WIN,

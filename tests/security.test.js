@@ -200,6 +200,63 @@ test('окно профиля не больше его экрана', () => {
   }
 });
 
+// ── Страна антидетекта (без VPN: CDP гео/зона/локаль) ──
+test('в авто-режиме координаты НЕ эмулируются (не выдумываем гео против IP)', () => {
+  for (let i = 0; i < 10; i++) {
+    const id = fp.generateIdentity('a' + i, 'i', { browser: 'chrome' });
+    assert.strictEqual(id.geolocation, null);
+    assert.strictEqual(id.geo_source, 'none');
+  }
+});
+
+test('каждая страна даёт согласованную identity (зона ↔ локаль ↔ гео ↔ валюта)', () => {
+  const list = fp.listCountries();
+  assert.ok(list.length >= 30, 'мало стран для антидетекта: ' + list.length);
+  for (const c of list) {
+    for (let i = 0; i < 5; i++) {
+      const id = fp.generateIdentity('t' + i, 'i' + c.code, { browser: 'chrome', country: c.code });
+      assert.strictEqual(id.leak_check.ok, true, c.code + ': ' + id.leak_check.problems.join('; '));
+      assert.strictEqual(id.country_code, c.code);
+      assert.ok(id.geolocation, c.code + ': нет гео-точки при выбранной стране');
+      assert.ok(Math.abs(id.geolocation.lat) <= 90 && Math.abs(id.geolocation.lon) <= 180);
+    }
+  }
+});
+
+test('гео профиля стабильна, у разных профилей одной страны — разная (анти-склейка)', () => {
+  const a1 = fp.generateIdentity('p1', 'i', { browser: 'chrome', country: 'DE' });
+  const a2 = fp.generateIdentity('p1', 'i', { browser: 'chrome', country: 'DE' });
+  assert.deepStrictEqual(a1.geolocation, a2.geolocation, 'один профиль получил разные координаты');
+  const b = fp.generateIdentity('p2', 'i', { browser: 'chrome', country: 'DE' });
+  assert.notDeepStrictEqual(a1.geolocation, b.geolocation, 'два профиля делят гео-точку');
+  // выбор страны не должен «уводить» железо: geo использует отдельный rng-поток
+  const noC = fp.generateIdentity('p1', 'i', { browser: 'chrome' });
+  void noC; // просто не падает
+});
+
+test('явно заданная страна с чужой зоной фиксируется как противоречие', () => {
+  const id = fp.generateIdentity('x', 'i', {
+    browser: 'chrome', country: 'DE',
+    overrides: { timezone: 'America/New_York', lang: 'en-US' },
+  });
+  assert.strictEqual(id.leak_check.ok, false);
+  assert.ok(id.leak_check.problems.some((p) => p.includes('America/New_York')));
+});
+
+test('ручной override зоны в авто-режиме не ломает проверку утечек', () => {
+  const id = fp.generateIdentity('l', 'i', {
+    browser: 'chrome', overrides: { timezone: 'Europe/Moscow', lang: 'de-DE,de' },
+  });
+  assert.strictEqual(id.leak_check.ok, true, JSON.stringify(id.leak_check.problems));
+});
+
+test('мусорный код страны игнорируется, а не ломает генерацию', () => {
+  const id = fp.generateIdentity('g', 'i', { browser: 'chrome', country: '<script>' });
+  assert.ok(id.leak_check.ok, JSON.stringify(id.leak_check.problems));
+  assert.strictEqual(id.geolocation, null);
+  assert.strictEqual(fp.getCountry('<script>'), null);
+});
+
 // ─────────────────────────────────────────────
 //  ПРОЧЕЕ
 // ─────────────────────────────────────────────

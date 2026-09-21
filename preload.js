@@ -255,6 +255,7 @@ const api = {
     const p = profile === null || profile === undefined ? null : str(profile, 64);
     return call('api:preview-profile', { profile: p });
   },
+  listCountries: function () { return call('api:list-countries'); },
   rerollProfile: function (profile) {
     const p = str(profile, 64);
     if (!p) return Promise.resolve(EMPTY);

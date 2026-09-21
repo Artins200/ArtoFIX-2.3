@@ -511,6 +511,11 @@ function sanitizeSettings(input) {
     }
     out.fingerprint = f;
   }
+  // Глобальная страна-антиппечаток по умолчанию (профиль может переопределить)
+  if (input.geo && typeof input.geo === 'object') {
+    const cc = input.geo.country ? fpEngine.getCountry(input.geo.country) : null;
+    out.geo = { country: cc ? cc.code : null };
+  }
   return out;
 }
 
@@ -575,6 +580,18 @@ function readProfileMeta(name) {
   return meta && typeof meta === 'object' ? meta : {};
 }
 
+/**
+ * Страна антидетекта профиля: сначала meta.country профиля, иначе глобальный
+ * дефолт settings.geo.country, иначе null (авто-связка, координаты не эмулируем).
+ * Код валидируется через fpEngine.getCountry — мусорные значения отбрасываются.
+ */
+function resolveProfileCountry(meta, settings) {
+  const fromMeta = fpEngine.getCountry(meta && meta.country);
+  if (fromMeta) return fromMeta.code;
+  const fromSettings = settings && settings.geo ? fpEngine.getCountry(settings.geo.country) : null;
+  return fromSettings ? fromSettings.code : null;
+}
+
 /** Прокси профиля (server/username из meta, пароль — только через env). */
 function profileProxy(meta) {
   const p = meta && meta.proxy;
@@ -620,6 +637,7 @@ async function rollIdentity(profile, browser, opts) {
     browserVersion: realVersion,
     overrides,
     identitySalt: typeof meta.fingerprint_refresh === 'string' ? meta.fingerprint_refresh : null,
+    country: resolveProfileCountry(meta, settings),
   });
 
   // Флаги векторов: что именно разрешено подменять в UI
@@ -1674,6 +1692,13 @@ handle('api:write-profile-meta', (_e, name, data) => {
         delete merged.proxy;
       }
     }
+    // Страна антидетекта профиля. ''/null = авто (случайная согласованная связка,
+    // без эмуляции координат); ISO-код — явный выбор с гео-точкой страны.
+    if (data.country !== undefined) {
+      const cc = data.country ? fpEngine.getCountry(data.country) : null;
+      if (cc) merged.country = cc.code;
+      else delete merged.country;
+    }
     fs.mkdirSync(dir, { recursive: true });
     sec.writeFileAtomic(file, JSON.stringify(merged, null, 2));
     return { ok: true };
@@ -1755,6 +1780,7 @@ handle('api:preview-profile', async (_e, payload) => {
     browserVersion: browser === 'msedge' ? await readBrowserVersion('msedge') : await readBrowserVersion('chrome'),
     overrides,
     identitySalt: typeof meta.fingerprint_refresh === 'string' ? meta.fingerprint_refresh : null,
+    country: resolveProfileCountry(meta, settings),
   });
   const leak = fpEngine.validateIdentity(identity);
 
@@ -1776,13 +1802,27 @@ handle('api:preview-profile', async (_e, payload) => {
       fonts: identity.fonts.length + ' системных шрифтов',
       media: 'H.264/Vorbis/Opus — согласованы',
       rtc: identity.webrtc.mode === 'public_only' ? 'локальные IP скрыты' : 'по умолчанию',
+      country: identity.geo_source === 'country'
+        ? ((identity.country_flag ? identity.country_flag + ' ' : '') + (identity.country_name || identity.country_code)
+           + (identity.country_city ? ' · ' + identity.country_city : ''))
+        : 'авто — без эмуляции гео',
+      geo: identity.geolocation
+        ? identity.geolocation.lat.toFixed(4) + ', ' + identity.geolocation.lon.toFixed(4)
+          + ' (±' + (identity.geolocation.accuracy || 100) + ' м, стабильно у профиля)'
+        : null,
+      currency: identity.geo_source === 'country' ? identity.currency : null,
     },
+    countryCode: identity.geo_source === 'country' ? identity.country_code : null,
+    hasProxy: !!proxy,
     leakCheck: leak.ok,
     leakProblems: leak.problems,
     webglRenderer: identity.webgl ? identity.webgl.renderer : null,
     browser: browser,
   };
 });
+
+// Список стран для селектора антидетекта в UI (без координат — только фактология)
+handle('api:list-countries', () => fpEngine.listCountries());
 
 handle('api:reroll-profile', (_e, payload) => {
   const o = payload && typeof payload === 'object' ? payload : {};
