@@ -262,6 +262,26 @@ async function main() {
   check('с выключенным авто-обходом Zapret НЕ стартует', calls.zapretStart.length === zBefore3,
     calls.zapretStart.length + ' vs ' + zBefore3);
 
+  // ═══ 11. Превью-шим: поверхность window.api соответствует запросам app.js ═══
+  // preview/api-shim.js — не часть сборки Electron, но npm run preview должен
+  // работать: каждый apiBridge.<метод>, который зовёт app.js, обязан быть в шиме.
+  const shimPath = path.join(ROOT, 'preview/api-shim.js');
+  if (fs.existsSync(shimPath)) {
+    const shimSrc = fs.readFileSync(shimPath, 'utf8');
+    const shimDom = new JSDOM('<html><body></body></html>', { url: 'http://localhost/', runScripts: 'outside-only' });
+    shimDom.window.eval(shimSrc);
+    const shimApi = shimDom.window.api;
+    check('шим отдаёт готовый window.api', !!(shimApi && shimApi.ready === true));
+    const used = new Set();
+    const re = /apiBridge\.([A-Za-z_$][\w$]*)/g;
+    let m;
+    while ((m = re.exec(appJs))) used.add(m[1]);
+    const missing = [...used].filter((u) => typeof shimApi[u] === 'undefined');
+    check('в шиме есть все методы, которые вызывает app.js', missing.length === 0, 'нет: ' + missing.join(', '));
+  } else {
+    check('preview/api-shim.js на месте', false, 'файл не найден');
+  }
+
   console.log('\n' + (failed ? '✗ ПРОВАЛЕНО: ' + failed : '✓ ВСЕ ПРОВЕРКИ ПРОЙДЕНЫ'));
   process.exit(failed ? 1 : 0);
 }
