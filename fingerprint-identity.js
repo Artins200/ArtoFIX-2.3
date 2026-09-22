@@ -365,15 +365,51 @@ function intBetween(rng, min, max) { return min + Math.floor(rng() * (max - min 
 // ─────────────────────────────────────────────
 //  UA / UA-CH
 // ─────────────────────────────────────────────
-/** Порядок brands в UA-CH у Chrome фиксирован и менялся по версиям. */
-function buildBrands(chromeMajor) {
-  const v = String(chromeMajor);
-  // «Not)A;Brand» появился с Chrome 113 и ступенчато меняет разделитель.
-  const grease = 'Not)A;Brand';
-  const order = chromeMajor >= 120
-    ? [[grease, '99'], ['Chromium', v], ['Google Chrome', v]]
-    : [[grease, '99'], ['Chromium', v], ['Google Chrome', v]];
-  return order.map(([brand, version]) => ({ brand, version }));
+/* GREASE-бренд UA-CH. Chromium генерирует его ДЕТЕРМИНИРОВАННО от мажорной
+   версии (components/embedder_support/user_agent_utils.cc, спека UA-CH
+   §create-arbitrary-brands): строка «Not»+sep+«A»+sep+«Brand» с разделителями
+   из фиксированного набора, версия из {8, 99, 24}, порядок брендов —
+   перестановка от seed = major. Неправильный формат GREASE или его версия —
+   один из самых дешёвых детектов (сверяют с таблицей «что реально отдаёт
+   Chrome N»). Алгоритм проверен на реальных sec-ch-ua живых Chrome
+   106/109/113/114/131. */
+const GREASE_CHARS = [' ', '(', ')', '-', '.', '/', ':', ';', '=', '?', '_'];
+const GREASE_VERSIONS = ['8', '99', '24'];
+// Индексы в списке [браузер, GREASE, Chromium]; major % 6 → перестановка.
+const BRAND_ORDERS = [
+  [2, 0, 1], // 0: [Chromium, <браузер>, GREASE]
+  [2, 1, 0], // 1: [Chromium, GREASE, <браузер>]
+  [1, 2, 0], // 2: [GREASE, Chromium, <браузер>]
+  [0, 2, 1], // 3: [<браузер>, Chromium, GREASE]
+  [0, 1, 2], // 4: [<браузер>, GREASE, Chromium]
+  [1, 0, 2], // 5: [GREASE, <браузер>, Chromium]
+];
+
+/**
+ * Список брендов как у живого Chrome/Edge той же мажорной версии:
+ * продукт + Chromium + ровно один GREASE-бренд в правильном формате.
+ * @param {number|string} chromeMajor мажорная версия Chromium
+ * @param {string} [productBrand]     'Google Chrome' | 'Microsoft Edge'
+ */
+function buildBrands(chromeMajor, productBrand) {
+  const m = parseInt(String(chromeMajor), 10) || 0;
+  const product = productBrand || 'Google Chrome';
+  const grease = 'Not' + GREASE_CHARS[m % GREASE_CHARS.length] + 'A'
+               + GREASE_CHARS[(m + 1) % GREASE_CHARS.length] + 'Brand';
+  const greaseVersion = GREASE_VERSIONS[m % GREASE_VERSIONS.length];
+  const entries = [
+    { brand: product, version: String(m) },
+    { brand: grease, version: greaseVersion, grease: true },
+    { brand: 'Chromium', version: String(m) },
+  ];
+  return (BRAND_ORDERS[m % BRAND_ORDERS.length]).map((i) => entries[i]);
+}
+
+/** Версия бренда в fullVersionList: GREASE отдаёт «N.0.0.0», а не краткий N. */
+function brandFullVersion(entry, chromeMajor, fullVersion) {
+  const ver = String(entry.version != null ? entry.version : chromeMajor);
+  if (ver === String(chromeMajor)) return fullVersion;
+  return /\./.test(ver) ? ver : ver + '.0.0.0';
 }
 
 function isEdgeUA(browser) { return browser === 'msedge'; }
@@ -465,9 +501,11 @@ function generateIdentity(profileName, installId, opts) {
     ua_bitness: '64',
     ua_model: '',
     ua_mobile: false,
-    brands: browser === 'firefox' ? [] : buildBrands(chromeMajor),
+    // Бренды UA-CH строятся под РЕАЛЬНЫЙ продукт: у Edge в sec-ch-ua стоит
+    // «Microsoft Edge», а не «Google Chrome» — расхождение с UA (Edg/) детектят.
+    brands: browser === 'firefox' ? [] : buildBrands(chromeMajor, isEdgeUA(browser) ? 'Microsoft Edge' : 'Google Chrome'),
     ua_brands_edge: isEdgeUA(browser)
-      ? [{ brand: 'Microsoft Edge', version: String(chromeMajor) }, { brand: 'Chromium', version: String(chromeMajor) }]
+      ? buildBrands(chromeMajor, 'Microsoft Edge')
       : null,
 
     // ── гео/локаль ──
@@ -531,9 +569,11 @@ function generateIdentity(profileName, installId, opts) {
     webrtc: { mode: opts.proxyServer ? 'public_only' : 'default' },
     proxy: opts.proxyServer ? { server: opts.proxyServer, username: opts.proxyUsername || null } : null,
 
-    // шум для константных векторов (canvas/audio) — стабилен внутри профиля
+    // шум для константных векторов (canvas/audio) — стабилен внутри профиля.
+    // audio_noise ≥ 1e-6: меньшие значения «съедает» точность float32, и
+    // аудио-хеш (OfflineAudioContext) остаётся физическим — его и читают антиботы
     canvas_noise: intBetween(rng, 1, 60),
-    audio_noise: Number((rng() * 4e-6).toFixed(12)),
+    audio_noise: Number((1e-6 + rng() * 4e-6).toFixed(12)),
     audio_freq_shift: Number((rng() * 8e-5).toFixed(12)),
 
     generated_at: new Date().toISOString(),
@@ -552,7 +592,33 @@ function generateIdentity(profileName, installId, opts) {
   if (ov.proxy_server) { identity.proxy = { server: ov.proxy_server, username: ov.proxy_username || null }; identity.webrtc.mode = 'public_only'; }
 
   reconcileCountry(identity);
+  clampScreenCoherence(identity);
   identity.leak_check = validateIdentity(identity);
+  return identity;
+}
+
+/**
+ * Экран ↔ окно ↔ outer*: реальное окно браузера ВСЕГДА целиком помещается в
+ * рабочую область экрана, а outerHeight = innerHeight + «хром» (вкладки+адресная
+ * строка ≈ 70–100px). Нарушения — излюбленная проверка антиботов («таких окон не
+ * бывает»). Функция только ЖЁСТКО ограничивает уже посчитанные значения —
+ * rng-поток не трогаем, чтобы отпечаток профиля не «уехал» после обновления.
+ */
+function clampScreenCoherence(identity) {
+  const s = identity.screen;
+  if (!s) return identity;
+  s.avail_width = Math.min(s.avail_width, s.width);
+  s.avail_height = Math.min(s.avail_height, s.height);
+  s.outer_width = Math.min(s.outer_width, s.avail_width);
+  s.outer_height = Math.min(s.outer_height, s.avail_height);
+  // «хром» окна: outer − inner должен оставаться правдоподобным (70–100px)
+  const MIN_CHROME = 56;
+  if (s.outer_height < s.window_height + MIN_CHROME) {
+    s.window_height = Math.max(400, s.outer_height - MIN_CHROME);
+  }
+  if (s.outer_width < s.window_width) s.window_width = s.outer_width;
+  s.window_width = Math.min(s.window_width, s.avail_width);
+  s.window_height = Math.min(s.window_height, s.avail_height);
   return identity;
 }
 
@@ -596,6 +662,23 @@ function validateIdentity(id) {
   }
   if ((id.user_agent || '').includes('Windows') !== (id.ua_platform === 'Windows') && id.browser !== 'firefox') {
     problems.push('платформа в User-Agent расходится с ua_platform');
+  }
+
+  // 1b. UA-CH бренды: GREASE-формат + согласованность версий
+  // Живой Chrome всегда отдаёт ровно один GREASE-бренд вида Not?A?Brand
+  // (версия из {8, 24, 99}) и мажорную версию в брендах продукта/движка.
+  if (id.browser !== 'firefox' && Array.isArray(id.brands) && id.brands.length) {
+    const GREASE_RE = /^.{0,2}Not[^A-Za-z0-9]{0,2}A[^A-Za-z0-9]{0,2}Brand$/;
+    if (!id.brands.some((b) => b && GREASE_RE.test(String(b.brand)))) {
+      problems.push('в UA-CH нет GREASE-бренда — живой Chrome всегда его добавляет');
+    }
+    const majors = id.brands.map((b) => String(b && b.version));
+    if (id.ua_major && majors.indexOf(String(id.ua_major)) === -1) {
+      problems.push('бренды UA-CH не содержат мажорной версии из User-Agent');
+    }
+    if ((id.user_agent || '').includes('Edg/') && !id.brands.some((b) => b && b.brand === 'Microsoft Edge')) {
+      problems.push('в UA есть Edg/, а бренд Microsoft Edge в UA-CH отсутствует');
+    }
   }
 
   // 2. локаль ↔ зона
@@ -646,6 +729,15 @@ function validateIdentity(id) {
   }
   if (s.device_pixel_ratio && ![1, 1.25, 1.5, 1.75, 2].includes(s.device_pixel_ratio)) {
     problems.push('нестандартный devicePixelRatio');
+  }
+  // «таких окон не бывает»: outer* обязан помещаться в экран, inner — в outer
+  if (s.outer_width && s.width && s.outer_width > s.width) problems.push('outerWidth больше ширины экрана');
+  if (s.outer_height && s.height && s.outer_height > s.height) problems.push('outerHeight больше высоты экрана');
+  if (s.outer_height && s.window_height && s.outer_height < s.window_height + 56) {
+    problems.push('outerHeight не учитывает «хром» окна (вкладки + адресная строка)');
+  }
+  if (s.outer_width && s.window_width && s.outer_width < s.window_width) {
+    problems.push('outerWidth меньше ширины вьюпорта');
   }
 
   // 5. железо
@@ -704,6 +796,11 @@ module.exports = {
   validateIdentity,
   buildUserAgent,
   buildBrands,
+  brandFullVersion,
+  clampScreenCoherence,
+  GREASE_CHARS,
+  GREASE_VERSIONS,
+  BRAND_ORDERS,
   GPU_BANK,
   GPU_LIMITS,
   LOCALES,

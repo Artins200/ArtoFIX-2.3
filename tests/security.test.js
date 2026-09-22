@@ -256,6 +256,53 @@ test('окно профиля не больше его экрана', () => {
   }
 });
 
+test('outer* помещается в экран, а «хром» окна остаётся правдоподобным', () => {
+  for (let i = 0; i < 20; i++) {
+    const id = fp.generateIdentity('ow' + i, 'i', { browser: 'chrome' });
+    const s = id.screen;
+    assert.ok(s.outer_width <= s.width, 'outerWidth больше ширины экрана');
+    assert.ok(s.outer_height <= s.height, 'outerHeight больше высоты экрана — такого окна не бывает');
+    assert.ok(s.outer_height >= s.window_height + 56, 'outerHeight не учитывает вкладки + адресную строку');
+    assert.ok(s.outer_width >= s.window_width, 'outerWidth меньше вьюпорта');
+  }
+});
+
+test('GREASE-бренды UA-CH совпадают с живыми Chrome (формат/версия от мажорной)', () => {
+  // Сверено с реальными sec-ch-ua живых браузеров (см. fingerprint-identity.js):
+  const cases = [
+    [106, 'Not;A=Brand', '99'],   // реальный sec-ch-ua Chrome 106
+    [109, 'Not_A Brand', '99'],   // реальный capture Chrome 109
+    [113, 'Not-A.Brand', '24'],   // реальный sec-ch-ua Chrome 113
+    [114, 'Not.A/Brand', '8'],    // реальный capture Vivaldi 114 (Chromium 114)
+    [131, 'Not_A Brand', '24'],   // реальный sec-ch-ua Chrome 131
+  ];
+  for (const [major, greaseBrand, greaseVersion] of cases) {
+    const brands = fp.buildBrands(major);
+    const grease = brands.filter((b) => b.grease);
+    assert.strictEqual(grease.length, 1, 'ровно один GREASE-бренд (major ' + major + ')');
+    assert.strictEqual(grease[0].brand, greaseBrand, 'GREASE-строка для ' + major);
+    assert.strictEqual(grease[0].version, greaseVersion, 'GREASE-версия для ' + major);
+    assert.deepStrictEqual(brands.filter((b) => !b.grease).map((b) => b.brand).sort(),
+      ['Chromium', 'Google Chrome'], 'продукт + движок (major ' + major + ')');
+    assert.strictEqual(fp.brandFullVersion(grease[0], major, major + '.0.6778.86'), greaseVersion + '.0.0.0',
+      'GREASE в fullVersionList отдаёт N.0.0.0');
+  }
+  // Edge: продукт — Microsoft Edge, а не Google Chrome (иначе UA с Edg/ детектят)
+  const edge = fp.buildBrands(131, 'Microsoft Edge');
+  assert.ok(edge.some((b) => b.brand === 'Microsoft Edge'));
+  assert.ok(edge.some((b) => b.brand === 'Chromium'));
+  assert.ok(edge.some((b) => b.grease));
+});
+
+test('identity: бренды согласованы с UA и проходят leak check', () => {
+  const chrome = fp.generateIdentity('bc', 'i', { browser: 'chrome', browserVersion: '132.0.6834.110' });
+  assert.strictEqual(chrome.brands.length, 3);
+  assert.strictEqual(chrome.leak_check.ok, true, JSON.stringify(chrome.leak_check.problems));
+  const edge = fp.generateIdentity('be', 'i', { browser: 'msedge', browserVersion: '131.0.2903.86' });
+  assert.ok(edge.brands.some((b) => b.brand === 'Microsoft Edge'), 'Edge-бренд обязателен при UA с Edg/');
+  assert.strictEqual(edge.leak_check.ok, true, JSON.stringify(edge.leak_check.problems));
+});
+
 // ── Страна антидетекта (без VPN: CDP гео/зона/локаль) ──
 test('в авто-режиме координаты НЕ эмулируются (не выдумываем гео против IP)', () => {
   for (let i = 0; i < 10; i++) {

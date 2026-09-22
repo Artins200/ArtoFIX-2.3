@@ -44,9 +44,26 @@ function makeFakeDom() {
   // ── media / audio / permissions ──
   const AnalyserNode = { prototype: { getFloatFrequencyData(arr) { for (let i = 0; i < arr.length; i++) arr[i] = -100; },
                                       getByteFrequencyData(arr) { for (let i = 0; i < arr.length; i++) arr[i] = 10; } } };
+  // AudioBuffer с реальными выборками: чтобы проверить шум OfflineAudioContext
+  function AudioBuffer() {
+    this._channels = { 0: new Float32Array(64), 1: new Float32Array(64) };
+    for (const k of [0, 1]) for (let i = 0; i < 64; i++) this._channels[k][i] = Number(k) + i * 0.001;
+  }
+  AudioBuffer.prototype.getChannelData = function (channel) { return this._channels[channel]; };
+  AudioBuffer.prototype.copyFromChannel = function (dest, channel, start) {
+    const src = this._channels[channel];
+    const s = start || 0;
+    for (let i = 0; i < dest.length; i++) dest[i] = src[s + i];
+  };
   const HTMLMediaElement = { prototype: { canPlayType() { return ''; } } };
+  const MediaSource = { isTypeSupported() { return false; } };
   const Permissions = { prototype: { query() { return Promise.resolve({ state: 'denied' }); } } };
-  const Notification = { permission: 'denied' };
+  function PermissionStatus() {}
+  const Notification = {
+    permission: 'denied',
+    requestPermission(cb) { if (cb) cb('denied'); return Promise.resolve('denied'); },
+  };
+  const NetworkInformation = function NetworkInformation() {};
 
   // ── "окно" ──
   const navigator = {};
@@ -82,9 +99,12 @@ function makeFakeDom() {
     WebGLRenderingContext,
     WebGL2RenderingContext: { prototype: Object.create(WebGLRenderingContext.prototype) },
     AnalyserNode,
+    AudioBuffer,
     HTMLMediaElement,
-    MediaSource: { isTypeSupported() { return false; } },
+    MediaSource,
     Permissions,
+    PermissionStatus,
+    NetworkInformation,
     Notification,
     RTCPeerConnection: function RTCPeerConnection() { this.addEventListener = function () {}; },
     AudioContext: function AudioContext() {},

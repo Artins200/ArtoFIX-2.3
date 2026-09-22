@@ -42,7 +42,7 @@ UI (app.js)                main (main.js)                     browser (engine.py
 
 **Согласованность.** Все поля выводятся из одного «железа»:
 * класс GPU ↔ лимиты WebGL (`MAX_TEXTURE_SIZE`, `MAX_VERTEX_UNIFORM_VECTORS`, …),
-* версия установленного Chrome ↔ `User-Agent` ↔ `navigator.userAgentData.brands` ↔ `sec-ch-ua`,
+* версия установленного Chrome ↔ `User-Agent` ↔ `navigator.userAgentData.brands` ↔ `sec-ch-ua` (включая GREASE-бренд и порядок списка — как у этой версии Chromium),
 * часовой пояс ↔ `navigator.language(s)` ↔ `Accept-Language` (с учётом диаспор: `ru-RU` + `Asia/Tbilisi` — валидно),
 * экран ↔ размер окна ↔ `devicePixelRatio` ↔ `screen.availHeight` (окно не больше экрана),
 * `hardwareConcurrency` ↔ объём памяти.
@@ -65,21 +65,25 @@ Multilogin/GoLogin и как их читают антибот-скрипты).
 | Железо | CDP `Emulation.setHardwareConcurrencyOverride` + патчи `hardwareConcurrency`, `deviceMemory`, `maxTouchPoints` |
 | WebGL | патч `getParameter` для `0x9245/0x9246` + лимиты по классу GPU; списки расширений дополняются `WEBGL_debug_renderer_info` |
 | Canvas | детерминированный шум младших битов в 12 точках для `getImageData`/`toDataURL`/`toBlob`; canvas восстанавливается после чтения |
-| Audio | стабильный сдвиг `AnalyserNode.getFloatFrequencyData`/`getByteFrequencyData` |
+| Audio | стабильный сдвиг `AnalyserNode.getFloatFrequencyData`/`getByteFrequencyData` + микропомехи в выборках `AudioBuffer.getChannelData`/`copyFromChannel` (главный канал аудио-отпечатка OfflineAudioContext). Шум применяется один раз на канал, оба пути чтения совпадают |
 | Медиакодеки | согласованные ответы `canPlayType` и `MediaSource.isTypeSupported` |
 | Шрифты | `document.fonts.check` согласован с системным набором Windows |
-| Разрешения | `Permissions.query` и `Notification.permission` не противоречат друг другу |
+| Разрешения | `Permissions.query` и `Notification.permission` не противоречат друг другу; `requestPermission()` отвечает тем же состоянием, а статус — настоящий `PermissionStatus` (`instanceof` проходит) |
+| PDF Viewer | `navigator.pdfViewerEnabled = true` согласован с набором PDF-плагинов |
+| Языки/сеть | `navigator.languages` — один замороженный массив (`===` между вызовами); `navigator.connection` — один объект без нестандартного поля `type` (в живом Chrome его нет) |
 | WebRTC | `--webrtc-ip-handling-policy=default_public_interface_only` (при прокси) + фильтрация приватных ICE-кандидатов |
 | Прокси профиля | `--proxy-server` + генерируемое MV3-расширение для логина/пароля (пароль приходит только через переменную окружения) |
 
 ## 4. Скрытие автоматизации
 
 * `--disable-blink-features=AutomationControlled`, `excludeSwitches: ['enable-automation','enable-logging']`, `useAutomationExtension: false`.
-* `navigator.webdriver` → `false` (свойство удаляется из прототипа и переопределяется геттером).
-* Переменные ChromeDriver (`cdc_…`, `$cdc_…`) вычищаются из `window` и `document` — классическая проверка `Detected_by_chromedriver`.
-* Добавляется правдоподобный `chrome.runtime` (в автоматизированном Chrome его нет, в обычном — есть).
+* `navigator.webdriver` → `false` (свойство удаляется из прототипа и переопределяется геттером; own-свойство на `navigator` НЕ создаётся — в живом Chrome его нет, а перечисляется оно через `getOwnPropertyNames`).
+* Переменные ChromeDriver (`cdc_…`, `$cdc_…`) и артефакты Selenium/Phantom (`__webdriver_*`, `__selenium_*`, `domAutomation`, `_phantom`, …) вычищаются из `window` и `document` — классическая проверка `Detected_by_chromedriver`.
+* Добавляется правдоподобный `chrome.runtime` (в автоматизированном Chrome его нет, в обычном — есть); `chrome.csi()`/`chrome.loadTimes()` отдают **стабильные** метки: `loadTimes()` заморожен после загрузки и никогда не из «будущего», `csi()` — `startE` абсолютной эпохой, `onloadT` временем от неё, `pageT` растёт от старта страницы. Плывущие/«будущие» значения — готовый детект самодельных заглушек.
 * `credentials_enable_service`/`profile.password_manager_enabled` включаются обратно (Selenium выключает их по умолчанию — это заметный след).
-* **Маскировка патчей**: все подменённые функции регистрируются в `WeakMap`, `Function.prototype.toString` возвращает для них `function getParameter() { [native code] }` — детекторы вида «функция переопределена» не срабатывают (проверено тестом `tests/pageinit.test.js`).
+* Фоновые троттлинги отключаются (`--disable-background-timer-throttling`, `--disable-backgrounding-occluded-windows`, `--disable-renderer-backgrounding`, `CalculateNativeWinOcclusion`): неактивное окно продолжает жить, и поведенческие проверки (тайминги, события) не видят «мёртвую» вкладку.
+* Свойства ставятся на **прототипы** (`Screen.prototype`, `Window.prototype`, `Document.prototype`, `Navigator.prototype`, `FontFaceSet.prototype`, `Permissions.prototype`), а не own-свойствами объектов — `getOwnPropertyDescriptor` не находит подмены.
+* **Маскировка патчей**: все подменённые функции регистрируются в `WeakMap`, `Function.prototype.toString` возвращает для них `function getParameter() { [native code] }` — детекторы вида «функция переопределена» не срабатывают (проверено тестом `tests/pageinit.test.js`). Арности патчей совпадают с нативными (`toBlob.length === 1`, `RTCPeerConnection.length === 0`, …).
 
 ## 5. Человекоподобное поведение
 
@@ -202,6 +206,14 @@ logs                          последние логи запусков
 
 ## 12. Обновления ArtoFIX 2.5
 
+* **Обновление 2.5.1 — меньше проблем с детектами (проверки Cloudflare/Turnstile):**
+  * **UA-CH GREASE-бренды теперь как у живого Chrome.** Строка `Not?A?Brand`, версия из {8, 24, 99} и порядок брендов в `sec-ch-ua`/`userAgentData.brands` генерируются детерминированно от мажорной версии — по алгоритму Chromium (`user_agent_utils.cc`) и спецификации UA-CH. Раньше стоял захардкоженный `Not)A;Brand`;v=`99`, который не совпадал с тем, что реально отдаёт заявленная версия. В `Sec-CH-UA-Full-Version-List` GREASE получает канонический `N.0.0.0`. Для Edge бренды — `Microsoft Edge` + `Chromium` (раньше Chrome-бренды при UA с `Edg/` противоречили сами себе).
+  * **`chrome.csi`/`chrome.loadTimes` ведут себя как живые:** метки заморожены, монотонны, `finishLoadTime` не «из будущего» (прежняя заглушка отдавала время на 50мс впереди текущего и плывущие значения при повторных вызовах — именно это и ловили проверки Challenge).
+  * **Аудио-отпечаток закрыт полностью:** помехи добавляются в выборки `AudioBuffer.getChannelData`/`copyFromChannel` (главный вектор — рендер OfflineAudioContext у fingerprintjs-подобных скриптов; раньше эти API вообще не шумились). Шум применяется один раз на канал, оба пути чтения совпадают между собой и стабильны в профиле.
+  * **Фиксы утечек самой системы:** `toBlob` больше не оставляет `__artofix_*`-свойства на canvas (их перечисляют детекторы); фильтр приватных ICE-кандидатов WebRTC раньше **не срабатывал вообще** (регулярка привязывалась к `^`, а строка кандидата начинается с `candidate:`) и не фильтровал `onicecandidate = fn`; `canPlayType` отвечал на HEVC/AV1 «probably» от имени h264 (все три живут в `video/mp4`); `navigator.webdriver` больше не создаёт own-свойство на `navigator`.
+  * **Согласованность вместо противоречий:** `Notification.requestPermission()` отвечает тем же состоянием, что `Notification.permission` (а принудительный `allow` в content-settings убран — он давал мгновенный `granted` при заявленном `default`); `permissions.query` возвращает настоящий `PermissionStatus` (`instanceof`); `navigator.languages` — один замороженный массив; `navigator.connection` — один объект без нестандартного поля `type`; `navigator.pdfViewerEnabled` согласован с PDF-плагинами.
+  * **Окна без аномалий:** `outerWidth/outerHeight` жёстко ужимаются до экрана, а `outerHeight − innerHeight` остаётся правдоподобным «хромом» браузера (вкладки + адресная строка) — «окна больше экрана» антиботы считают мгновенно. `validateIdentity` ловит такие противоречия в leak-check.
+  * **Фоновое окно живое:** таймеры/рендер не троттлятся в неактивном окне (`--disable-background-timer-throttling` и др.) — поведенческие проверки не видят «мёртвую» вкладку.
 * **Обход защиты сайта Claude (Anthropic) и Cloudflare Turnstile:**
   * Инъекция нативных структур `window.chrome.csi`, `window.chrome.loadTimes` и `window.chrome.app` с точными временными метками запуска, проверяемыми скриптами Cloudflare Challenge;
   * Эмуляция плагинов Chrome PDF Viewer в `navigator.plugins` и `navigator.mimeTypes`;
