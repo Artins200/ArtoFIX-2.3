@@ -46,10 +46,11 @@ const IDENTITY = {
     },
   },
   canvas_noise: 37,
+  audio_noise: 2e-5,
   audio_freq_shift: 0.0000412,
   media: {
-    video: { h264: 'probably', vp9: 'probably' },
-    audio: { opus: 'probably', mp3: 'probably' },
+    video: { h264: 'probably', vp9: 'probably', hevc: '', av1: 'probably' },
+    audio: { opus: 'probably', mp3: 'probably', aac: 'probably' },
     media_source: { 'video/mp4; codecs="avc1.42E01E"': true, 'audio/mpeg': true },
   },
   fonts: ['Arial', 'Segoe UI'],
@@ -61,11 +62,35 @@ function runInit(identity) {
   const dom = makeFakeDom();
   const script = extractTemplate().replace('/*__IDENTITY__*/ null', JSON.stringify(identity || IDENTITY));
   const ctx = vm.createContext(Object.assign(dom.win, {
-    WeakMap, Int32Array, Uint8ClampedArray, Promise, Math, Object, JSON, Error, String, Array,
+    WeakMap, Int32Array, Uint8ClampedArray, Promise: SyncPromise, Math, Object, JSON, Error, String, Array,
   }));
   vm.runInContext(script, ctx, { filename: 'page-init.js' });
   return Object.assign(dom, { ctx });
 }
+
+/* Мини-Promise с синхронным then: промис-значения (permissions, Notification)
+   проверяются в синхронных тестах без вылета за их рамки. */
+function SyncPromise(executor) {
+  const self = this;
+  this._state = 'pending';
+  this._value = undefined;
+  this._cbs = [];
+  const resolve = (v) => {
+    if (self._state !== 'pending') return;
+    self._state = 'fulfilled';
+    self._value = v;
+    self._cbs.splice(0).forEach((f) => f(v));
+  };
+  try { executor(resolve, () => {}); } catch (e) { /* как Promise: ошибки гасим */ }
+}
+SyncPromise.prototype.then = function (onFulfilled) {
+  if (typeof onFulfilled === 'function') {
+    if (this._state === 'fulfilled') onFulfilled(this._value);
+    else this._cbs.push(onFulfilled);
+  }
+  return this;
+};
+SyncPromise.resolve = function (v) { return new SyncPromise((res) => res(v)); };
 
 const results = [];
 function test(name, fn) {
@@ -178,6 +203,131 @@ test('navigator.plugins и mimeTypes эмулируют плагины Chrome PD
 
 test('document.hasFocus возвращает true для прохождения проверок активности', () => {
   assert.strictEqual(dom.win.document.hasFocus(), true);
+});
+
+// ── Согласованность против детекторов Cloudflare / «мёртвых» заглушек ──
+
+test('navigator.webdriver живёт ТОЛЬКО на прототипе (без own-свойства)', () => {
+  assert.strictEqual(Object.getOwnPropertyDescriptor(dom.win.navigator, 'webdriver'), undefined);
+  assert.strictEqual(dom.win.navigator.webdriver, false);
+});
+
+test('navigator.languages — один и тот же замороженный массив (languages === languages)', () => {
+  const a = dom.win.navigator.languages;
+  const b = dom.win.navigator.languages;
+  assert.strictEqual(a, b, 'новый массив на каждый вызов — признак патча');
+  assert.strictEqual(dom.win.navigator.language, 'ru-RU');
+});
+
+test('navigator.connection — один объект без нестандартного поля type', () => {
+  const c1 = dom.win.navigator.connection;
+  const c2 = dom.win.navigator.connection;
+  assert.strictEqual(c1, c2, 'connection должен быть одним объектом');
+  assert.strictEqual(c1.effectiveType, '4g');
+  assert.strictEqual(c1.type, undefined, "Chrome не отдаёт connection.type — его наличие = детект");
+});
+
+test('chrome.csi: правдоподобные метки (onloadT относительный, pageT растёт, всё стабильно)', () => {
+  const a = dom.win.chrome.csi();
+  const b = dom.win.chrome.csi();
+  assert.strictEqual(a.startE, b.startE, 'startE не должен меняться между вызовами');
+  assert.strictEqual(a.onloadT, b.onloadT, 'onloadT заморожен после onload');
+  assert.ok(a.onloadT < 10000, 'onloadT — время ОТ startE, а не абсолютная эпоха: ' + a.onloadT);
+  assert.ok(a.startE > 1e12, 'startE — абсолютная эпоха в ms');
+  assert.ok(a.pageT >= a.onloadT, 'pageT не может быть меньше onloadT');
+  assert.strictEqual(a.tran, 15);
+});
+
+test('chrome.loadTimes: метки заморожены, монотонны и не «из будущего»', () => {
+  const a = dom.win.chrome.loadTimes();
+  const b = dom.win.chrome.loadTimes();
+  const nowSec = Date.now() / 1000;
+  assert.ok(a.requestTime < a.startLoadTime, 'requestTime < startLoadTime');
+  assert.ok(a.startLoadTime < a.commitLoadTime, 'startLoadTime < commitLoadTime');
+  assert.ok(a.commitLoadTime <= a.finishDocumentLoadTime, 'commitLoadTime <= finishDocumentLoadTime');
+  assert.ok(a.finishDocumentLoadTime <= a.finishLoadTime, 'finishDocumentLoadTime <= finishLoadTime');
+  assert.ok(a.finishLoadTime <= nowSec, 'finishLoadTime из будущего — готовый детект заглушки: ' + a.finishLoadTime);
+  assert.strictEqual(a.finishLoadTime, b.finishLoadTime, 'значения loadTimes() должны быть заморожены');
+  assert.strictEqual(a.requestTime, b.requestTime);
+  assert.strictEqual(a.firstPaintAfterLoadTime, 0);
+  assert.strictEqual(a.connectionInfo, 'h2');
+});
+
+test('Canvas.toBlob не оставляет следов (__artofix_*) на самом canvas', () => {
+  const c = Object.create(dom.win.HTMLCanvasElement.prototype);
+  c.width = 10; c.height = 10;
+  c.toBlob(function () {});
+  const leaks = Object.getOwnPropertyNames(c).filter((k) => /artofix/i.test(k));
+  assert.deepStrictEqual(leaks, [], 'свойства на canvas перечисляются детекторами: ' + leaks.join(','));
+});
+
+test('арности патчей совпадают с нативными (toBlob=1, RTCPeerConnection=0, check=0)', () => {
+  assert.strictEqual(dom.win.HTMLCanvasElement.prototype.toBlob.length, 1);
+  assert.strictEqual(dom.win.RTCPeerConnection.length, 0);
+  assert.strictEqual(dom.win.document.fonts.check.length, 0);
+  assert.strictEqual(dom.win.HTMLMediaElement.prototype.canPlayType.length, 1);
+});
+
+test('кодеки: HEVC в video/mp4 не отвечает «probably» от имени h264', () => {
+  assert.strictEqual(dom.win.HTMLMediaElement.prototype.canPlayType('video/mp4; codecs="avc1.42E01E"'), 'probably');
+  assert.strictEqual(dom.win.HTMLMediaElement.prototype.canPlayType('video/mp4; codecs="hvc1.1.6.L93.B0"'), '');
+  assert.strictEqual(dom.win.HTMLMediaElement.prototype.canPlayType('video/mp4'), 'probably');
+  assert.strictEqual(dom.win.HTMLMediaElement.prototype.canPlayType('video/webm; codecs="vp9"'), 'probably');
+});
+
+test('AudioBuffer: шум стабилен, одинаков для getChannelData и copyFromChannel', () => {
+  const buf = new dom.win.AudioBuffer();
+  const first = Float32Array.from(buf.getChannelData(0));
+  const second = Float32Array.from(buf.getChannelData(0));
+  assert.deepStrictEqual(Array.from(first), Array.from(second), 'повторное чтение не должно накапливать шум');
+  assert.strictEqual(buf.getChannelData(0), buf.getChannelData(0), 'нативный getChannelData возвращает ту же ссылку');
+  const dest = new Float32Array(64);
+  buf.copyFromChannel(dest, 1);
+  assert.deepStrictEqual(Array.from(dest), Array.from(buf.getChannelData(1)), 'два пути чтения обязаны совпадать');
+  // шум должен отличаться у другого профиля
+  const dom2 = runInit(Object.assign({}, IDENTITY, { canvas_noise: 55, audio_noise: 2e-6 }));
+  const buf2 = new dom2.win.AudioBuffer();
+  assert.notDeepStrictEqual(Array.from(buf2.getChannelData(0)), Array.from(new dom.win.AudioBuffer().getChannelData(0)),
+    'разные профили → разный аудио-отпечаток');
+  // исходная выборка реально изменена (шум применился)
+  assert.notDeepStrictEqual(Array.from(first), Array.from(new dom.win.AudioBuffer()._channels[0]),
+    'шум должен менять выборки');
+});
+
+test('navigator.pdfViewerEnabled согласован с PDF-плагинами', () => {
+  assert.strictEqual(dom.win.navigator.pdfViewerEnabled, true);
+});
+
+test('Notification.requestPermission отдаёт то же состояние, что Notification.permission', () => {
+  assert.strictEqual(dom.win.Notification.permission, 'default');
+  let got = null;
+  dom.win.Notification.requestPermission(function (s) { got = s; });
+  assert.strictEqual(got, dom.win.Notification.permission, 'permission и requestPermission обязаны совпадать');
+});
+
+test('permissions.query отдаёт объект-PermissionStatus (instanceof), а не голый литерал', () => {
+  let status = null;
+  const p = dom.win.Permissions.prototype.query({ name: 'notifications' });
+  assert.ok(p && typeof p.then === 'function', 'query должен возвращать Promise');
+  p.then((s) => { status = s; });
+  assert.ok(status, 'статус должен прийти');
+  assert.strictEqual(status.state, 'default');
+  assert.ok(status instanceof dom.win.PermissionStatus, 'instanceof PermissionStatus обязан проходить — голый литерал детектят');
+  assert.strictEqual(status.onchange, null);
+});
+
+test('WebRTC: приватные ICE-кандидаты фильтруются и через onicecandidate', () => {
+  const pc = new dom.win.RTCPeerConnection();
+  const got = [];
+  pc.onicecandidate = function (ev) { got.push(ev); };
+  const wrapped = pc.onicecandidate;
+  assert.strictEqual(typeof wrapped, 'function');
+  wrapped({ candidate: { candidate: 'candidate:1 1 udp 2122260223 192.168.1.5 54321 typ host' } });
+  wrapped({ candidate: { candidate: 'candidate:2 1 udp 2122260223 10.0.0.7 54321 typ host' } });
+  wrapped({ candidate: { candidate: 'candidate:3 1 udp 2122260223 fd31:ab1:2::5 54321 typ host' } });
+  assert.strictEqual(got.length, 0, 'приватные/ULA кандидаты должны отсекаться');
+  wrapped({ candidate: { candidate: 'candidate:4 1 udp 2122260223 203.0.113.7 54321 typ srflx' } });
+  assert.strictEqual(got.length, 1, 'публичный кандидат должен проходить');
 });
 
 // отчёт

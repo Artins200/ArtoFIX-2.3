@@ -235,6 +235,38 @@ def _humanization():
     assert callable(engine.human_pause)
 
 
+@check("fullVersionList: GREASE-бренд отдаёт N.0.0.0, служебные флаги не уходят в CDP")
+def _full_version_list():
+    engine = load_engine()
+    cfg = {"identity": {
+        "schema": 2,
+        "user_agent": "UA-STRING", "ua_major": "131", "ua_full_version": "131.0.6778.86",
+        "brands": [
+            {"brand": "Not_A Brand", "version": "24", "grease": True},
+            {"brand": "Google Chrome", "version": "131"},
+            {"brand": "Chromium", "version": "131"},
+        ],
+    }}
+    ident = engine.BrowserManager().build_identity(cfg, "t", "chrome")
+    captured = {}
+
+    class CapDriver:
+        def execute_cdp_cmd(self, cmd, params):
+            if cmd == "Network.setUserAgentOverride":
+                captured.update(params)
+            return {}
+
+    engine.BrowserManager().apply_identity(CapDriver(), ident, cfg)
+    md = captured["userAgentMetadata"]
+    brands = {b["brand"]: b["version"] for b in md["brands"]}
+    fulls = {b["brand"]: b["version"] for b in md["fullVersionList"]}
+    assert brands["Not_A Brand"] == "24", "в sec-ch-ua GREASE остаётся кратким"
+    assert fulls["Not_A Brand"] == "24.0.0.0", "в fullVersionList GREASE = N.0.0.0 (как у живого Chrome)"
+    assert fulls["Google Chrome"] == "131.0.6778.86"
+    assert fulls["Chromium"] == "131.0.6778.86"
+    assert all("grease" not in b for b in md["brands"]), "служебные флаги не уходят в CDP"
+
+
 def main():
     failed = [r for r in RESULTS if r[0] == "fail"]
     for status, name in RESULTS:

@@ -263,53 +263,113 @@ PAGE_INIT_TEMPLATE = r"""
 
   // ── 1. Следы автоматизации ──
   try {
-    delete Object.getPrototypeOf(navigator).webdriver;
-    defineGetter(Object.getPrototypeOf(navigator), 'webdriver', function () { return false; });
+    var navProto = Object.getPrototypeOf(navigator);
+    delete navProto.webdriver;
+    defineGetter(navProto, 'webdriver', function () { return false; });
   } catch (e) {}
-  try { defineValue(navigator, 'webdriver', false); } catch (e) {}
+  // ВАЖНО: own-свойство 'webdriver' на самом navigator НЕ создаём — в живом
+  // Chrome getter живёт только на Navigator.prototype, а собственные свойства
+  // на navigator перечисляются через getOwnPropertyNames и детектятся мгновенно.
+  var AUTOMATION_EXACT = [
+    '_phantom', '__nightmare', 'callPhantom', '_selenium', 'callSelenium', 'calledSelenium',
+    '_Selenium_IDE_Recorder', '_WEBDRIVER_ELEM_CACHE',
+    '__webdriver_evaluate', '__selenium_evaluate', '__webdriver_script_function',
+    '__webdriver_script_func', '__webdriver_script_fn', '__webdriver_script_fn_called',
+    '__webdriver_script_result', '__webdriver_script_error', '__fxdriver_evaluate',
+    '__driver_unwrapped', '__driver_evaluate', '__webdriver_unwrapped',
+    '__selenium_unwrapped', '__fxdriver_unwrapped', '__webdriver_ctrc', '__webdriver_chr',
+    '__lastWatirAlert', '__lastWatirConfirm', '__lastWatirPrompt',
+    'domAutomation', 'domAutomationController', 'domAutomationControllerId',
+  ];
   ['window', 'document'].forEach(function (scopeName) {
     var scope = scopeName === 'window' ? window : document;
     try {
       Object.getOwnPropertyNames(scope).forEach(function (key) {
-        if (/^\$?cdc_/i.test(key)) { try { delete scope[key]; } catch (e) {} }
+        if (/^\$?cdc_/i.test(key) || AUTOMATION_EXACT.indexOf(key) !== -1) {
+          try { delete scope[key]; } catch (e) {}
+        }
       });
     } catch (e) {}
   });
 
   // ── 1.1 Обход защиты Claude / Cloudflare Turnstile: window.chrome ──
+  // Проверки Challenge смотрят на ПОВЕДЕНИЕ этих API: loadTimes() в живом
+  // Chrome отдаёт ЗАМОРОЖЕННЫЕ метки (не «плывут» при повторных вызовах и
+  // никогда не из будущего), csi() — startE=абсолютная эпоха, onloadT=время
+  // от startE, pageT растёт от старта страницы. Плывущие/«будущие» значения —
+  // классический детект автогенеренных заглушек.
   try {
+    if (!window.chrome) { defineValue(window, 'chrome', {}); }
     if (window.chrome) {
+      var t0 = Date.now();
+      var startE = t0 - 300;          // «навигация» началась чуть раньше скрипта
+      var onloadT = 312.7;            // ms от startE до onload — фиксированы
+
       if (!window.chrome.runtime) {
-        var noop = function () { return undefined; };
+        var makeNoop = function (name) {
+          return markNative(function () { return undefined; }, name);
+        };
         window.chrome.runtime = {
           id: undefined,
-          connect: noop, sendMessage: noop, onMessage: { addListener: noop, removeListener: noop },
-          getPlatformInfo: noop,
+          connect: makeNoop('connect'),
+          sendMessage: makeNoop('sendMessage'),
+          onMessage: {
+            addListener: makeNoop('addListener'),
+            removeListener: makeNoop('removeListener'),
+          },
+          getPlatformInfo: markNative(function (cb) {
+            if (typeof cb === 'function') cb({ os: 'win', arch: 'x86-64' });
+          }, 'getPlatformInfo'),
         };
       }
       if (!window.chrome.csi) {
-        var startMs = Date.now();
         window.chrome.csi = markNative(function () {
-          return { startE: startMs, onloadT: startMs + 120, pageT: 120.4, tran: 15 };
+          return {
+            onloadT: onloadT,
+            pageT: Math.max(onloadT, Date.now() - startE),
+            startE: startE,
+            tran: 15,
+          };
         }, 'csi');
       }
       if (!window.chrome.loadTimes) {
+        var ltCache = null;
         window.chrome.loadTimes = markNative(function () {
-          var nowSec = Date.now() / 1000;
+          if (!ltCache) {
+            var nowSec = Date.now() / 1000;
+            var requestTime = nowSec - 0.35;
+            ltCache = {
+              requestTime: requestTime,
+              startLoadTime: requestTime + 0.05,
+              commitLoadTime: requestTime + 0.12,
+              finishDocumentLoadTime: requestTime + 0.28,
+              finishLoadTime: nowSec,               // ≤ now: из будущего не бывает
+              firstPaintTime: requestTime + 0.24,
+              firstPaintAfterLoadTime: 0,
+              navigationType: 'Other',
+              wasFetchedViaSpdy: true,
+              wasNpnNegotiated: true,
+              npnNegotiatedProtocol: 'h2',
+              wasAlternateProtocolAvailable: false,
+              connectionInfo: 'h2',
+            };
+          }
+          // значения заморожены после загрузки — каждый вызов отдаёт копию
+          // одного и того же объекта, как живой Chrome
           return {
-            requestTime: nowSec - 0.25,
-            startLoadTime: nowSec - 0.2,
-            commitLoadTime: nowSec - 0.1,
-            finishDocumentLoadTime: nowSec,
-            finishLoadTime: nowSec + 0.05,
-            firstPaintTime: nowSec - 0.04,
-            firstPaintAfterLoadTime: 0,
-            navigationType: 'Other',
-            wasFetchedViaSpdy: true,
-            wasNpnNegotiated: true,
-            npnNegotiatedProtocol: 'h2',
-            wasAlternateProtocolAvailable: false,
-            connectionInfo: 'h2',
+            requestTime: ltCache.requestTime,
+            startLoadTime: ltCache.startLoadTime,
+            commitLoadTime: ltCache.commitLoadTime,
+            finishDocumentLoadTime: ltCache.finishDocumentLoadTime,
+            finishLoadTime: ltCache.finishLoadTime,
+            firstPaintTime: ltCache.firstPaintTime,
+            firstPaintAfterLoadTime: ltCache.firstPaintAfterLoadTime,
+            navigationType: ltCache.navigationType,
+            wasFetchedViaSpdy: ltCache.wasFetchedViaSpdy,
+            wasNpnNegotiated: ltCache.wasNpnNegotiated,
+            npnNegotiatedProtocol: ltCache.npnNegotiatedProtocol,
+            wasAlternateProtocolAvailable: ltCache.wasAlternateProtocolAvailable,
+            connectionInfo: ltCache.connectionInfo,
           };
         }, 'loadTimes');
       }
@@ -377,21 +437,42 @@ PAGE_INIT_TEMPLATE = r"""
       fakeMimes.namedItem = markNative(function (name) { return this[name] || null; }, 'namedItem');
       defineGetter(Object.getPrototypeOf(navigator), 'mimeTypes', function () { return fakeMimes; });
     }
+    // navigator.pdfViewerEnabled: в живом Chrome с PDF Viewer = true и обязан
+    // совпадать с наличием PDF-плагинов выше (их сверяют вместе)
+    if (ID.pdf_viewer_enabled !== false) {
+      defineGetter(Object.getPrototypeOf(navigator), 'pdfViewerEnabled', function () { return true; });
+    }
   } catch (e) {}
 
   // ── 1.3 Обход защиты Claude / Turnstile: document.hasFocus и visibility ──
+  // Окно «живое»: hasFocus() = true и visibilityState = 'visible' всегда идут
+  // ПАРОЙ (focus + hidden одновременно — мгновенный флаг). Патчим прототип
+  // Document: own-свойства на document перечисляются getOwnPropertyNames и
+  // сами по себе выдают подмену.
   try {
     if (document) {
-      document.hasFocus = markNative(function () { return true; }, 'hasFocus');
-      defineGetter(document, 'hidden', function () { return false; });
-      defineGetter(document, 'visibilityState', function () { return 'visible'; });
+      var docProto = (typeof Document !== 'undefined' && Document.prototype) || null;
+      if (docProto && docProto.hasFocus) {
+        docProto.hasFocus = markNative(function hasFocus() { return true; }, 'hasFocus');
+        defineGetter(docProto, 'hidden', function () { return false; });
+        defineGetter(docProto, 'visibilityState', function () { return 'visible'; });
+      } else {
+        document.hasFocus = markNative(function hasFocus() { return true; }, 'hasFocus');
+        defineGetter(document, 'hidden', function () { return false; });
+        defineGetter(document, 'visibilityState', function () { return 'visible'; });
+      }
     }
   } catch (e) {}
 
   // ── 2. navigator: языки, платформа, железо ──
   if (ID.languages && ID.languages.length) {
-    defineGetter(Object.getPrototypeOf(navigator), 'languages', function () { return ID.languages.slice(); });
-    defineGetter(Object.getPrototypeOf(navigator), 'language', function () { return ID.languages[0]; });
+    // В живом Chrome navigator.languages — ОДИН и тот же замороженный массив
+    // (navigator.languages === navigator.languages). Новый массив на каждый
+    // getter-вызов — известный детект самодельных патчей.
+    var langList = ID.languages.slice();
+    try { Object.freeze(langList); } catch (e) {}
+    defineGetter(Object.getPrototypeOf(navigator), 'languages', function () { return langList; });
+    defineGetter(Object.getPrototypeOf(navigator), 'language', function () { return langList[0]; });
   }
   if (V.platform !== false && ID.ua_platform === 'Windows') {
     defineGetter(Object.getPrototypeOf(navigator), 'platform', function () { return 'Win32'; });
@@ -402,27 +483,53 @@ PAGE_INIT_TEMPLATE = r"""
     defineGetter(Object.getPrototypeOf(navigator), 'maxTouchPoints', function () { return ID.hardware.max_touch_points || 0; });
   }
   if (ID.connection) {
-    defineGetter(Object.getPrototypeOf(navigator), 'connection', function () {
-      return { effectiveType: ID.connection.effective_type, downlink: ID.connection.downlink,
-               rtt: ID.connection.rtt, saveData: !!ID.connection.save_data, type: 'wifi',
-               onchange: null, addEventListener: function () {}, removeEventListener: function () {} };
-    });
+    // Один объект NetworkInformation на весь документ (connection === connection).
+    // Нестандартного поля 'type' быть НЕ должно: живой Chrome его не отдаёт —
+    // его наличие = готовый детект подделки.
+    var NI = (typeof NetworkInformation !== 'undefined') ? NetworkInformation.prototype : Object.prototype;
+    var conn = Object.create(NI);
+    conn.effectiveType = ID.connection.effective_type;
+    conn.downlink = ID.connection.downlink;
+    conn.rtt = ID.connection.rtt;
+    conn.saveData = !!ID.connection.save_data;
+    conn.onchange = null;
+    conn.addEventListener = markNative(function () {}, 'addEventListener');
+    conn.removeEventListener = markNative(function () {}, 'removeEventListener');
+    conn.dispatchEvent = markNative(function () { return true; }, 'dispatchEvent');
+    defineGetter(Object.getPrototypeOf(navigator), 'connection', function () { return conn; });
   }
 
   // ── 3. Экран ──
+  // Свойства экрана/окна в живом Chrome живут на Screen.prototype и
+  // Window.prototype. Ставим геттеры туда же: own-свойства на самом window/screen
+  // «светятся» в getOwnPropertyDescriptor и выдают подмену. Если прототип
+  // недоступен (тестовое окружение) — откатываемся на объект.
   if (V.screen !== false && ID.screen) {
     var S = ID.screen;
-    defineGetter(screen, 'width', function () { return S.width; });
-    defineGetter(screen, 'height', function () { return S.height; });
-    defineGetter(screen, 'availWidth', function () { return S.avail_width; });
-    defineGetter(screen, 'availHeight', function () { return S.avail_height; });
-    defineGetter(screen, 'colorDepth', function () { return S.color_depth; });
-    defineGetter(screen, 'pixelDepth', function () { return S.pixel_depth; });
+    var sTarget = screen, wTarget = window;
+    try {
+      if (typeof Screen !== 'undefined' && Screen.prototype &&
+          Object.getOwnPropertyDescriptor(Screen.prototype, 'width')) {
+        sTarget = Screen.prototype;
+      }
+    } catch (e) {}
+    try {
+      if (typeof Window !== 'undefined' && Window.prototype &&
+          Object.getOwnPropertyDescriptor(Window.prototype, 'outerWidth')) {
+        wTarget = Window.prototype;
+      }
+    } catch (e) {}
+    defineGetter(sTarget, 'width', function () { return S.width; });
+    defineGetter(sTarget, 'height', function () { return S.height; });
+    defineGetter(sTarget, 'availWidth', function () { return S.avail_width; });
+    defineGetter(sTarget, 'availHeight', function () { return S.avail_height; });
+    defineGetter(sTarget, 'colorDepth', function () { return S.color_depth; });
+    defineGetter(sTarget, 'pixelDepth', function () { return S.pixel_depth; });
     if (S.device_pixel_ratio) {
-      defineGetter(window, 'devicePixelRatio', function () { return S.device_pixel_ratio; });
+      defineGetter(wTarget, 'devicePixelRatio', function () { return S.device_pixel_ratio; });
     }
-    defineGetter(window, 'outerWidth', function () { return S.outer_width; });
-    defineGetter(window, 'outerHeight', function () { return S.outer_height; });
+    defineGetter(wTarget, 'outerWidth', function () { return S.outer_width; });
+    defineGetter(wTarget, 'outerHeight', function () { return S.outer_height; });
   }
 
   // ── 4. WebGL: vendor/renderer + лимиты одного класса GPU ──
@@ -550,7 +657,10 @@ PAGE_INIT_TEMPLATE = r"""
     }
 
     if (canvasProto && origToBlob) {
-      var patchedToBlob = function toBlob(cb, type, quality) {
+      // Арность 1 — как у нативного toBlob; состояние живёт в ЗАМЫКАНИИ:
+      // никаких __artofix_* свойств на самом canvas (их перечисляют детекторы)
+      var patchedToBlob = function toBlob(cb) {
+        var type = arguments[1], quality = arguments[2];
         var ctx = null;
         try { ctx = this.getContext && this.getContext('2d'); } catch (e) {}
         if (!ctx || !this.width || !this.height || typeof cb !== 'function') {
@@ -559,13 +669,9 @@ PAGE_INIT_TEMPLATE = r"""
         var backup = null;
         try { backup = snapshot(ctx, this.width, this.height); } catch (e) {}
         if (!backup) return origToBlob.call(this, cb, type, quality);
-        this.__artofix_restore = ctx;
-        this.__artofix_backup = backup;
-        var self = this;
         ctx.putImageData(makeNoisy(ctx, this.width, this.height), 0, 0);
         return origToBlob.call(this, function (blob) {
           try { ctx.putImageData(backup, 0, 0); } catch (e) {}
-          try { delete self.__artofix_restore; delete self.__artofix_backup; } catch (e) {}
           cb(blob);
         }, type, quality);
       };
@@ -575,16 +681,23 @@ PAGE_INIT_TEMPLATE = r"""
   }
 
   // ── 6. AudioContext: стабильный сдвиг вместо реального железа ──
-  if (V.audio !== false && ID.audio_freq_shift) {
+  // Главный аудио-вектор антибот-скрипт (fingerprintjs и т.п.) — OfflineAudioContext:
+  // осциллятор + компрессор рендерятся и читаются через AudioBuffer.getChannelData /
+  // copyFromChannel. Шумим сами ВЫБОРКИ буфера — неслышимо на слух, стабильно в
+  // пределах профиля и одинаково для обоих способов чтения (иначе — детект).
+  if (V.audio !== false && (ID.audio_freq_shift || ID.audio_noise)) {
     try {
-      var shift = ID.audio_freq_shift;
+      var shift = ID.audio_freq_shift || 0;
+      var anoise = ID.audio_noise || 1e-6;
+      var cseedA = ID.canvas_noise | 0;
+
       var AnalyserProto = window.AnalyserNode && AnalyserNode.prototype;
       if (AnalyserProto) {
         var origFloat = AnalyserProto.getFloatFrequencyData;
         if (origFloat) {
           var pf = function getFloatFrequencyData(arr) {
             origFloat.apply(this, arguments);
-            for (var i = 0; i < arr.length; i += 64) arr[i] = arr[i] + shift;
+            for (var i = 0; i < arr.length; i++) arr[i] = arr[i] + shift;
           };
           markNative(pf, 'getFloatFrequencyData');
           AnalyserProto.getFloatFrequencyData = pf;
@@ -594,10 +707,48 @@ PAGE_INIT_TEMPLATE = r"""
           var step = Math.round(shift * 100000) % 3;
           var pb = function getByteFrequencyData(arr) {
             origByte.apply(this, arguments);
-            for (var i = 0; i < arr.length; i += 64) arr[i] = (arr[i] + step) % 256;
+            for (var i = 0; i < arr.length; i++) arr[i] = (arr[i] + step) % 256;
           };
           markNative(pb, 'getByteFrequencyData');
           AnalyserProto.getByteFrequencyData = pb;
+        }
+      }
+
+      var AudioBufProto = window.AudioBuffer && AudioBuffer.prototype;
+      if (AudioBufProto && AudioBufProto.getChannelData) {
+        var origGetChannel = AudioBufProto.getChannelData;
+        var origCopyFrom = AudioBufProto.copyFromChannel;
+        // шум применяется РОВНО ОДИН раз на (буфер, канал): getChannelData
+        // возвращает живую ссылку, повторное «шумление» накопило бы разницу
+        var noisyDone = new WeakMap();
+        var ensureNoisy = markNative(function (buf, channel) {
+          try {
+            var done = noisyDone.get(buf);
+            if (!done) { done = {}; noisyDone.set(buf, done); }
+            if (done[channel]) return;
+            done[channel] = true;
+            var arr = origGetChannel.call(buf, channel);
+            if (!arr || !arr.length) return;
+            var n = Math.min(arr.length, 64);
+            for (var i = 0; i < n; i++) {
+              var d = anoise * (((i + 1) * (channel + 3) + cseedA) % 7 - 3);
+              arr[i] = arr[i] + d;
+            }
+          } catch (e) {}
+        }, 'ensureNoisy');
+        var patchedGetChannel = function getChannelData(channel) {
+          ensureNoisy(this, channel);
+          return origGetChannel.call(this, channel);
+        };
+        markNative(patchedGetChannel, 'getChannelData');
+        AudioBufProto.getChannelData = patchedGetChannel;
+        if (origCopyFrom) {
+          var patchedCopyFrom = function copyFromChannel(dest, channel) {
+            ensureNoisy(this, channel);
+            return origCopyFrom.apply(this, arguments);
+          };
+          markNative(patchedCopyFrom, 'copyFromChannel');
+          AudioBufProto.copyFromChannel = patchedCopyFrom;
         }
       }
     } catch (e) {}
@@ -606,20 +757,35 @@ PAGE_INIT_TEMPLATE = r"""
   // ── 7. Медиакодеки: ответы должны совпадать с заявленным железом ──
   if (V.media !== false && ID.media) {
     try {
-      var CANPLAY = { h264: 'video/mp4; codecs="avc1.42E01E"', hevc: 'video/mp4; codecs="hvc1.1.6.L93.B0"',
-                      vp9: 'video/webm; codecs="vp9"', av1: 'video/mp4; codecs="av01.0.05M.08"',
-                      vorbis: 'audio/ogg; codecs="vorbis"', opus: 'audio/webm; codecs="opus"',
-                      mp3: 'audio/mpeg', aac: 'audio/mp4; codecs="mp4a.40.2"' };
       var el = window.HTMLMediaElement && HTMLMediaElement.prototype;
       if (el && el.canPlayType) {
         var origCanPlay = el.canPlayType;
+        // Сначала ищем по CODEC-строке: h264/hvc1/av01 живут в одном контейнере
+        // video/mp4, и поиск по префиксу MIME отвечал бы на запрос HEVC «probably»
+        // от имени h264 — внутреннее противоречие отпечатка.
         var patched = function canPlayType(type) {
           var t = String(type || '').toLowerCase();
-          var key = Object.keys(CANPLAY).find(function (k) { return t.indexOf(CANPLAY[k].split(';')[0]) === 0; });
-          if (!key) {
-            key = /h264|avc1/.test(t) ? 'h264' : /hvc1|hevc/.test(t) ? 'hevc' : /vp9/.test(t) ? 'vp9'
-                : /av01/.test(t) ? 'av1' : /vorbis/.test(t) ? 'vorbis' : /opus/.test(t) ? 'opus'
-                : /mp3|mpeg/.test(t) ? 'mp3' : /mp4a|aac/.test(t) ? 'aac' : null;
+          var key = null;
+          if (/avc[13x]|h\.?264/.test(t)) key = 'h264';
+          else if (/hvc1|hev1|hevc/.test(t)) key = 'hevc';
+          else if (/vp0?9/.test(t)) key = 'vp9';
+          else if (/vp8/.test(t)) key = 'vp8';
+          else if (/av01|av1/.test(t)) key = 'av1';
+          else if (/theora/.test(t)) key = 'theora';
+          else if (/vorbis/.test(t)) key = 'vorbis';
+          else if (/opus/.test(t)) key = 'opus';
+          else if (/mp3|mpeg[- ]?audio|audio\/mpeg|audio\/mp3/.test(t)) key = 'mp3';
+          else if (/mp4a|aac/.test(t)) key = 'aac';
+          else if (/flac/.test(t)) key = 'flac';
+          else if (/pcm/.test(t)) key = 'pcm';
+          else {
+            // голый контейнер без codecs-строки — базовый кодек контейнера
+            if (t.indexOf('video/mp4') === 0) key = 'h264';
+            else if (t.indexOf('video/webm') === 0) key = 'vp9';
+            else if (t.indexOf('audio/mp4') === 0) key = 'aac';
+            else if (t.indexOf('audio/webm') === 0) key = 'opus';
+            else if (t.indexOf('audio/ogg') === 0) key = 'vorbis';
+            else if (t.indexOf('audio/mpeg') === 0) key = 'mp3';
           }
           if (key && ID.media.video && ID.media.video[key] !== undefined) return ID.media.video[key];
           if (key && ID.media.audio && ID.media.audio[key] !== undefined) return ID.media.audio[key];
@@ -644,8 +810,11 @@ PAGE_INIT_TEMPLATE = r"""
   // ── 8. Шрифты: список согласован с системным набором Windows ──
   if (V.fonts !== false && ID.fonts && document.fonts) {
     try {
-      var origCheck = document.fonts.check;
-      var patchedCheck = function check(font) {
+      // check живёт на FontFaceSet.prototype; арность 0 — как у нативного
+      var fontTarget = (typeof FontFaceSet !== 'undefined' && FontFaceSet.prototype) || document.fonts;
+      var origCheck = fontTarget.check || document.fonts.check;
+      var patchedCheck = function check() {
+        var font = arguments.length ? arguments[0] : '';
         var family = String(font || '')
           .replace(/^.*?[\d.]+(?:px|pt|em|rem|%)?\s*/, '')
           .replace(/^["']|["']$/g, '')
@@ -654,7 +823,7 @@ PAGE_INIT_TEMPLATE = r"""
         return origCheck.apply(this, arguments);
       };
       markNative(patchedCheck, 'check');
-      document.fonts.check = patchedCheck;
+      fontTarget.check = patchedCheck;
     } catch (e) {}
   }
 
@@ -664,20 +833,41 @@ PAGE_INIT_TEMPLATE = r"""
       var PermProto = window.Permissions && Permissions.prototype;
       if (PermProto && PermProto.query) {
         var origQuery = PermProto.query;
+        var PS = (typeof PermissionStatus !== 'undefined') ? PermissionStatus.prototype : null;
         var patchedQuery = function query(desc) {
           var name = desc && desc.name;
           var state = ID.permissions[name];
           if (state) {
-            return Promise.resolve({ state: state, name: name, onchange: null,
-                                     addEventListener: function () {}, removeEventListener: function () {} });
+            // объект-«статус» как настоящий PermissionStatus (instanceof обязан
+            // проходить: голый объект literal — готовый детект подмены)
+            var status = PS ? Object.create(PS) : {};
+            try {
+              Object.defineProperty(status, 'state', { value: state, configurable: true });
+              Object.defineProperty(status, 'name', { value: name, configurable: true });
+              Object.defineProperty(status, 'onchange', { value: null, writable: true, configurable: true });
+            } catch (e) {
+              status.state = state; status.name = name; status.onchange = null;
+            }
+            return Promise.resolve(status);
           }
           return origQuery.apply(this, arguments);
         };
         markNative(patchedQuery, 'query');
         PermProto.query = patchedQuery;
       }
-      if (window.Notification && ID.permissions.notifications) {
-        defineGetter(window.Notification, 'permission', function () { return ID.permissions.notifications; });
+      if (window.Notification) {
+        // Notification.permission и requestPermission() обязаны отвечать ОДНИМ
+        // и тем же состоянием: «default» + мгновенный granted из content-settings —
+        // внутреннее противоречие, его детектят
+        var notifState = ID.permissions.notifications || 'default';
+        defineGetter(window.Notification, 'permission', function () { return notifState; });
+        var patchedReqPerm = function requestPermission() {
+          var cb = arguments.length ? arguments[0] : null;
+          if (typeof cb === 'function') cb(notifState);
+          return Promise.resolve(notifState);
+        };
+        markNative(patchedReqPerm, 'requestPermission');
+        try { window.Notification.requestPermission = patchedReqPerm; } catch (e) {}
       }
     } catch (e) {}
   }
@@ -686,22 +876,39 @@ PAGE_INIT_TEMPLATE = r"""
   if (ID.webrtc && ID.webrtc.mode === 'public_only' && window.RTCPeerConnection) {
     try {
       var OrigPC = window.RTCPeerConnection;
-      var isPrivate = function (ip) {
-        return /^(10\.|127\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|fe80:|::1)/i.test(ip || '');
-      };
-      var patchedPC = function RTCPeerConnection(cfg, ctx) {
-        var pc = new OrigPC(cfg, ctx);
+      // Строка кандидата выглядит как «candidate:… 192.168.1.5 54321 typ host» —
+      // ищем приватный IP/ULA ВНУТРИ строки (привязка к ^ никогда не срабатывала).
+      // 100.64.0.0/10 — CGNAT-диапазон провайдеров, f[cd]xx::/8 и fe80:: — IPv6 ULA/LL.
+      var PRIV_IP_RE = /(?:^|[\s"'])(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|127\.\d{1,3}\.\d{1,3}\.\d{1,3}|169\.254\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3}|::1|f[cd][0-9a-f]{2}:|fe80:)/i;
+      var isPrivate = function (line) { return PRIV_IP_RE.test(line || ''); };
+      // арность 0 — как у нативного конструктора (optional-параметры не считаются)
+      var patchedPC = function RTCPeerConnection() {
+        var pc = new OrigPC(arguments[0], arguments[1]);
         var origAdd = pc.addEventListener.bind(pc);
+        var wrapListener = function (type, listener) {
+          if (type === 'icecandidate' && typeof listener === 'function') {
+            return function (ev) {
+              if (ev && ev.candidate && isPrivate(ev.candidate.candidate)) return;
+              return listener.apply(this, arguments);
+            };
+          }
+          return listener;
+        };
         try {
-          pc.addEventListener = function (type, listener, opts) {
-            if (type === 'icecandidate' && typeof listener === 'function') {
-              return origAdd(type, function (ev) {
-                if (ev && ev.candidate && isPrivate(ev.candidate.candidate)) return;
-                return listener.apply(this, arguments);
-              }, opts);
-            }
-            return origAdd(type, listener, opts);
-          };
+          pc.addEventListener = markNative(function (type, listener, opts) {
+            return origAdd(type, wrapListener(type, listener), opts);
+          }, 'addEventListener');
+        } catch (e) {}
+        // onicecandidate = fn — второй обязательный путь доставки кандидатов
+        try {
+          var onice = null;
+          Object.defineProperty(pc, 'onicecandidate', {
+            get: markNative(function () { return onice; }, 'get onicecandidate'),
+            set: markNative(function (fn) {
+              onice = (typeof fn === 'function') ? wrapListener('icecandidate', fn) : fn;
+            }, 'set onicecandidate'),
+            configurable: true,
+          });
         } catch (e) {}
         return pc;
       };
@@ -900,8 +1107,16 @@ class BrowserManager:
         opt.add_argument("--no-first-run")
         opt.add_argument("--no-default-browser-check")
         opt.add_argument("--disable-infobars")
-        opt.add_argument("--disable-features=ChromeWhatsNewUI,PrivacySandboxConsentDecisionMigration,EncryptedClientHello")
+        # CalculateNativeWinOcclusion: Windows «прячет» неактивные окна, из-за чего
+        # фоновая вкладка троттлится и начинает вести себя не как живая (таймеры,
+        # requestAnimationFrame) — заметно и антиботам, и просто ломает сайты
+        opt.add_argument("--disable-features=ChromeWhatsNewUI,PrivacySandboxConsentDecisionMigration,EncryptedClientHello,CalculateNativeWinOcclusion")
         opt.add_argument("--disable-session-crashed-bubble")
+        # фоновое окно продолжает жить: без этого скрытое за окном браузер
+        # «засыпает» и поведенческие проверки (тайминги, события) видят бота
+        opt.add_argument("--disable-background-timer-throttling")
+        opt.add_argument("--disable-backgrounding-occluded-windows")
+        opt.add_argument("--disable-renderer-backgrounding")
 
         opt.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
         opt.add_experimental_option("useAutomationExtension", False)
@@ -910,7 +1125,9 @@ class BrowserManager:
             # Selenium по умолчанию выключает менеджер паролей — это заметный след
             "credentials_enable_service": True,
             "profile.password_manager_enabled": True,
-            "profile.default_content_setting_values.notifications": 1,
+            # notifications намеренно НЕ разрешаем принудительно (allow): принудительный
+            # allow даёт мгновенный 'granted' из requestPermission при 'default' в
+            # Notification.permission — противоречие, которое детектят антибот-скрипты
         })
 
         # прокси профиля (если задан) — главный фактор в прохождении капчи
@@ -984,14 +1201,23 @@ class BrowserManager:
                 major = m.group(1) if m else "131"
             full = ident.get("ua_full_version") or f"{major}.0.0.0"
             full_list = []
+            brands_clean = []
             for b in brands:
                 if not isinstance(b, dict) or "brand" not in b:
                     continue
                 ver = str(b.get("version", major))
-                # grease-бренды сохраняют свой «неправильный» номер версии
-                full_list.append({"brand": b["brand"], "version": full if ver == str(major) else ver})
+                brands_clean.append({"brand": b["brand"], "version": ver})
+                # grease-бренд в fullVersionList отдаёт «N.0.0.0», а не краткий N
+                # (сверено с реальными Sec-CH-UA-Full-Version-List живого Chrome)
+                if ver == str(major):
+                    full_ver = full
+                elif "." not in ver:
+                    full_ver = ver + ".0.0.0"
+                else:
+                    full_ver = ver
+                full_list.append({"brand": b["brand"], "version": full_ver})
             metadata = {
-                "brands": brands,
+                "brands": brands_clean,
                 "fullVersionList": full_list,
                 "fullVersion": full,
                 "platform": ident.get("ua_platform", "Windows"),
