@@ -103,7 +103,7 @@ select  { cursor:pointer; }
   /* фон окна: мягкие градиенты + базовый цвет с настраиваемой прозрачностью */
   background:
     radial-gradient(1100px 460px at 80% -10%, rgba(var(--acr),.075), transparent 62%),
-    radial-gradient(900px 420px at -12% 110%, rgba(var(--ac2r),.055), transparent 60%),
+    radial-gradient(900px 420px at -12% 110%, rgba(var(--ac2r),.085), transparent 60%),
     rgba(var(--bg-rgb, 237,240,247), var(--win-alpha, 1));
   display:flex; flex-direction:column;
   animation: appBoot .45s cubic-bezier(.22,1,.36,1);
@@ -118,6 +118,40 @@ select  { cursor:pointer; }
     0 3px 12px rgba(9,12,20,.20),
     inset 0 0 0 1px rgba(255,255,255,.22);
   transition: background .35s ease, border-radius .18s ease;
+}
+
+/* ── ФОН-КАРТИНКА (опциональный слой поверх базового цвета, но под контентом) ──
+   Прозрачность окна (--win-alpha) управляет и цветом, и картинкой — функция
+   прозрачности не ломается при включении картинки. */
+#bg-image-layer {
+  position:absolute;
+  inset:0;
+  z-index:0;
+  border-radius:inherit;
+  background-size:cover;
+  background-position:center;
+  background-repeat:no-repeat;
+  pointer-events:none;
+  opacity:var(--win-alpha, 1);
+  display:none;
+  transition:opacity .25s ease;
+}
+#app.has-bg-image #bg-image-layer {
+  display:block;
+}
+/* Контент поверх фонового слоя */
+#titlebar, #main-layout, #toasts, #admin-hint {
+  position:relative;
+  z-index:1;
+}
+#app.has-bg-image {
+  /* Когда картинка включена — базовый цвет делаем полупрозрачным,
+     чтобы картинка просвечивала, но читаемость сохранялась за счёт
+     оверлея в #bg-image-layer (linear-gradient с bg-rgb). */
+  background:
+    radial-gradient(1100px 460px at 80% -10%, rgba(var(--acr),.09), transparent 62%),
+    radial-gradient(900px 420px at -12% 110%, rgba(var(--ac2r),.10), transparent 60%),
+    rgba(var(--bg-rgb, 237,240,247), calc(var(--win-alpha, 1) * 0.45));
 }
 @keyframes appBoot {
   from { opacity:0; transform:translateY(10px) scale(.99); }
@@ -185,7 +219,14 @@ body.is-max #app { border-color:transparent; box-shadow:none; }
   border-right:1px solid var(--divider);
   display:flex; flex-direction:column;
   padding:14px 12px 12px; gap:2px;
+  overflow-y:auto;
+  overflow-x:hidden;
+  min-height:0;
 }
+#sidebar::-webkit-scrollbar { width:6px; }
+#sidebar::-webkit-scrollbar-track { background:transparent; }
+#sidebar::-webkit-scrollbar-thumb { background:var(--card-br); border-radius:4px; }
+#sidebar::-webkit-scrollbar-thumb:hover { background:var(--tx3); }
 
 .nav-sep {
   font-size:9.5px; letter-spacing:1.8px; color:var(--tx3);
@@ -203,8 +244,8 @@ body.is-max #app { border-color:transparent; box-shadow:none; }
 .nav-btn:hover { background:var(--row-hover); color:var(--tx); }
 .nav-btn:hover .nav-icon { transform:scale(1.1); }
 .nav-btn.is-active {
-  background:rgba(var(--acr),.1);
-  color:var(--ac); border-color:rgba(var(--acr),.14);
+  background:linear-gradient(135deg, rgba(var(--acr),.13), rgba(var(--ac2r),.13));
+  color:var(--ac); border-color:rgba(var(--acr),.18);
 }
 .nav-btn.is-active .nav-icon { opacity:1; }
 
@@ -216,6 +257,10 @@ body.is-max #app { border-color:transparent; box-shadow:none; }
   background:var(--card); border-radius:14px;
   border:1px solid var(--card-br);
   box-shadow:0 1px 2px rgba(20,24,44,.04);
+  flex-shrink:0;
+  position:sticky;
+  bottom:0;
+  z-index:3;
 }
 .status-row { display:flex; align-items:center; gap:9px; margin-bottom:11px; }
 
@@ -246,10 +291,10 @@ body.th-night #zapret-dot { background:#39445c; }
 .status-btn:last-child { margin-bottom:0; }
 
 .sb-start {
-  background:var(--ac); color:#fff;
+  background:linear-gradient(135deg, var(--ac), var(--ac2)); color:#fff;
   box-shadow:0 1px 2px rgba(var(--acr),.3);
 }
-.sb-start:hover { filter:brightness(1.08); box-shadow:0 4px 14px rgba(var(--acr),.3); transform:translateY(-1px); }
+.sb-start:hover { filter:brightness(1.08); box-shadow:0 4px 14px rgba(var(--acr),.3), 0 2px 8px rgba(var(--ac2r),.22); transform:translateY(-1px); }
 .sb-start:active { transform:none; }
 
 .sb-stop {
@@ -292,8 +337,8 @@ body.th-night #zapret-dot { background:#39445c; }
   font-weight:700; margin-bottom:13px; display:flex; align-items:center; gap:8px;
 }
 .section-title::before {
-  content:''; width:6px; height:6px; border-radius:50%;
-  background:var(--ac); flex-shrink:0;
+  content:''; width:8px; height:8px; border-radius:50%;
+  background:linear-gradient(135deg, var(--ac), var(--ac2)); flex-shrink:0;
 }
 
 .field-label {
@@ -335,12 +380,13 @@ body.th-night #zapret-dot { background:#39445c; }
 .btn:disabled { opacity:.45; pointer-events:none; }
 
 .btn-primary {
-  background:var(--ac); color:#fff;
+  background:linear-gradient(135deg, var(--ac), var(--ac2));
+  color:#fff;
   box-shadow:0 1px 2px rgba(var(--acr),.3);
 }
 .btn-primary:hover {
   filter:brightness(1.08);
-  box-shadow:0 4px 16px rgba(var(--acr),.32);
+  box-shadow:0 4px 16px rgba(var(--acr),.32), 0 2px 8px rgba(var(--ac2r),.22);
   transform:translateY(-1px);
 }
 .btn-primary:active { transform:none; box-shadow:0 1px 2px rgba(var(--acr),.3); }
@@ -845,6 +891,7 @@ body.th-night .sys-banner {
      MAIN APP
      =========================== -->
 <div id="app">
+  <div id="bg-image-layer"></div>
   <div id="titlebar">
     <div id="logo">
       <div id="logo-box"><img id="logo-img" src="" width="20" height="20" style="display:block"></div>
@@ -1262,7 +1309,24 @@ body.th-night .sys-banner {
     <p style="font-size:10.5px;color:var(--tx3);line-height:1.6;margin-top:10px">
       Окно скруглено полностью — форму и «стекло» видно сразу. Прозрачность делает фон
       окна полупрозрачным (текст остаётся читаемым). В развёрнутом виде углы прямые.
+      Работает и с картинкой фона — картинка тоже становится полупрозрачной.
     </p>
+  </div>
+
+  <!-- Фон: картинка -->
+  <div class="af-card" style="margin-bottom:14px">
+    <div class="section-title">Фон приложения — картинка</div>
+    <p style="font-size:10.5px;color:var(--tx2);line-height:1.6;margin-bottom:12px">
+      Выбери картинку для заднего фона окна. Картинка показывается под контентом с лёгким затемнением
+      для читаемости. Прозрачность окна (ползунок выше) продолжает работать — при 30% окно и картинка
+      полупрозрачны и видно рабочий стол.
+    </p>
+    <div id="bg-preview" style="display:none;margin-bottom:12px;border-radius:12px;overflow:hidden;border:1px solid var(--card-br);height:120px;background-size:cover;background-position:center"></div>
+    <div class="grid-2">
+      <button class="btn btn-primary" data-af-on="click" data-af-action="pickBgImage">🖼 Выбрать картинку</button>
+      <button class="btn btn-secondary" data-af-on="click" data-af-action="clearBgImage">✕ Убрать картинку</button>
+    </div>
+    <div id="bg-image-status" style="font-size:10.5px;color:var(--tx3);font-family:var(--mono);margin-top:9px;min-height:16px"></div>
   </div>
 </div>
 </template>

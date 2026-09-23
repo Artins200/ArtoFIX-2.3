@@ -180,7 +180,8 @@ const api = {
   },
   readSettings: function () { return call('api:read-settings'); },
   writeSettings: function (data) {
-    const d = plainObject(data);
+    // bgImage может быть до 4 МБ data URL — разрешаем до 6 МБ JSON
+    const d = plainObject(data, 6 * 1024 * 1024);
     if (!d) return Promise.resolve(EMPTY);
     return call('api:write-settings', d);
   },
@@ -260,6 +261,9 @@ const api = {
   readLogs: function () { return call('api:read-logs'); },
   clearLogs: function () { return call('api:clear-logs'); },
   copyLogs: function () { return call('api:copy-logs'); },
+
+  // ── фон-картинка ──
+  pickBgImage: function () { return call('api:pick-bg-image'); },
 
   // ── отпечаток ──
   previewProfile: function (profile) {
