@@ -58,8 +58,9 @@ const IDENTITY = {
   webrtc: { mode: 'public_only' },
 };
 
-function runInit(identity) {
+function runInit(identity, mutate) {
   const dom = makeFakeDom();
+  if (mutate) mutate(dom);
   const script = extractTemplate().replace('/*__IDENTITY__*/ null', JSON.stringify(identity || IDENTITY));
   const ctx = vm.createContext(Object.assign(dom.win, {
     WeakMap, Int32Array, Uint8ClampedArray, Promise: SyncPromise, Math, Object, JSON, Error, String, Array,
@@ -183,8 +184,42 @@ test('Function.prototype.toString скрывает патчи ([native code])', 
   assert.ok(/userFn/.test(userFn.toString()));
 });
 
-test('chrome.runtime добавлен (в автоматизированном Chrome его нет)', () => {
-  assert.ok(dom.win.chrome.runtime && typeof dom.win.chrome.runtime.connect === 'function');
+test('chrome.runtime НЕ создаётся (у обычной страницы Chrome его нет — это улика)', () => {
+  assert.strictEqual(dom.win.chrome.runtime, undefined, 'самодельный chrome.runtime детектится');
+});
+
+test('window.chrome не выдумывается, если объекта нет', () => {
+  const d = runInit(IDENTITY, (dd) => { delete dd.win.chrome; });
+  assert.strictEqual(d.win.chrome, undefined, 'создавать window.chrome с нуля нельзя');
+});
+
+test('геттеры выглядят нативно: имя, отсутствие prototype, enumerable', () => {
+  const navProto = Object.getPrototypeOf(dom.win.navigator);
+  for (const prop of ['platform', 'languages', 'language', 'hardwareConcurrency', 'maxTouchPoints', 'webdriver']) {
+    const desc = Object.getOwnPropertyDescriptor(navProto, prop);
+    assert.ok(desc && desc.get, prop + ': должен быть аксессор');
+    assert.strictEqual(desc.get.name, 'get ' + prop, prop + ': имя геттера (пустое имя — улика)');
+    assert.strictEqual(Object.prototype.hasOwnProperty.call(desc.get, 'prototype'), false,
+      prop + ': у нативного аксессора нет собственного prototype');
+    assert.strictEqual(desc.enumerable, true, prop + ': IDL-свойства enumerable');
+  }
+});
+
+test('Function.prototype.toString неотличим по форме от нативного', () => {
+  // Function берём из самого vm-контекста: шаблон патчит именно его intrinsic
+  const Fn = (dom.ctx && dom.ctx.Function) || Function;
+  const desc = Object.getOwnPropertyDescriptor(Fn.prototype, 'toString');
+  assert.strictEqual(desc.value.name, 'toString');
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(desc.value, 'prototype'), false,
+    'подменённый toString с prototype = детект');
+  assert.strictEqual(desc.enumerable, false);
+});
+
+test('подменённые функции несут нативное имя (Function#name)', () => {
+  const glProto = dom.win.WebGLRenderingContext.prototype;
+  assert.strictEqual(glProto.getParameter.name, 'getParameter');
+  assert.strictEqual(dom.win.HTMLCanvasElement.prototype.toDataURL.name, 'toDataURL');
+  assert.strictEqual(dom.win.document.hasFocus.name, 'hasFocus');
 });
 
 test('chrome.csi и chrome.loadTimes присутствуют (детект Cloudflare/Turnstile/Claude)', () => {
@@ -385,6 +420,19 @@ test('воркер-скрипт несёт шум canvas профиля (как 
   const tpl = extractWorkerTemplate();
   assert.ok(tpl.includes('ID.canvas_noise'), 'шум не берётся из отпечатка');
   assert.ok(tpl.includes('cseed'), 'нет детерминированного зерна профиля');
+});
+
+test('сеть/плагины ставятся через defineProperty (присваивание в геттеры роняло скрипт)', () => {
+  const tpl = extractTemplate();
+  assert.ok(/defineGetter\(NI, 'effectiveType'/.test(tpl), 'effectiveType должен быть геттером');
+  assert.ok(!/fakePlugins\.length\s*=/.test(tpl), 'присваивание length в PluginArray бросает TypeError');
+  assert.ok(/defineValue\(fakePlugins, 'length'/.test(tpl));
+});
+
+test('аудио-шум размазан по всему буферу (иначе аудио-хеш остаётся физическим)', () => {
+  const tpl = extractTemplate();
+  assert.ok(/i \+= step7/.test(tpl), 'нужен шаг по всему буферу');
+  assert.ok(!/Math\.min\(arr\.length, 64\)/.test(tpl), 'шум только по первым 64 сэмплам слишком слаб');
 });
 
 // отчёт

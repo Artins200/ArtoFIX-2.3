@@ -240,20 +240,50 @@ PAGE_INIT_TEMPLATE = r"""
   var nativeMap = new WeakMap();
   var origToString = Function.prototype.toString;
   function markNative(fn, name) {
-    try { nativeMap.set(fn, 'function ' + (name || fn.name || '') + '() { [native code] }'); } catch (e) {}
+    try {
+      // не только toString: у функций сверяют и Function#name (пустое имя у
+      // подменённой функции — улика не хуже отсутствия [native code])
+      if (name && fn.name !== name) {
+        try { Object.defineProperty(fn, 'name', { value: name, configurable: true }); } catch (e1) {}
+      }
+      nativeMap.set(fn, 'function ' + (name || fn.name || '') + '() { [native code] }');
+    } catch (e) {}
     return fn;
   }
-  var patchedToString = function toString() {
+  // Метод из литерала объекта, а не `function toString() {}`: у нативной
+  // Function.prototype.toString НЕТ собственного prototype (её нельзя вызвать
+  // через new), и обычная функция выдала бы себя этим.
+  var patchedToString = { toString() {
     var orig = nativeMap.get(this);
     if (orig) return orig;
     return origToString.call(this);
-  };
+  } }.toString;
   markNative(patchedToString, 'toString');
   try { Object.defineProperty(Function.prototype, 'toString', { value: patchedToString, writable: true, configurable: true }); } catch (e) {}
 
+  // Нативный аксессор отличается от обычной функции тремя вещами, и каждую из
+  // них проверяют скрипты-детекторы (CreepJS и подобные):
+  //   • Object.getOwnPropertyDescriptor(o, 'platform').get.name === 'get platform'
+  //   • у аксессора НЕТ собственного prototype (его нельзя вызвать через new)
+  //   • enumerable у IDL-свойств равен true
+  // Обычная `function () {}` даёт пустое имя, собственный prototype и
+  // enumerable=false — ровно три улики подделки.
   function defineGetter(target, prop, getter) {
     try {
-      Object.defineProperty(target, prop, { get: markNative(getter, 'get ' + prop), configurable: true });
+      var desc = null;
+      try { desc = Object.getOwnPropertyDescriptor(target, prop); } catch (e1) {}
+      var name = null, enumerable = true;
+      if (desc) {
+        enumerable = desc.enumerable !== false;      // как у самого свойства
+        var origGet = desc.get;
+        if (origGet && typeof origGet.name === 'string' && origGet.name) name = origGet.name;
+      }
+      if (!name) name = 'get ' + String(prop).replace(/^get\s+/, '');
+      // аксессор из литерала объекта: без prototype и без new (как в движке)
+      var holder = { get v() { return getter.call(this); } };
+      var accessor = Object.getOwnPropertyDescriptor(holder, 'v').get;
+      try { Object.defineProperty(accessor, 'name', { value: name, configurable: true }); } catch (e2) {}
+      Object.defineProperty(target, prop, { get: markNative(accessor), configurable: true, enumerable: enumerable });
     } catch (e) {}
   }
   function defineValue(target, prop, value) {
@@ -301,30 +331,18 @@ PAGE_INIT_TEMPLATE = r"""
   // никогда не из будущего), csi() — startE=абсолютная эпоха, onloadT=время
   // от startE, pageT растёт от старта страницы. Плывущие/«будущие» значения —
   // классический детект автогенеренных заглушек.
+  // ВАЖНО: объект window.chrome НЕ создаём, если его нет. У живого Chrome на
+  // каждой странице есть chrome.csi/loadTimes/app, но chrome.runtime у обычной
+  // страницы ОТСУТСТВУЕТ (он появляется только там, где работает расширение).
+  // Самодельный runtime — известная улика «антидетекта», поэтому мы его не
+  // добавляем вовсе, а csi/loadTimes дописываем лишь тогда, когда объект уже
+  // существует: настоящие значения живого Chrome лучше любых заглушек.
   try {
-    if (!window.chrome) { defineValue(window, 'chrome', {}); }
     if (window.chrome) {
       var t0 = Date.now();
       var startE = t0 - 300;          // «навигация» началась чуть раньше скрипта
       var onloadT = 312.7;            // ms от startE до onload — фиксированы
 
-      if (!window.chrome.runtime) {
-        var makeNoop = function (name) {
-          return markNative(function () { return undefined; }, name);
-        };
-        window.chrome.runtime = {
-          id: undefined,
-          connect: makeNoop('connect'),
-          sendMessage: makeNoop('sendMessage'),
-          onMessage: {
-            addListener: makeNoop('addListener'),
-            removeListener: makeNoop('removeListener'),
-          },
-          getPlatformInfo: markNative(function (cb) {
-            if (typeof cb === 'function') cb({ os: 'win', arch: 'x86-64' });
-          }, 'getPlatformInfo'),
-        };
-      }
       if (!window.chrome.csi) {
         window.chrome.csi = markNative(function () {
           return {
@@ -409,35 +427,47 @@ PAGE_INIT_TEMPLATE = r"""
       var mimeArrProto = typeof MimeTypeArray !== 'undefined' ? MimeTypeArray.prototype : Object.prototype;
       var mimeProto = typeof MimeType !== 'undefined' ? MimeType.prototype : Object.prototype;
 
+      // Значения ставим через defineProperty, а не присваиванием: length и
+      // элементы у PluginArray могут быть геттерами, и присваивание бросало
+      // TypeError — из-за этого фейковые плагины не устанавливались вовсе.
       var fakePlugins = Object.create(pluginArrProto);
       fakePluginsList.forEach(function (p, i) {
         var pl = Object.create(pluginProto);
-        pl.name = p.name;
-        pl.filename = p.filename;
-        pl.description = p.description;
-        pl.length = fakeMimesList.length;
-        fakePlugins[i] = pl;
-        fakePlugins[p.name] = pl;
+        defineValue(pl, 'name', p.name);
+        defineValue(pl, 'filename', p.filename);
+        defineValue(pl, 'description', p.description);
+        fakeMimesList.forEach(function (m, j) {
+          var mt = Object.create(mimeProto);
+          defineValue(mt, 'type', m.type);
+          defineValue(mt, 'suffixes', m.suffixes);
+          defineValue(mt, 'description', m.description);
+          defineValue(mt, 'enabledPlugin', pl);
+          defineValue(pl, j, mt);
+          defineValue(pl, m.type, mt);
+        });
+        defineValue(pl, 'length', fakeMimesList.length);
+        defineValue(fakePlugins, i, pl);
+        defineValue(fakePlugins, p.name, pl);
       });
-      fakePlugins.length = fakePluginsList.length;
-      fakePlugins.item = markNative(function (idx) { return this[idx] || null; }, 'item');
-      fakePlugins.namedItem = markNative(function (name) { return this[name] || null; }, 'namedItem');
-      fakePlugins.refresh = markNative(function () {}, 'refresh');
+      defineValue(fakePlugins, 'length', fakePluginsList.length);
+      defineValue(fakePlugins, 'item', markNative(function (idx) { return this[idx] || null; }, 'item'));
+      defineValue(fakePlugins, 'namedItem', markNative(function (name) { return this[name] || null; }, 'namedItem'));
+      defineValue(fakePlugins, 'refresh', markNative(function () {}, 'refresh'));
       defineGetter(Object.getPrototypeOf(navigator), 'plugins', function () { return fakePlugins; });
 
       var fakeMimes = Object.create(mimeArrProto);
       fakeMimesList.forEach(function (m, i) {
         var mi = Object.create(mimeProto);
-        mi.type = m.type;
-        mi.suffixes = m.suffixes;
-        mi.description = m.description;
-        mi.enabledPlugin = fakePlugins[0];
-        fakeMimes[i] = mi;
-        fakeMimes[m.type] = mi;
+        defineValue(mi, 'type', m.type);
+        defineValue(mi, 'suffixes', m.suffixes);
+        defineValue(mi, 'description', m.description);
+        defineValue(mi, 'enabledPlugin', fakePlugins[0]);
+        defineValue(fakeMimes, i, mi);
+        defineValue(fakeMimes, m.type, mi);
       });
-      fakeMimes.length = fakeMimesList.length;
-      fakeMimes.item = markNative(function (idx) { return this[idx] || null; }, 'item');
-      fakeMimes.namedItem = markNative(function (name) { return this[name] || null; }, 'namedItem');
+      defineValue(fakeMimes, 'length', fakeMimesList.length);
+      defineValue(fakeMimes, 'item', markNative(function (idx) { return this[idx] || null; }, 'item'));
+      defineValue(fakeMimes, 'namedItem', markNative(function (name) { return this[name] || null; }, 'namedItem'));
       defineGetter(Object.getPrototypeOf(navigator), 'mimeTypes', function () { return fakeMimes; });
     }
     // navigator.pdfViewerEnabled: в живом Chrome с PDF Viewer = true и обязан
@@ -492,17 +522,26 @@ PAGE_INIT_TEMPLATE = r"""
     // Один объект NetworkInformation на весь документ (connection === connection).
     // Нестандартного поля 'type' быть НЕ должно: живой Chrome его не отдаёт —
     // его наличие = готовый детект подделки.
-    var NI = (typeof NetworkInformation !== 'undefined') ? NetworkInformation.prototype : Object.prototype;
-    var conn = Object.create(NI);
-    conn.effectiveType = ID.connection.effective_type;
-    conn.downlink = ID.connection.downlink;
-    conn.rtt = ID.connection.rtt;
-    conn.saveData = !!ID.connection.save_data;
-    conn.onchange = null;
-    conn.addEventListener = markNative(function () {}, 'addEventListener');
-    conn.removeEventListener = markNative(function () {}, 'removeEventListener');
-    conn.dispatchEvent = markNative(function () { return true; }, 'dispatchEvent');
-    defineGetter(Object.getPrototypeOf(navigator), 'connection', function () { return conn; });
+    //
+    // ВАЖНО (исправление 2.5.4): effectiveType/downlink/rtt/saveData — это
+    // ГЕТТЕРЫ на NetworkInformation.prototype, поэтому простое присваивание
+    // бросало TypeError в строгом режиме. Исключение убивало весь скрипт
+    // целиком, и всё, что шло ниже — экран, WebGL, canvas, аудио, шрифты,
+    // WebRTC — молча оставалось настоящим. Значения ставим геттерами на
+    // прототип (как в живом Chrome) и обязательно внутри try/catch.
+    try {
+      var NI = (typeof NetworkInformation !== 'undefined') ? NetworkInformation.prototype : Object.prototype;
+      defineGetter(NI, 'effectiveType', function () { return ID.connection.effective_type || '4g'; });
+      defineGetter(NI, 'downlink', function () { return ID.connection.downlink != null ? ID.connection.downlink : 10; });
+      defineGetter(NI, 'rtt', function () { return ID.connection.rtt != null ? ID.connection.rtt : 50; });
+      defineGetter(NI, 'saveData', function () { return !!ID.connection.save_data; });
+      var conn = Object.create(NI);
+      defineValue(conn, 'addEventListener', markNative(function () {}, 'addEventListener'));
+      defineValue(conn, 'removeEventListener', markNative(function () {}, 'removeEventListener'));
+      defineValue(conn, 'dispatchEvent', markNative(function () { return true; }, 'dispatchEvent'));
+      defineValue(conn, 'onchange', null);
+      defineGetter(Object.getPrototypeOf(navigator), 'connection', function () { return conn; });
+    } catch (e) {}
   }
 
   // ── 3. Экран ──
@@ -735,9 +774,12 @@ PAGE_INIT_TEMPLATE = r"""
             done[channel] = true;
             var arr = origGetChannel.call(buf, channel);
             if (!arr || !arr.length) return;
-            var n = Math.min(arr.length, 64);
-            for (var i = 0; i < n; i++) {
-              var d = anoise * (((i + 1) * (channel + 3) + cseedA) % 7 - 3);
+            // Шум по ВСЕМУ буферу (каждый 7-й сэмпл), а не по первым 64:
+            // иначе аудио-хеш fingerprintjs-подобных скриптов, считающих сумму
+            // по всему буферу, остаётся физическим — и профиль опознаётся.
+            var step7 = 7;
+            for (var i = 0; i < arr.length; i += step7) {
+              var d = anoise * (((i / step7 + 1) * (channel + 3) + cseedA) % 7 - 3);
               arr[i] = arr[i] + d;
             }
           } catch (e) {}
@@ -938,19 +980,45 @@ WORKER_INIT_TEMPLATE = r"""
   var nativeMap = new WeakMap();
   var origToString = Function.prototype.toString;
   function markNative(fn, name) {
-    try { nativeMap.set(fn, 'function ' + (name || fn.name || '') + '() { [native code] }'); } catch (e) {}
+    try {
+      // не только toString: у функций сверяют и Function#name (пустое имя у
+      // подменённой функции — улика не хуже отсутствия [native code])
+      if (name && fn.name !== name) {
+        try { Object.defineProperty(fn, 'name', { value: name, configurable: true }); } catch (e1) {}
+      }
+      nativeMap.set(fn, 'function ' + (name || fn.name || '') + '() { [native code] }');
+    } catch (e) {}
     return fn;
   }
-  var patchedToString = function toString() {
+  // Метод из литерала объекта, а не `function toString() {}`: у нативной
+  // Function.prototype.toString НЕТ собственного prototype (её нельзя вызвать
+  // через new), и обычная функция выдала бы себя этим.
+  var patchedToString = { toString() {
     var orig = nativeMap.get(this);
     if (orig) return orig;
     return origToString.call(this);
-  };
+  } }.toString;
   markNative(patchedToString, 'toString');
   try { Object.defineProperty(Function.prototype, 'toString', { value: patchedToString, writable: true, configurable: true }); } catch (e) {}
 
+  // имя, отсутствие prototype и enumerable — как у нативного аксессора
+  // (см. пояснение в page-init: это три проверяемые улики подделки)
   function defineGetter(target, prop, getter) {
-    try { Object.defineProperty(target, prop, { get: markNative(getter, 'get ' + prop), configurable: true }); } catch (e) {}
+    try {
+      var desc = null;
+      try { desc = Object.getOwnPropertyDescriptor(target, prop); } catch (e1) {}
+      var name = null, enumerable = true;
+      if (desc) {
+        enumerable = desc.enumerable !== false;
+        var origGet = desc.get;
+        if (origGet && typeof origGet.name === 'string' && origGet.name) name = origGet.name;
+      }
+      if (!name) name = 'get ' + String(prop).replace(/^get\s+/, '');
+      var holder = { get v() { return getter.call(this); } };
+      var accessor = Object.getOwnPropertyDescriptor(holder, 'v').get;
+      try { Object.defineProperty(accessor, 'name', { value: name, configurable: true }); } catch (e2) {}
+      Object.defineProperty(target, prop, { get: markNative(accessor), configurable: true, enumerable: enumerable });
+    } catch (e) {}
   }
   function defineValue(target, prop, value) {
     try { Object.defineProperty(target, prop, { value: value, writable: true, configurable: true, enumerable: true }); } catch (e) {}
@@ -1477,6 +1545,86 @@ def wgl_limits_get(wgl, key):
         return None
 
 
+BROWSER_PRODUCT_RE = re.compile(r"(HeadlessChrome|Chrome|Chromium|Edg|Edge|Firefox)/(\d+(?:\.\d+){0,3})")
+
+
+def real_browser_version(driver):
+    """
+    Версия РЕАЛЬНО запущенного движка (CDP Browser.getVersion).
+    Возвращает (kind, version): kind — 'chrome' | 'msedge' | 'firefox'.
+    """
+    try:
+        info = driver.execute_cdp_cmd("Browser.getVersion", {}) or {}
+    except Exception:
+        return None, None
+    product = str(info.get("product") or "")
+    match = BROWSER_PRODUCT_RE.search(product)
+    if not match:
+        return None, None
+    kind = match.group(1).lower()
+    if kind in ("edg", "edge"):
+        kind = "msedge"
+    elif kind == "firefox":
+        kind = "firefox"
+    else:
+        kind = "chrome"
+    return kind, match.group(2)
+
+
+def ua_kind(user_agent):
+    ua = str(user_agent or "")
+    if "Edg/" in ua:
+        return "msedge"
+    if "Firefox/" in ua:
+        return "firefox"
+    if "Chrome/" in ua:
+        return "chrome"
+    return "unknown"
+
+
+def align_ua_version(ident, engine_kind, engine_version):
+    """
+    UA и Client Hints обязаны называть версию ТОГО движка, который реально
+    запущен. Иначе выходит «Chrome 131», который на деле умеет всё из 153-го:
+    любая проверка, сверяющая заявленную версию с возможностями браузера
+    (это делают и Cloudflare, и Google-капча), ловит такое мгновенно.
+    """
+    notes = []
+    if not engine_version:
+        return notes
+    major = str(engine_version).split(".")[0]
+    kind = ua_kind(ident.get("user_agent"))
+    if engine_kind and kind != "unknown" and engine_kind != kind:
+        notes.append("ВНИМАНИЕ: запущен %s, а UA заявляет %s — профиль открыт не тем браузером"
+                     % (engine_kind, kind))
+        return notes
+    if ident.get("user_agent_source") == "user":
+        # пользовательский UA не переписываем, но предупредить обязаны
+        match = re.search(r"(?:Chrome|Edg|Firefox)/(\d+)", str(ident.get("user_agent") or ""))
+        if match and match.group(1) != major:
+            notes.append("ВНИМАНИЕ: в UA заявлена версия %s, а движок — %s. Cloudflare и Google "
+                         "сверяют заявленную версию с реальными возможностями браузера."
+                         % (match.group(1), major))
+        return notes
+    if str(ident.get("ua_major") or "") == major:
+        return notes
+    old = str(ident.get("ua_major") or "?")
+    ua = str(ident.get("user_agent") or "")
+    ua = re.sub(r"(Chrome/)\d+\.0\.0\.0", r"\g<1>" + major + ".0.0.0", ua)
+    ua = re.sub(r"(Edg/)\d+\.0\.0\.0", r"\g<1>" + major + ".0.0.0", ua)
+    ua = re.sub(r"(Firefox/)\d+\.0", r"\g<1>" + major + ".0", ua)
+    ident["user_agent"] = ua
+    ident["ua_major"] = major
+    ident["ua_full_version"] = str(engine_version)
+    brands = ident.get("brands")
+    if isinstance(brands, list):
+        for brand in brands:
+            if isinstance(brand, dict) and not brand.get("grease"):
+                brand["version"] = major
+    notes.append("UA: версия %s → %s (реально запущенный движок)" % (old, major))
+    return notes
+
+
 class WorkerPatchManager:
     """
     Патчит dedicated-воркеры тем же отпечатком, что и главный поток.
@@ -1644,6 +1792,69 @@ WORKER_CHECK_JS = r"""
   return 'pending';
 })();
 """
+
+
+# Проверяем, что подмены РЕАЛЬНО применились на странице сайта: если скрипт
+# споткнулся на середине (как было с navigator.connection), это видно здесь,
+# а не «втихую» на живом сайте.
+PAGE_CHECK_JS = r"""
+(function () {
+  var out = { platform: navigator.platform, cores: navigator.hardwareConcurrency,
+              deviceMemory: navigator.deviceMemory, languages: (navigator.languages || []).join(','),
+              touch: navigator.maxTouchPoints, screenW: screen.width, screenH: screen.height,
+              webdriver: navigator.webdriver, tex: null, renderer: null, canvasPatched: null,
+              focus: (typeof document.hasFocus === 'function') ? document.hasFocus() : null };
+  try {
+    var c = document.createElement('canvas');
+    var gl = c.getContext('webgl');
+    if (gl) {
+      out.tex = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+      var dbg = gl.getExtension('WEBGL_debug_renderer_info');
+      if (dbg) out.renderer = gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL);
+    }
+  } catch (e) {}
+  try {
+    var src = String(HTMLCanvasElement.prototype.toDataURL);
+    out.canvasPatched = src.indexOf('[native code]') !== -1 && window.__artofixCanvasMark === undefined;
+  } catch (e) {}
+  return out;
+})();
+"""
+
+
+def page_spoof_selfcheck(driver, ident):
+    """
+    Сверяет то, что видит страница, с отпечатком профиля.
+    Возвращает список расхождений — пустой список означает «подмены применились».
+    """
+    try:
+        seen = driver.execute_script(js_expr(PAGE_CHECK_JS))
+    except Exception as e:
+        return ["самопроверка не запустилась: " + str(e)]
+    if not isinstance(seen, dict):
+        return ["страница не отдала значения отпечатка"]
+    bad = []
+    if ident.get("platform") and seen.get("platform") != ident["platform"]:
+        bad.append("platform: ожидали %s, получили %s" % (ident["platform"], seen.get("platform")))
+    langs = ident.get("languages") or []
+    if langs and seen.get("languages") != ",".join(langs):
+        bad.append("languages: ожидали %s, получили %s" % (",".join(langs), seen.get("languages")))
+    hw = ident.get("hardware") or {}
+    if hw.get("cores") and seen.get("cores") != hw["cores"]:
+        bad.append("hardwareConcurrency: ожидали %s, получили %s" % (hw["cores"], seen.get("cores")))
+    scr = ident.get("screen") or {}
+    if (ident.get("vectors") or {}).get("screen") is not False and scr.get("width"):
+        if seen.get("screenW") != int(scr["width"]):
+            bad.append("screen.width: ожидали %s, получили %s" % (scr["width"], seen.get("screenW")))
+    webgl = ident.get("webgl") or {}
+    limits = webgl.get("limits") or {}
+    if (ident.get("vectors") or {}).get("webgl") is not False and limits.get("MAX_TEXTURE_SIZE"):
+        if seen.get("tex") != limits["MAX_TEXTURE_SIZE"]:
+            bad.append("WebGL MAX_TEXTURE_SIZE: ожидали %s, получили %s"
+                       % (limits["MAX_TEXTURE_SIZE"], seen.get("tex")))
+    if seen.get("webdriver") is not False:
+        bad.append("navigator.webdriver = %s" % seen.get("webdriver"))
+    return bad
 
 
 def worker_selftest(driver, timeout=5.0):
@@ -2363,6 +2574,12 @@ class BrowserManager:
             else:
                 driver = self._launch_chrome(profile_path, ident)
 
+            # 0) Версия движка: UA и Client Hints должны называть именно её,
+            #    иначе заявленная версия противоречит возможностям браузера.
+            engine_kind, engine_version = real_browser_version(driver)
+            for note in align_ua_version(ident, engine_kind, engine_version):
+                print("[fp] " + note)
+
             # 1) Снимаем РЕАЛЬНОЕ железо, пока документ (about:blank) ещё не пропатчен.
             #    Это последний момент, когда видно правду: ядра, deviceMemory, лимиты GPU.
             real = probe_real_hardware(driver)
@@ -2393,7 +2610,19 @@ class BrowserManager:
                 else:
                     print("[cf] разогрев поведения пропущен — страница сайта ещё не открыта")
 
-                # 5) Самопроверка «главный поток ↔ воркер» — ровно то, чем
+                # 5) Самопроверка отпечатка: подмены обязаны быть применимы на
+                #    самом сайте, а не только «в теории». Раньше сбой в середине
+                #    скрипта (например, на navigator.connection) молча оставлял
+                #    половину сигналов настоящими.
+                if cf_state in ("ok", "disabled", "unknown"):
+                    spoof_problems = page_spoof_selfcheck(driver, ident)
+                    if spoof_problems:
+                        print("[fp] ВНИМАНИЕ: подмена применилась не полностью — " +
+                              "; ".join(spoof_problems) + " (это видно антибот-скриптам)")
+                    else:
+                        print("[fp] отпечаток применился: platform/экран/WebGL/языки совпадают с профилем")
+
+                # 6) Самопроверка «главный поток ↔ воркер» — ровно то, чем
                 #    проверяют подделку отпечатка. Пишем в лог как есть.
                 if patcher is not None and patcher.enabled:
                     diffs = worker_selftest(driver)

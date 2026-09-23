@@ -631,6 +631,147 @@ def _cf_settings_keys():
     assert ident["hardware"]["cores"] == 8, "выключенный тумблер обязан отключать выравнивание"
 
 
+@check("версия движка: UA и Client Hints называют ту, что реально запущена")
+def _ua_version_align():
+    engine = load_engine()
+    ident = {"user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                           "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+             "user_agent_source": "generated", "ua_major": "131", "ua_full_version": "131.0.6778.86",
+             "brands": [{"brand": "Not_A Brand", "version": "24", "grease": True},
+                        {"brand": "Google Chrome", "version": "131"},
+                        {"brand": "Chromium", "version": "131"}]}
+    notes = engine.align_ua_version(ident, "chrome", "153.0.8010.0")
+    assert "Chrome/153.0.0.0" in ident["user_agent"], ident["user_agent"]
+    assert ident["ua_major"] == "153" and ident["ua_full_version"] == "153.0.8010.0", ident
+    assert all(b["version"] == "153" for b in ident["brands"] if not b.get("grease")), ident["brands"]
+    assert ident["brands"][0]["version"] == "24", "GREASE-версию трогать нельзя"
+    assert notes and "153" in notes[0], notes
+    # повторный вызов — идемпотентен
+    assert engine.align_ua_version(ident, "chrome", "153.0.8010.0") == []
+
+    edge = {"user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                          "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0",
+            "user_agent_source": "generated", "ua_major": "131", "brands": []}
+    engine.align_ua_version(edge, "msedge", "153.0.8010.0")
+    assert "Edg/153.0.0.0" in edge["user_agent"], edge["user_agent"]
+
+
+@check("версия движка: пользовательский UA не переписывается, но расхождение видно в логе")
+def _ua_version_user():
+    engine = load_engine()
+    ident = {"user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/131.0.0.0 Safari/537.36",
+             "user_agent_source": "user", "ua_major": "131"}
+    notes = engine.align_ua_version(ident, "chrome", "153.0.8010.0")
+    assert "Chrome/131.0.0.0" in ident["user_agent"], "UA пользователя трогать нельзя"
+    assert any("ВНИМАНИЕ" in n for n in notes), notes
+
+
+@check("версия движка: чужой браузер в профиле ловится предупреждением")
+def _ua_kind_mismatch():
+    engine = load_engine()
+    edge_ident = {"user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/131.0.0.0 Safari/537.36 "
+                                "Edg/131.0.0.0", "user_agent_source": "generated", "ua_major": "131"}
+    notes = engine.align_ua_version(edge_ident, "chrome", "153.0.8010.0")
+    assert any("ВНИМАНИЕ" in n for n in notes), notes
+    assert "Edg/131" in edge_ident["user_agent"], "при чужом браузере UA не подменяем"
+
+
+@check("версия движка читается из CDP и попадает в запуск до навигации")
+def _ua_version_wiring():
+    engine = load_engine()
+    src = ENGINE_SRC
+    assert "Browser.getVersion" in src, "нет чтения версии движка"
+    assert "align_ua_version(ident, engine_kind, engine_version)" in src, "нет выравнивания версии"
+    assert src.index("align_ua_version(ident, engine_kind, engine_version)") < src.index("cf_navigate(driver, url, cfg)"), \
+        "версию выравниваем до навигации"
+
+    class _D:
+        def execute_cdp_cmd(self, method, params):
+            if method == "Browser.getVersion":
+                return {"product": "Chrome/153.0.8010.0", "userAgent": "Mozilla/5.0 HeadlessChrome/153.0.8010.0"}
+            return {}
+
+    kind, version = engine.real_browser_version(_D())
+    assert (kind, version) == ("chrome", "153.0.8010.0"), (kind, version)
+
+    class _Edge:
+        def execute_cdp_cmd(self, method, params):
+            return {"product": "Edg/153.0.8010.0"}
+
+    assert engine.real_browser_version(_Edge()) == ("msedge", "153.0.8010.0")
+
+    class _Broken:
+        def execute_cdp_cmd(self, method, params):
+            raise RuntimeError("нет CDP")
+
+    assert engine.real_browser_version(_Broken()) == (None, None)
+
+
+@check("шаблон: подмены не «умирают на середине» (присваивание в геттеры = TypeError)")
+def _template_no_raw_assign():
+    src = ENGINE_SRC
+    # Раньше здесь был `conn.effectiveType = ...` — присваивание в геттер
+    # NetworkInformation бросало TypeError в строгом режиме, и ВСЁ, что ниже
+    # (экран, WebGL, canvas, аудио, кодеки, шрифты, WebRTC), молча оставалось
+    # настоящим. Такие присваивания не должны вернуться.
+    for bad in ["conn.effectiveType =", "conn.downlink =", "conn.rtt =", "conn.saveData =",
+                "conn.onchange =", "fakePlugins.length =", "fakeMimes.length =",
+                "pl.length =", "mi.enabledPlugin ="]:
+        assert bad not in src, "присваивание в host-объект вернётся бедой: " + bad
+    assert "defineGetter(NI, 'effectiveType'" in src, "сеть должна ставиться геттерами"
+    assert "defineValue(fakePlugins, 'length'" in src
+    assert "defineValue(fakeMimes, 'length'" in src
+    # блоки, которые раньше роняли скрипт, обязаны быть в try/catch
+    conn_block = src[src.index("if (ID.connection) {"):][:1500]
+    assert "try {" in conn_block, "блок connection без try/catch"
+
+
+@check("шаблон: аудио-шум покрывает весь буфер, а не первые сэмплы")
+def _template_audio_coverage():
+    src = ENGINE_SRC
+    assert "i += step7" in src, "шум по всему буферу"
+    assert "Math.min(arr.length, 64)" not in src, "шум только по первым 64 сэмплам — слишком слабо"
+
+
+@check("самопроверка отпечатка: расхождения видны движку и попадают в лог")
+def _spoof_selfcheck():
+    engine = load_engine()
+    ident = {"platform": "Win32", "languages": ["de-DE", "de"], "hardware": {"cores": 8},
+             "screen": {"width": 1920}, "webgl": {"limits": {"MAX_TEXTURE_SIZE": 32768}},
+             "vectors": {"screen": True, "webgl": True}}
+
+    class _Good:
+        def execute_script(self, src):
+            return {"platform": "Win32", "languages": "de-DE,de", "cores": 8, "screenW": 1920,
+                    "tex": 32768, "webdriver": False}
+
+    assert engine.page_spoof_selfcheck(_Good(), ident) == []
+
+    class _Bad:
+        def execute_script(self, src):
+            return {"platform": "Linux x86_64", "languages": "en-US", "cores": 2, "screenW": 1280,
+                    "tex": 8192, "webdriver": True}
+
+    problems = engine.page_spoof_selfcheck(_Bad(), ident)
+    assert len(problems) >= 5, problems
+    assert any("platform" in p for p in problems) and any("WebGL" in p for p in problems), problems
+
+    class _Broken:
+        def execute_script(self, src):
+            raise RuntimeError("нет страницы")
+
+    assert engine.page_spoof_selfcheck(_Broken(), ident), "сбой пробы обязан быть виден"
+
+
+@check("самопроверка отпечатка вызывается на самом сайте, а не «в теории»")
+def _spoof_selfcheck_wiring():
+    src = ENGINE_SRC
+    assert "page_spoof_selfcheck(driver, ident)" in src, "нет вызова самопроверки"
+    assert "подмена применилась не полностью" in src, "нет предупреждения в логе"
+    assert src.index("page_spoof_selfcheck(driver, ident)") < src.index("worker_selftest(driver)"), \
+        "сначала отпечаток, потом воркеры"
+
+
 def main():
     failed = [r for r in RESULTS if r[0] == "fail"]
     for status, name in RESULTS:
