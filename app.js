@@ -54,6 +54,7 @@ function makeNullApi() {
     cbnFixWarp: empty, cbnTestWarp: obj,
     readLogs: nul, clearLogs: empty, copyLogs: empty,
     fingerprintRoll: obj, previewProfile: obj, previewRoll: empty, listCountries: nul,
+    pickBgImage: function(){ return Promise.resolve({ ok:false, msg:'Мост недоступен'}); },
     reportError: function () {},
     onLogEntry: off, onZapretStatus: off, onZapretProgress: off, onDiagLog: off,
     onDiagProgress: off, onTrayAction: off, onNavigate: off, onBootstrap: off,
@@ -879,7 +880,7 @@ function renderBinds() {
 }
 
 // ── THEMES & COLORS ──
-var APP_SETTINGS = { theme: '', colors: null };
+var APP_SETTINGS = { theme: '', colors: null, bgImage: null };
 
 // Список тем нового дизайна (без киберпанк-набора).
 // Старые значения (th-cyber, th-hacker, th-matrix и т.п.) больше не применяются.
@@ -926,14 +927,18 @@ function removeCssVar(name) {
 }
 
 function previewColors() {
-  var ac  = document.getElementById('color-accent')?.value  || '#4f46e5';
-  var ac2 = document.getElementById('color-accent2')?.value || '#8b5cf6';
+  var acEl = document.getElementById('color-accent');
+  var ac2El = document.getElementById('color-accent2');
+  var ac  = (acEl && acEl.value)  || '#4f46e5';
+  var ac2 = (ac2El && ac2El.value) || '#8b5cf6';
   applyColors(ac, ac2);
 }
 
 async function saveColors() {
-  var ac  = document.getElementById('color-accent')?.value  || '#4f46e5';
-  var ac2 = document.getElementById('color-accent2')?.value || '#8b5cf6';
+  var acEl = document.getElementById('color-accent');
+  var ac2El = document.getElementById('color-accent2');
+  var ac  = (acEl && acEl.value)  || '#4f46e5';
+  var ac2 = (ac2El && ac2El.value) || '#8b5cf6';
   applyColors(ac, ac2);
   APP_SETTINGS.colors = { ac: ac, ac2: ac2 };
   await saveSettings();
@@ -1049,6 +1054,61 @@ function saveWindowStyle() {
   saveSettings();
 }
 
+// ── ФОН-КАРТИНКА ──
+// Картинка хранится как data URL в настройках (до 4 МБ). Слой #bg-image-layer
+// имеет opacity: var(--win-alpha) — прозрачность продолжает работать и с картинкой.
+function applyBgImage(dataUrl) {
+  var layer = document.getElementById('bg-image-layer');
+  var app = document.getElementById('app');
+  var preview = document.getElementById('bg-preview');
+  var status = document.getElementById('bg-image-status');
+  if (!layer || !app) return;
+  if (dataUrl && typeof dataUrl === 'string' && dataUrl.indexOf('data:image/') === 0) {
+    // Безопасно: dataUrl из main-процесса, но экранируем кавычки
+    var safe = dataUrl.replace(/"/g, '\\"');
+    // Оверлей из --bg-rgb для читаемости текста поверх картинки
+    layer.style.backgroundImage = 'linear-gradient(rgba(var(--bg-rgb,237,240,247),0.62), rgba(var(--bg-rgb,237,240,247),0.62)), url("' + safe + '")';
+    app.classList.add('has-bg-image');
+    if (preview) {
+      preview.style.display = '';
+      preview.style.backgroundImage = 'url("' + safe + '")';
+    }
+    if (status) { status.style.color = 'var(--grn)'; status.textContent = '✓ Картинка установлена'; }
+  } else {
+    layer.style.backgroundImage = '';
+    app.classList.remove('has-bg-image');
+    if (preview) { preview.style.display = 'none'; preview.style.backgroundImage = ''; }
+    if (status) { status.style.color = 'var(--tx3)'; status.textContent = 'Фон — стандартный цвет'; }
+  }
+}
+
+async function pickBgImage() {
+  var status = document.getElementById('bg-image-status');
+  if (status) { status.style.color = 'var(--ac)'; status.textContent = '⏳ Выбор файла...'; }
+  try {
+    var res = await apiBridge.pickBgImage();
+    if (res && res.ok && res.dataUrl) {
+      APP_SETTINGS.bgImage = res.dataUrl;
+      applyBgImage(res.dataUrl);
+      await saveSettings();
+      showToast('🖼 Фон-картинка установлена! Прозрачность продолжает работать.', 'ok');
+    } else {
+      if (status) { status.style.color = res && res.msg ? 'var(--red)' : 'var(--tx3)'; status.textContent = res && res.msg ? '✗ ' + res.msg : 'Отменено'; }
+      if (res && res.msg) showToast(res.msg, 'err');
+    }
+  } catch (e) {
+    if (status) { status.style.color = 'var(--red)'; status.textContent = '✗ ' + e.message; }
+    showToast('Ошибка: ' + e.message, 'err');
+  }
+}
+
+async function clearBgImage() {
+  APP_SETTINGS.bgImage = null;
+  applyBgImage(null);
+  await saveSettings();
+  showToast('Фон сброшен на стандартный', '');
+}
+
 // Эффекты фона (частицы/сканлайны) из старого дизайна удалены —
 // функция сохранена для совместимости с записанными настройками.
 function saveFx() {
@@ -1089,6 +1149,8 @@ function initSettingsTab() {
   if (opEl)  opEl.value  = String(Math.round(op * 100));
   if (radD)  radD.textContent = String(Math.round(rad));
   if (opD)   opD.textContent  = String(Math.round(op * 100));
+  // Фон-картинка
+  applyBgImage(s.bgImage || null);
 }
 
 async function saveSettings() {
@@ -1111,6 +1173,8 @@ async function loadSettings() {
   } catch(e) {}
   // Скругление/прозрачность окна применяем всегда (есть настройки или дефолты)
   applyWindowStyle();
+  // Фон-картинка — применяем сразу при старте, чтобы прозрачность не ломалась
+  try { applyBgImage(APP_SETTINGS.bgImage || null); } catch (_) {}
 }
 
 // ── CONFIG ──
@@ -1789,12 +1853,17 @@ async function rerollFingerprint() {
 }
 
 function saveFpConfig() {
+  var _f1 = document.getElementById('fp-webgl');
+  var _f2 = document.getElementById('fp-platform');
+  var _f3 = document.getElementById('fp-canvas');
+  var _f4 = document.getElementById('fp-resolution');
+  var _f5 = document.getElementById('fp-ua');
   var cfg = {
-    webgl:      document.getElementById('fp-webgl')?.checked      !== false,
-    platform:   document.getElementById('fp-platform')?.checked   !== false,
-    canvas:     document.getElementById('fp-canvas')?.checked     !== false,
-    resolution: document.getElementById('fp-resolution')?.checked || false,
-    ua:         document.getElementById('fp-ua')?.checked         || false,
+    webgl:      (_f1 && _f1.checked)      !== false,
+    platform:   (_f2 && _f2.checked)   !== false,
+    canvas:     (_f3 && _f3.checked)     !== false,
+    resolution: (_f4 && _f4.checked) || false,
+    ua:         (_f5 && _f5.checked)         || false,
   };
   // Сохраняем в APP_SETTINGS
   APP_SETTINGS.fingerprint = cfg;
@@ -2248,12 +2317,18 @@ async function initCheburnet() {
 }
 
 function saveCbn() {
-  CBN_SETTINGS.autostart   = document.getElementById('cbn-autostart')?.checked || false;
-  CBN_SETTINGS.autorestart = document.getElementById('cbn-autorestart')?.checked || true;
-  CBN_SETTINGS.interval    = parseInt(document.getElementById('cbn-interval')?.value || '30');
-  CBN_SETTINGS.dns1        = document.getElementById('cbn-dns1')?.value;
-  CBN_SETTINGS.dns2        = document.getElementById('cbn-dns2')?.value;
-  CBN_SETTINGS.dnsMode     = document.getElementById('cbn-dns-mode')?.value;
+  var _c1 = document.getElementById('cbn-autostart');
+  var _c2 = document.getElementById('cbn-autorestart');
+  var _c3 = document.getElementById('cbn-interval');
+  var _c4 = document.getElementById('cbn-dns1');
+  var _c5 = document.getElementById('cbn-dns2');
+  var _c6 = document.getElementById('cbn-dns-mode');
+  CBN_SETTINGS.autostart   = (_c1 && _c1.checked) || false;
+  CBN_SETTINGS.autorestart = (_c2 && _c2.checked) || true;
+  CBN_SETTINGS.interval    = parseInt((_c3 && _c3.value) || '30');
+  CBN_SETTINGS.dns1        = _c4 && _c4.value;
+  CBN_SETTINGS.dns2        = _c5 && _c5.value;
+  CBN_SETTINGS.dnsMode     = _c6 && _c6.value;
   APP_SETTINGS.cheburnet = CBN_SETTINGS;
   saveSettings();
   if (CBN_SETTINGS.autostart) startCbnMonitor();
@@ -2365,8 +2440,10 @@ function stopCbnMonitor() {
 }
 
 async function cheburnetApplyDns() {
-  var dns1 = document.getElementById('cbn-dns1')?.value;
-  var dns2 = document.getElementById('cbn-dns2')?.value;
+  var _d1 = document.getElementById('cbn-dns1');
+  var _d2 = document.getElementById('cbn-dns2');
+  var dns1 = _d1 && _d1.value;
+  var dns2 = _d2 && _d2.value;
   var st = document.getElementById('cbn-dns-status');
   if (st) { st.textContent = '⏳ Применяем DNS...'; st.style.color = 'var(--ac)'; }
   try {
@@ -2785,6 +2862,8 @@ AF_ACTIONS = {
   resetColors: resetColors,
   saveFx: saveFx,
   saveWindowStyle: saveWindowStyle,
+  pickBgImage: pickBgImage,
+  clearBgImage: clearBgImage,
 
   // adblock
   addPreset: addPreset,

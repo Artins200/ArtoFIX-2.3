@@ -491,6 +491,19 @@ function writeConfig(cfg) {
 }
 
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
+const BG_IMAGE_MAX = 4 * 1024 * 1024; // 4 MB data URL
+function isValidBgDataUrl(v) {
+  if (typeof v !== 'string') return false;
+  if (v.length > BG_IMAGE_MAX) return false;
+  if (!v.startsWith('data:image/')) return false;
+  // only allow png jpeg jpg webp gif
+  if (!/^data:image\/(png|jpeg|jpg|webp|gif);base64,/.test(v)) return false;
+  // basic base64 length check
+  var b64 = v.split(',')[1] || '';
+  if (b64.length < 100) return false;
+  if (b64.length > BG_IMAGE_MAX) return false;
+  return true;
+}
 function sanitizeSettings(input) {
   const out = {};
   if (!input || typeof input !== 'object') return out;
@@ -502,6 +515,11 @@ function sanitizeSettings(input) {
     const op = Number(input.colors.op);
     if (Number.isFinite(op) && op >= 0.1 && op <= 1) c.op = String(op);
     out.colors = c;
+  }
+  if (typeof input.bgImage === 'string' && isValidBgDataUrl(input.bgImage)) {
+    out.bgImage = input.bgImage;
+  } else if (input.bgImage === null) {
+    out.bgImage = null;
   }
   if (input.cheburnet && typeof input.cheburnet === 'object') {
     const cb = {};
@@ -1603,6 +1621,44 @@ function runPowerShellInline(script, env) {
   });
 }
 
+// ── ФОН-КАРТИНКА: выбор файла → data URL ──
+function pickBgImage() {
+  if (!win || win.isDestroyed()) return Promise.resolve({ ok: false, msg: 'Окно недоступно' });
+  if (rateLimited('pick-bg', 1500)) return Promise.resolve({ ok: false, msg: 'Слишком часто' });
+  var files = dialog.showOpenDialogSync(win, {
+    title: 'Выбери картинку для фона',
+    properties: ['openFile'],
+    filters: [
+      { name: 'Изображения', extensions: ['png','jpg','jpeg','webp','gif'] },
+      { name: 'Все файлы', extensions: ['*'] },
+    ],
+  });
+  if (!files || !files.length) return Promise.resolve({ ok: false, msg: null }); // отмена — не ошибка
+  var filePath = files[0];
+  try {
+    var stat = fs.statSync(filePath);
+    if (!stat.isFile()) return { ok: false, msg: 'Не файл' };
+    if (stat.size > 4 * 1024 * 1024) return { ok: false, msg: 'Файл слишком большой — до 4 МБ' };
+    var ext = path.extname(filePath).toLowerCase();
+    var mimeMap = { '.png':'image/png', '.jpg':'image/jpeg', '.jpeg':'image/jpeg', '.webp':'image/webp', '.gif':'image/gif' };
+    var mime = mimeMap[ext];
+    if (!mime) return { ok: false, msg: 'Поддерживаются только png/jpg/webp/gif' };
+    var buf = fs.readFileSync(filePath);
+    // Проверка сигнатуры файла (магия)
+    var isValid = false;
+    if (ext === '.png' && buf[0]===0x89 && buf[1]===0x50) isValid = true;
+    else if ((ext === '.jpg' || ext === '.jpeg') && buf[0]===0xFF && buf[1]===0xD8) isValid = true;
+    else if (ext === '.gif' && buf[0]===0x47 && buf[1]===0x49) isValid = true;
+    else if (ext === '.webp' && buf.toString('ascii',0,4)==='RIFF') isValid = true;
+    if (!isValid) return { ok: false, msg: 'Файл не похож на картинку' };
+    var dataUrl = 'data:' + mime + ';base64,' + buf.toString('base64');
+    if (dataUrl.length > 4 * 1024 * 1024) return { ok: false, msg: 'Картинка слишком большая после кодирования' };
+    return { ok: true, dataUrl: dataUrl, name: path.basename(filePath) };
+  } catch (e) {
+    return { ok: false, msg: e.message };
+  }
+}
+
 // ═══════════════════════════════════════════
 //  IPC: ВАЛИДАЦИЯ ИСТОЧНИКА + РЕГИСТРАЦИЯ КАНАЛОВ
 // ═══════════════════════════════════════════
@@ -1862,6 +1918,7 @@ handle('api:cbn-set-dns', (_e, payload) => cbnSetDns(payload && typeof payload =
 handle('api:cbn-reset-dns', () => cbnResetDns());
 handle('api:cbn-fix-warp', () => cbnFixWarp());
 handle('api:cbn-test-warp', () => cbnTestWarp());
+handle('api:pick-bg-image', () => pickBgImage());
 
 // ── логи ──
 handle('api:read-logs', () => launchLogs.slice());
