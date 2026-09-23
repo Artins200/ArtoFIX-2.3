@@ -399,6 +399,238 @@ def _cf_wiring():
     assert "[cf] BLOCKED" in src and "[cf] CHALLENGE" in src, "нет машинных маркеров для main"
     assert "разогрев поведения пропущен" in src, "разогрев может уйти на страницу проверки"
 
+# ── воркеры и coherence с реальным железом ──────────────────────────────
+
+class _FakeWorkerDriver:
+    """Драйвер с эмуляцией Target-домена: как Selenium execute_cdp_cmd."""
+
+    def __init__(self, targets=None):
+        self.calls = []
+        self.scripts = []
+        self.attached = 0
+        self.detached = []
+        self.targets = targets if targets is not None else [
+            {"targetId": "W1", "type": "worker", "attached": False},
+            {"targetId": "F1", "type": "iframe", "attached": False},
+        ]
+        self.fail_attach = False
+
+    def execute_cdp_cmd(self, method, params):
+        self.calls.append((method, params))
+        if method == "Target.setAutoAttach":
+            return {}
+        if method == "Target.getTargets":
+            return {"targetInfos": [dict(t, attached=(t["targetId"] in ("W1", "W2"))) for t in self.targets]}
+        if method == "Target.attachToTarget":
+            if self.fail_attach:
+                raise RuntimeError("attach failed")
+            self.attached += 1
+            return {"sessionId": "S" + str(self.attached)}
+        if method == "Target.sendMessageToTarget":
+            import json as _json
+            try:
+                msg = _json.loads(params["message"])
+            except Exception:
+                msg = {}
+            if msg.get("method") == "Runtime.evaluate":
+                self.scripts.append(msg.get("params", {}).get("expression", ""))
+            return {}
+        if method == "Target.detachFromTarget":
+            self.detached.append(params.get("sessionId"))
+            return {}
+        return {}
+
+
+@check("js_expr: значение выражения доходит из Selenium (иначе CF-логика слепая)")
+def _js_expr():
+    engine = load_engine()
+    assert engine.js_expr("(function(){return 1;})();").startswith("return (")
+    assert engine.js_expr("return 1;") == "return 1;"          # уже с return — не ломаем
+    # скрипт, заканчивающийся строчным комментарием, не должен «съесть» хвост
+    wrapped = engine.js_expr("(function(){ return 1; })(); // хвост")
+    assert wrapped.endswith("\n);") and "// хвост" in wrapped
+    # и главное: проба состояния страницы обязана вернуть словарь
+    class _D:
+        def execute_script(self, src):
+            # Selenium исполняет скрипт как ТЕЛО функции: без return значение теряется
+            return {"title": "Just a moment..."} if src.strip().startswith("return") else None
+    state, _ray = engine.page_cf_state(_D())
+    assert state == "challenge", state
+    class _D2:
+        def execute_script(self, src):
+            return {"platform": "Linux x86_64"} if src.strip().startswith("return") else None
+    assert engine.probe_real_hardware(_D2()).get("platform") == "Linux x86_64"
+
+
+@check("железо: ядра, память и языки выравниваются по реальной машине")
+def _align_hw():
+    engine = load_engine()
+    ident = {"user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/131.0.0.0",
+             "user_agent_source": "generated", "ua_platform": "Windows", "platform": "Win32",
+             "languages": ["de-DE", "de"],
+             "hardware": {"cores": 8, "memory": 16, "device_memory": 8, "max_touch_points": 0}}
+    real = {"platform": "Linux x86_64", "cores": 2, "languages": ["de-DE"], "device_memory": 4, "webgl": None}
+    notes = engine.align_identity_to_hardware(ident, real, {})
+    assert ident["hardware"]["cores"] == 2, ident["hardware"]
+    assert ident["hardware"]["device_memory"] == 4, ident["hardware"]
+    assert ident["languages"] == ["de-DE"], ident["languages"]
+    assert ident["platform"] == "Linux x86_64"
+    assert engine.device_memory_bucket(16) == 8 and engine.device_memory_bucket(2) == 2, "шкала как в Chrome"
+    assert notes, "должны быть пояснения в лог"
+
+
+@check("железо: реальный GPU показывается как есть, программный — нет")
+def _align_gpu():
+    engine = load_engine()
+    base = {"user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/131.0.0.0",
+            "user_agent_source": "generated", "ua_platform": "Windows", "platform": "Win32",
+            "languages": ["ru-RU"], "hardware": {"cores": 8, "device_memory": 8},
+            "webgl": {"vendor": "Google Inc. (NVIDIA)", "renderer": "ANGLE (NVIDIA, RTX 3060 Direct3D11)",
+                      "tier": "high", "limits": {"MAX_TEXTURE_SIZE": 32768, "MAX_VARYING_VECTORS": 32}}}
+    real_hw = {"platform": "Win32", "cores": 8, "languages": ["ru-RU"], "device_memory": 8,
+               "webgl": {"vendor": "Google Inc. (Intel)", "renderer": "ANGLE (Intel, Intel(R) UHD Graphics 630)",
+                         "limits": {"MAX_TEXTURE_SIZE": 16384, "MAX_VARYING_VECTORS": 30}}}
+    hw = json.loads(json.dumps(base))
+    engine.align_identity_to_hardware(hw, real_hw, {})
+    assert "Intel" in hw["webgl"]["renderer"], hw["webgl"]
+    assert hw["webgl"]["limits"]["MAX_TEXTURE_SIZE"] == 16384
+    assert hw["webgl"]["tier"] == "mid"
+
+    real_sw = {"platform": "Linux x86_64", "cores": 2, "languages": ["ru-RU"], "device_memory": 4,
+               "webgl": {"renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero)))",
+                         "limits": {"MAX_TEXTURE_SIZE": 8192}}}
+    sw = json.loads(json.dumps(base))
+    notes = engine.align_identity_to_hardware(sw, real_sw, {})
+    assert sw["webgl"]["renderer"] == base["webgl"]["renderer"], "программный рендер нельзя показывать сайту"
+    assert sw["webgl"]["limits"]["MAX_TEXTURE_SIZE"] == 32768, "лимиты профиля не должны стать «программными»"
+    assert sw.get("software_gpu") is True and notes
+
+
+@check("UA выравнивается по реальной ОС, но не трогается, если задан пользователем")
+def _align_ua():
+    engine = load_engine()
+    def ident(src):
+        return {"user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                              "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+                "user_agent_source": src, "ua_major": "131", "ua_platform": "Windows",
+                "ua_platform_version": "10.0.0", "platform": "Win32",
+                "languages": ["ru-RU"], "hardware": {"cores": 4, "device_memory": 4}}
+    real = {"platform": "Linux x86_64", "cores": 4, "languages": ["ru-RU"], "device_memory": 4, "webgl": None}
+    gen = ident("generated")
+    engine.align_identity_to_hardware(gen, real, {})
+    assert "X11; Linux x86_64" in gen["user_agent"], gen["user_agent"]
+    assert "Chrome/131.0.0.0" in gen["user_agent"], "версия обязана сохраниться"
+    assert gen["ua_platform"] == "Linux" and gen["platform"] == "Linux x86_64"
+
+    usr = ident("user")
+    engine.align_identity_to_hardware(usr, real, {})
+    assert "Windows NT 10.0" in usr["user_agent"], "пользовательский UA трогать нельзя"
+    assert usr.get("platform_mismatch") is True, "но предупредить обязаны"
+    assert engine.align_ua_to_os({"user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                                  "Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0", "ua_major": "131"},
+                                 "MacIntel") is not None
+
+
+@check("воркеры: авто-подключение только к Worker (iframe-виджеты не замораживаем)")
+def _worker_autoatach():
+    engine = load_engine()
+    driver = _FakeWorkerDriver()
+    mgr = engine.WorkerPatchManager(driver, "self.__patched = 1;", log=lambda *_: None, poll=0.05)
+    assert mgr.start() is True
+    method, params = driver.calls[0]
+    assert method == "Target.setAutoAttach", method
+    assert params.get("autoAttach") is True
+    assert params.get("waitForDebuggerOnStart") is True
+    filter_rule = params.get("filter") or []
+    assert any(r.get("type") == "worker" and r.get("exclude") is False for r in filter_rule), filter_rule
+    assert any(r.get("exclude") is True for r in filter_rule), "нужен запрет по умолчанию"
+    mgr.stop()
+
+
+@check("воркеры: патч применяется, воркер отпускается, повторно не патчится")
+def _worker_patch():
+    engine = load_engine()
+    driver = _FakeWorkerDriver()
+    mgr = engine.WorkerPatchManager(driver, "self.__artofix = 1;", log=lambda *_: None, poll=0.05)
+    mgr.start()
+    assert mgr.patch_pending() == 1, "должен пропатчить ровно воркер"
+    assert mgr.patched == 1
+    assert driver.scripts and "self.__artofix = 1;" in driver.scripts[0]
+    methods = [c[0] for c in driver.calls]
+    assert "Target.attachToTarget" in methods and "Target.detachFromTarget" in methods
+    released = [json.loads(c[1]["message"])["method"] for c in driver.calls
+                if c[0] == "Target.sendMessageToTarget" and "runIfWaitingForDebugger" in c[1]["message"]]
+    assert released, "воркер обязан быть отпущен (Runtime.runIfWaitingForDebugger)"
+    assert driver.detached, "сессию воркера нужно закрыть"
+    # второй вызов не должен патчить его снова
+    assert mgr.patch_pending() == 0
+    mgr.stop()
+
+
+@check("воркеры: при сбое патча воркер всё равно отпускается")
+def _worker_patch_failure():
+    engine = load_engine()
+    driver = _FakeWorkerDriver()
+    driver.fail_attach = True
+    mgr = engine.WorkerPatchManager(driver, "self.x = 1;", log=lambda *_: None, poll=0.05)
+    mgr.start()
+    assert mgr.patch_pending() == 0
+    assert mgr.patched == 0 and mgr.errors >= 1
+    assert driver.detached == [], "сессии нет — закрывать нечего"
+    mgr.stop()
+
+
+@check("воркеры: самопроверка видит расхождение и молчит при согласии")
+def _worker_selftest():
+    engine = load_engine()
+
+    class _D:
+        def __init__(self, result):
+            self.result = result
+            self.calls = 0
+        def execute_script(self, src):
+            self.calls += 1
+            return self.result
+
+    bad = _D({"platform": "Linux x86_64", "cores": 2, "langs": "en-US",
+              "main": {"platform": "Win32", "cores": 8, "langs": "ru-RU,ru"}})
+    diffs = engine.worker_selftest(bad, timeout=1)
+    assert len(diffs) == 3, diffs
+
+    good = _D({"platform": "Win32", "cores": 8, "langs": "ru-RU,ru",
+               "main": {"platform": "Win32", "cores": 8, "langs": "ru-RU,ru"}})
+    assert engine.worker_selftest(good, timeout=1) == []
+
+    slow = _D("pending")
+    slow.result = {"error": "pending"}
+    assert engine.worker_selftest(slow, timeout=1), "молчащий воркер — это подозрительно"
+
+
+@check("движок применяет воркеры и железо до первой навигации")
+def _start_wiring():
+    src = ENGINE_SRC
+    for needle in ["probe_real_hardware(driver)", "align_identity_to_hardware(ident, real, cfs)",
+                   "WorkerPatchManager(driver, build_worker_init(ident))", "worker_selftest(driver)",
+                   "patcher.stop()"]:
+        assert needle in src, "в start_browser нет: " + needle
+    assert src.index("align_identity_to_hardware(ident, real, cfs)") < src.index("cf_navigate(driver, url, cfg)"), \
+        "выравнивание обязано быть до навигации"
+    assert "js_expr(PROBE_REAL_JS)" in src and "js_expr(CF_PROBE_JS)" in src, "нет js_expr у проб"
+
+
+@check("настройки CF знают про воркеры и железо")
+def _cf_settings_keys():
+    engine = load_engine()
+    cfs = engine.cf_settings({})
+    assert cfs["worker_patch"] is True and cfs["align_hardware"] is True, cfs
+    off = engine.cf_settings({"cf": {"worker_patch": False, "align_hardware": False}})
+    assert off["worker_patch"] is False and off["align_hardware"] is False
+    ident = {"hardware": {"cores": 8}, "webgl": None, "languages": ["ru-RU"]}
+    real = {"platform": "Win32", "cores": 2, "languages": ["ru-RU"], "webgl": None}
+    engine.align_identity_to_hardware(ident, real, {"align_hardware": False})
+    assert ident["hardware"]["cores"] == 8, "выключенный тумблер обязан отключать выравнивание"
+
+
 def main():
     failed = [r for r in RESULTS if r[0] == "fail"]
     for status, name in RESULTS:

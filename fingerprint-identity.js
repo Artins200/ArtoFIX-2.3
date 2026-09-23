@@ -581,6 +581,9 @@ function generateIdentity(profileName, installId, opts) {
 
   // прикладные переопределения из настроек UI
   const ov = opts.overrides || {};
+  // Кто автор UA: движок выравнивает UA по реальной ОС только у сгенерированных
+  // (см. engine.py → align_ua_to_os). Пользовательский UA — неприкосновенен.
+  identity.user_agent_source = ov.user_agent ? 'user' : 'generated';
   if (ov.user_agent) identity.user_agent = ov.user_agent;
   if (ov.resolution && /^\d{2,5},\d{2,5}$/.test(ov.resolution)) {
     const [w, h] = ov.resolution.split(',').map(Number);

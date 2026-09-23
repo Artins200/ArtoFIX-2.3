@@ -345,6 +345,16 @@ test('main включает песочницу и отключает Node в р�
   assert.ok(/will-navigate/.test(mainJs), 'нет запрета навигации');
 });
 
+// ── Превью (npm run preview): фрейм должен грузить реальный маршрут ──
+test('предпросмотр не открывается пустым фреймом', () => {
+  const harness = read('preview/harness.html');
+  const server = read('preview/server.js');
+  const m = harness.match(/<iframe[^>]*src="([^"]+)"/);
+  assert.ok(m, 'в harness.html нет iframe');
+  assert.strictEqual(m[1], '/app.html', 'src фрейма должен быть абсолютным маршрутом /app.html');
+  assert.ok(server.includes("'/app.html'"), 'сервер предпросмотра не отдаёт /app.html');
+});
+
 const failed = results.filter((r) => r[0] === 'fail');
 results.forEach((r) => console.log((r[0] === 'ok' ? '  ✓ ' : '  ✗ ') + r[1]));
 console.log('\nwiring: ' + (results.length - failed.length) + '/' + results.length + ' проверок пройдено');

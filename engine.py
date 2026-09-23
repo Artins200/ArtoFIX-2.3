@@ -27,6 +27,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 from urllib.parse import urlsplit
 
@@ -476,8 +477,11 @@ PAGE_INIT_TEMPLATE = r"""
     defineGetter(Object.getPrototypeOf(navigator), 'languages', function () { return langList; });
     defineGetter(Object.getPrototypeOf(navigator), 'language', function () { return langList[0]; });
   }
-  if (V.platform !== false && ID.ua_platform === 'Windows') {
-    defineGetter(Object.getPrototypeOf(navigator), 'platform', function () { return 'Win32'; });
+  // navigator.platform берём из ID.platform: engine выравнивает его по РЕАЛЬНОЙ ОС
+  // (в воркере живёт настоящий platform, и главный поток обязан говорить то же).
+  var PLATFORM_SPOOF = ID.platform || (ID.ua_platform === 'Windows' ? 'Win32' : null);
+  if (V.platform !== false && PLATFORM_SPOOF) {
+    defineGetter(Object.getPrototypeOf(navigator), 'platform', function () { return PLATFORM_SPOOF; });
   }
   if (V.hw !== false && ID.hardware) {
     defineGetter(Object.getPrototypeOf(navigator), 'hardwareConcurrency', function () { return ID.hardware.cores; });
@@ -924,9 +928,757 @@ PAGE_INIT_TEMPLATE = r"""
 """
 
 
+WORKER_INIT_TEMPLATE = r"""
+(function () {
+  'use strict';
+  var ID = /*__IDENTITY__*/ null;
+  if (!ID || typeof navigator === 'undefined') return;
+
+  // ── 0. Прячем собственный патч от Function.prototype.toString (как в кадрах) ──
+  var nativeMap = new WeakMap();
+  var origToString = Function.prototype.toString;
+  function markNative(fn, name) {
+    try { nativeMap.set(fn, 'function ' + (name || fn.name || '') + '() { [native code] }'); } catch (e) {}
+    return fn;
+  }
+  var patchedToString = function toString() {
+    var orig = nativeMap.get(this);
+    if (orig) return orig;
+    return origToString.call(this);
+  };
+  markNative(patchedToString, 'toString');
+  try { Object.defineProperty(Function.prototype, 'toString', { value: patchedToString, writable: true, configurable: true }); } catch (e) {}
+
+  function defineGetter(target, prop, getter) {
+    try { Object.defineProperty(target, prop, { get: markNative(getter, 'get ' + prop), configurable: true }); } catch (e) {}
+  }
+  function defineValue(target, prop, value) {
+    try { Object.defineProperty(target, prop, { value: value, writable: true, configurable: true, enumerable: true }); } catch (e) {}
+  }
+
+  var NAV = null;
+  try { NAV = Object.getPrototypeOf(navigator); } catch (e) {}
+  if (!NAV) return;
+  var V = ID.vectors || {};
+
+  // ── 1. Те же сигналы, что и в главном потоке ──
+  // Воркер — не «второй браузер»: антибот-скрипты (в т.ч. проверки Cloudflare)
+  // специально сверяют значения из Worker с главным потоком. Раньше здесь
+  // оставались РЕАЛЬНЫЕ platform/ядра/лимиты GPU — главный детект.
+  // ВАЖНО: в WorkerNavigator живут далеко не все свойства Navigator.
+  // В настоящем Chrome в воркере НЕТ webdriver, maxTouchPoints и vendor —
+  // создать их «для порядка» означает выдать себя: `'webdriver' in navigator`
+  // внутри Worker у настоящего Chrome всегда false.
+  // Поэтому подменяем только то, что там действительно есть (проверка in).
+  var CAN = function (name) { try { return name in navigator; } catch (e) { return false; } };
+
+  if (ID.languages && ID.languages.length && CAN('languages')) {
+    var langList = ID.languages.slice();
+    try { Object.freeze(langList); } catch (e) {}
+    defineGetter(NAV, 'languages', function () { return langList; });
+    if (CAN('language')) defineGetter(NAV, 'language', function () { return langList[0]; });
+  }
+  if (V.platform !== false && ID.platform && CAN('platform')) {
+    defineGetter(NAV, 'platform', function () { return ID.platform; });
+  }
+  if (V.hw !== false && ID.hardware) {
+    if (CAN('hardwareConcurrency') && ID.hardware.cores) {
+      defineGetter(NAV, 'hardwareConcurrency', function () { return ID.hardware.cores; });
+    }
+    if (CAN('deviceMemory') && ID.hardware.device_memory) {
+      defineGetter(NAV, 'deviceMemory', function () { return ID.hardware.device_memory; });
+    }
+  }
+
+  // ── 2. WebGL в воркере (OffscreenCanvas) ──
+  // Прототип WebGLRenderingContext в воркере общий с OffscreenCanvas-контекстом,
+  // поэтому патч тот же, что и в главном потоке.
+  if (V.webgl !== false && ID.webgl) {
+    var W = ID.webgl;
+    var LIM = W.limits || {};
+    var limValue = {};
+    limValue[0x0D33] = LIM.MAX_TEXTURE_SIZE;                 // MAX_TEXTURE_SIZE
+    limValue[0x84E8] = LIM.MAX_RENDERBUFFER_SIZE;            // MAX_RENDERBUFFER_SIZE
+    limValue[0x8DFB] = LIM.MAX_VERTEX_UNIFORM_VECTORS;
+    limValue[0x8DFD] = LIM.MAX_FRAGMENT_UNIFORM_VECTORS;
+    limValue[0x8DFC] = LIM.MAX_VARYING_VECTORS;
+    limValue[0x8869] = LIM.MAX_VERTEX_ATTRIBS;
+    limValue[0x8B4D] = LIM.MAX_COMBINED_TEXTURE_IMAGE_UNITS;
+    limValue[0x851C] = LIM.MAX_CUBE_MAP_TEXTURE_SIZE;
+    limValue[0x8872] = LIM.MAX_TEXTURE_IMAGE_UNITS;
+
+    function patchGL(Proto) {
+      if (!Proto || !Proto.getParameter) return;
+      var orig = Proto.getParameter;
+      var patched = function getParameter(pname) {
+        switch (pname) {
+          case 0x9245: return W.vendor || W.unmasked_vendor;
+          case 0x9246: return W.renderer || W.unmasked_renderer;
+          case 0x0D3A: return new Int32Array(LIM.MAX_VIEWPORT_DIMS || [16384, 16384]);
+          default: break;
+        }
+        if (Object.prototype.hasOwnProperty.call(limValue, pname) && limValue[pname] !== undefined
+            && limValue[pname] !== null) {
+          return limValue[pname];
+        }
+        return orig.apply(this, arguments);
+      };
+      markNative(patched, 'getParameter');
+      try { Proto.getParameter = patched; } catch (e) {}
+      var origExt = Proto.getSupportedExtensions;
+      if (origExt) {
+        var patchedExt = function getSupportedExtensions() {
+          var list = origExt.apply(this, arguments) || [];
+          if (list.indexOf('WEBGL_debug_renderer_info') === -1) list = list.concat(['WEBGL_debug_renderer_info']);
+          return list;
+        };
+        markNative(patchedExt, 'getSupportedExtensions');
+        try { Proto.getSupportedExtensions = patchedExt; } catch (e) {}
+      }
+    }
+    try { patchGL(typeof WebGLRenderingContext !== 'undefined' && WebGLRenderingContext.prototype); } catch (e) {}
+    try { patchGL(typeof WebGL2RenderingContext !== 'undefined' && WebGL2RenderingContext.prototype); } catch (e) {}
+  }
+
+  // ── 3. Canvas в воркере: OffscreenCanvas должен шуметь ТАК ЖЕ, как <canvas> ──
+  // Если главный поток отдаёт уникальный для профиля хеш, а воркер — «чистый»,
+  // скрипт сравнивает два рендера одного и того же текста и видит подмену.
+  if (V.canvas !== false && ID.canvas_noise) {
+    var cseed = ID.canvas_noise | 0;
+    function perturb(data, w, h) {
+      if (!data || !data.length || !w || !h) return data;
+      for (var i = 0; i < 12; i++) {
+        var px = Math.abs((cseed * 31 + i * 7919) % w);
+        var py = Math.abs((cseed * 17 + i * 104729) % h);
+        var o = (py * w + px) * 4;
+        if (o + 2 >= data.length) continue;
+        var v = ((px * 73856093) ^ (py * 19349663) ^ (i * 40503) ^ cseed) >>> 0;
+        var d = (v % 3) - 1;
+        data[o] = Math.max(0, Math.min(255, data[o] + d));
+        data[o + 2] = Math.max(0, Math.min(255, data[o + 2] + d));
+      }
+      return data;
+    }
+
+    var OC = typeof OffscreenCanvas !== 'undefined' ? OffscreenCanvas : null;
+    var OC2D = typeof OffscreenCanvasRenderingContext2D !== 'undefined' ? OffscreenCanvasRenderingContext2D.prototype : null;
+
+    if (OC && OC.prototype && OC.prototype.convertToBlob) {
+      var origConvert = OC.prototype.convertToBlob;
+      var patchedConvert = function convertToBlob() {
+        var ctx = null;
+        try { ctx = this.getContext && this.getContext('2d'); } catch (e) {}
+        if (!ctx || !this.width || !this.height) return origConvert.apply(this, arguments);
+        var raw = ctx.getImageData.bind(ctx);
+        var backup = null;
+        try { backup = raw(0, 0, this.width, this.height); } catch (e) {}
+        if (!backup) return origConvert.apply(this, arguments);
+        var snapshot = null;
+        try {
+          snapshot = raw(0, 0, this.width, this.height);
+          perturb(snapshot.data, snapshot.width, snapshot.height);
+          ctx.putImageData(snapshot, 0, 0);
+          return origConvert.apply(this, arguments);
+        } finally {
+          try { ctx.putImageData(backup, 0, 0); } catch (e) {}
+        }
+      };
+      markNative(patchedConvert, 'convertToBlob');
+      try { OC.prototype.convertToBlob = patchedConvert; } catch (e) {}
+    }
+
+    if (OC2D && OC2D.getImageData) {
+      var origGetImageData = OC2D.getImageData;
+      var patchedGetImageData = function getImageData(sx, sy, sw, sh) {
+        var img = origGetImageData.apply(this, arguments);
+        try { perturb(img.data, img.width, img.height); } catch (e) {}
+        return img;
+      };
+      markNative(patchedGetImageData, 'getImageData');
+      try { OC2D.getImageData = patchedGetImageData; } catch (e) {}
+    }
+  }
+})();
+"""
+
+
 def build_page_init(identity):
     """Собирает page-init скрипт: значения уходят как JSON, не как код."""
     return PAGE_INIT_TEMPLATE.replace("/*__IDENTITY__*/ null", json.dumps(identity, ensure_ascii=False))
+
+# ─────────────────────────────────────────────
+#  ВОРКЕРЫ: ТОТ ЖЕ ОТПЕЧАТОК, ЧТО И В КАДРАХ
+#  ---------------------------------------------------------------
+#  Page.addScriptToEvaluateOnNewDocument патчит только документы. Воркеры
+#  (new Worker) живут в отдельном контексте и отдают РЕАЛЬНЫЕ значения:
+#  navigator.platform, hardwareConcurrency, deviceMemory, лимиты WebGL,
+#  а OffscreenCanvas — вообще «чистые» пиксели без шума профиля.
+#  Любой антибот-скрипт может сравнить главный поток с воркером и увидеть
+#  расхождение — это и есть классический «детект подделки».
+#
+#  Чиним через Target-домен: авто-подключение к воркерам (только к ним —
+#  фильтр, чтобы не «замораживать» iframe'ы виджетов) + Runtime.evaluate
+#  из воркер-сессии. События CDP читать не нужно: targetId берём из
+#  Target.getTargets, sessionId — из ответа Target.attachToTarget.
+# ─────────────────────────────────────────────
+
+WORKER_TARGET_TYPES = ("worker", "shared_worker", "service_worker")
+
+
+def js_expr(script):
+    """
+    Selenium исполняет переданный скрипт КАК ТЕЛО ФУНКЦИИ, поэтому значение
+    выражения до наружного кода не доходит: `(function(){ return {...} })();`
+    возвращает None, и любая логика «прочитай состояние страницы» молча ломается.
+    Оборачиваем выражение в явный `return (...)`, если его там ещё нет.
+    """
+    body = (script or "").strip()
+    if not body:
+        return body
+    if body.startswith("return"):
+        return body
+    # перевод строки перед закрывающей скобкой: если скрипт заканчивается
+    # строчным комментарием, добавленный хвост не попадёт внутрь него
+    return "return (" + body.rstrip(";") + "\n);"
+
+
+def build_worker_init(identity):
+    """Воркер-версия page-init: собирается подстановкой JSON, как и для кадров."""
+    return WORKER_INIT_TEMPLATE.replace("/*__IDENTITY__*/ null", json.dumps(identity, ensure_ascii=False))
+
+
+def real_memory_gb():
+    """Реальная память машины в ГБ (нужна, чтобы deviceMemory не противоречил железу)."""
+    try:
+        if sys.platform.startswith("win"):
+            import ctypes
+
+            class _MEMORYSTATUSEX(ctypes.Structure):
+                _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
+                            ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                            ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
+                            ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
+                            ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+
+            stat = _MEMORYSTATUSEX()
+            stat.dwLength = ctypes.sizeof(_MEMORYSTATUSEX)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat)):
+                return int(round(stat.ullTotalPhys / (1024 ** 3)))
+        else:
+            pages = os.sysconf("SC_PHYS_PAGES")
+            size = os.sysconf("SC_PAGE_SIZE")
+            return int(round(pages * size / (1024 ** 3)))
+    except Exception:
+        return None
+
+
+def cpu_cores():
+    """Реальные ядра: os.cpu_count() в Windows-сборке Python отдаёт их корректно."""
+    try:
+        return int(os.cpu_count() or 0) or None
+    except Exception:
+        return None
+
+
+def device_memory_bucket(ram_gb):
+    """navigator.deviceMemory в Chrome огрублён до 0.25…8 ГБ — держим ту же шкалу."""
+    if not ram_gb:
+        return None
+    if ram_gb <= 1:
+        return 0.25
+    if ram_gb <= 2:
+        return 2
+    if ram_gb <= 4:
+        return 4
+    return 8
+
+
+# Проба реального железа ДО первой инъекции: текущий about:blank ещё не патчен,
+# поэтому здесь видны настоящие значения (их потом нельзя будет получить).
+PROBE_REAL_JS = r"""
+(function () {
+  try {
+    var out = {
+      platform: navigator.platform,
+      cores: navigator.hardwareConcurrency,
+      languages: navigator.languages,
+      device_memory: navigator.deviceMemory,
+      webgl: null
+    };
+    try {
+      var c = document.createElement('canvas');
+      var gl = c.getContext('webgl') || c.getContext('experimental-webgl');
+      if (gl) {
+        var dbg = null;
+        try { dbg = gl.getExtension('WEBGL_debug_renderer_info'); } catch (e) {}
+        var limits = {};
+        var names = {
+          MAX_TEXTURE_SIZE: 0x0D33, MAX_RENDERBUFFER_SIZE: 0x84E8,
+          MAX_VERTEX_UNIFORM_VECTORS: 0x8DFB, MAX_FRAGMENT_UNIFORM_VECTORS: 0x8DFD,
+          MAX_VARYING_VECTORS: 0x8DFC, MAX_VERTEX_ATTRIBS: 0x8869,
+          MAX_COMBINED_TEXTURE_IMAGE_UNITS: 0x8B4D, MAX_CUBE_MAP_TEXTURE_SIZE: 0x851C,
+          MAX_TEXTURE_IMAGE_UNITS: 0x8872
+        };
+        for (var k in names) {
+          if (!Object.prototype.hasOwnProperty.call(names, k)) continue;
+          try { limits[k] = gl.getParameter(names[k]); } catch (e) {}
+        }
+        var dims = null;
+        try {
+          var d = gl.getParameter(gl.MAX_VIEWPORT_DIMS);
+          if (d && d.length >= 2) dims = [d[0], d[1]];
+        } catch (e) {}
+        if (dims) limits.MAX_VIEWPORT_DIMS = dims;
+        out.webgl = {
+          // 0x9245/0x9246 (UNMASKED_*) — то, что отдаёт WEBGL_debug_renderer_info;
+          // именно эти два значения и подменяет page-init (W.vendor / W.renderer).
+          vendor: dbg ? gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL) : null,
+          renderer: dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : null,
+          // 0x1F00/0x1F01 (VENDOR/RENDERER) — их page-init НЕ трогает
+          masked_vendor: gl.getParameter(gl.VENDOR),
+          masked_renderer: gl.getParameter(gl.RENDERER),
+          version: gl.getParameter(gl.VERSION),
+          limits: limits
+        };
+      }
+    } catch (e) {}
+    return out;
+  } catch (e) { return null; }
+})();
+"""
+
+
+# Ключи программной растеризации: заявлять «RTX 3060» на машине, где реально
+# рисует SwiftShader/llvmpipe, нельзя — расхождение видно и в лимитах, и в строках.
+SOFTWARE_GPU_RE = re.compile(
+    r"swiftshader|llvmpipe|softpipe|software rasterizer|software renderer|"
+    r"basic render|microsoft basic|mesa offscreen|virtualbox.*vboxts", re.I)
+
+
+def is_software_gpu(renderer):
+    return bool(renderer) and bool(SOFTWARE_GPU_RE.search(str(renderer)))
+
+
+def gpu_tier_from_limits(limits):
+    """Класс GPU по MAX_TEXTURE_SIZE — та же градация, что в GPU_LIMITS."""
+    try:
+        tex = int((limits or {}).get("MAX_TEXTURE_SIZE") or 0)
+    except Exception:
+        tex = 0
+    if tex >= 32768:
+        return "high"
+    if tex >= 16384:
+        return "mid"
+    if tex:
+        return "low"
+    return None
+
+
+def _os_family(platform_str):
+    p = str(platform_str or "").lower()
+    if p.startswith("win"):
+        return "windows"
+    if p.startswith("linux") or "x11" in p:
+        return "linux"
+    if "mac" in p:
+        return "macos"
+    return "unknown"
+
+
+def _ua_family(user_agent):
+    ua = str(user_agent or "")
+    if "Windows NT" in ua:
+        return "windows"
+    if "Macintosh" in ua or "Mac OS X" in ua:
+        return "macos"
+    if "Linux" in ua or "X11" in ua:
+        return "linux"
+    return "unknown"
+
+
+def probe_real_hardware(driver):
+    """Настоящие platform/ядра/deviceMemory/лимиты WebGL (до подмены)."""
+    try:
+        probe = driver.execute_script(js_expr(PROBE_REAL_JS))
+    except Exception as e:
+        print("[engine] проба железа не удалась: " + str(e))
+        return {}
+    return probe if isinstance(probe, dict) else {}
+
+
+def align_ua_to_os(ident, real_platform, browser="chrome"):
+    """
+    User-Agent профиля всегда собирается под Windows. На не-Windows машине это
+    мгновенное расхождение: воркер отдаёт настоящий navigator.platform, а
+    UA/Client Hints заявляют Windows. Если UA не задан пользователем вручную —
+    переписываем его под реальную ОС (версии Chrome/Edge сохраняем).
+    """
+    fam = _os_family(real_platform)
+    if fam == "unknown":
+        return None
+    ua = str(ident.get("user_agent") or "")
+    if not ua:
+        return None
+    major = str(ident.get("ua_major") or "")
+    if not major:
+        m = re.search(r"(?:Chrome|Edg|Firefox)/(\d+)", ua)
+        major = m.group(1) if m else "131"
+    is_edge = "Edg/" in ua or browser == "msedge"
+    is_firefox = "Firefox/" in ua or browser == "firefox"
+
+    if fam == "windows":
+        head = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+        plat, plat_version = "Windows", "10.0.0"
+    elif fam == "macos":
+        head = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
+        plat, plat_version = "macOS", "15.0.0"
+    else:
+        head = "Mozilla/5.0 (X11; Linux x86_64)"
+        plat, plat_version = "Linux", ""
+
+    if is_firefox:
+        ident["user_agent"] = head + " Gecko/20100101 Firefox/" + major + ".0"
+    elif is_edge:
+        ident["user_agent"] = (head + " AppleWebKit/537.36 (KHTML, like Gecko) Chrome/" + major +
+                               ".0.0.0 Safari/537.36 Edg/" + major + ".0.0.0")
+    else:
+        ident["user_agent"] = (head + " AppleWebKit/537.36 (KHTML, like Gecko) Chrome/" + major +
+                               ".0.0.0 Safari/537.36")
+    ident["ua_platform"] = plat
+    ident["ua_platform_version"] = plat_version
+    ident["platform"] = real_platform
+    ident["ua_os_aligned"] = True
+    return "UA переписан под реальную ОС (%s) — иначе воркер и Client Hints сразу выдают подмену" % real_platform
+
+
+def align_identity_to_hardware(ident, real, cfs):
+    """
+    Приводит отпечаток к реальному железу там, где «отличаться» — значит
+    светиться: воркеры и OffscreenCanvas физически не патчатся, а значит
+    любое расхождение главного потока с настоящими значениями = детект.
+
+    Порядок решений:
+      • ядра и deviceMemory — всегда по реальной машине (воркер покажет те же числа);
+      • GPU: если реальная карта настоящая — показываем ЕЁ (лимиты, строки) и
+        получаем полную согласованность «renderer ↔ лимиты ↔ воркер»;
+        если реально рисует SwiftShader/llvmpipe — заявлять её нельзя (это
+        сам по себе флаг), поэтому оставляем GPU профиля и предупреждаем;
+      • navigator.platform — из реального процесса (его всё равно видно в воркере);
+      • UA — под реальную ОС, если пользователь не задал его сам.
+    """
+    notes = []
+    if not isinstance(real, dict) or not real:
+        return notes
+    if cfs.get("align_hardware", True) is False:
+        return notes
+
+    hw = ident.get("hardware")
+    if not isinstance(hw, dict):
+        hw = {}
+        ident["hardware"] = hw
+
+    # ── ядра ──
+    cores = real.get("cores")
+    if not (isinstance(cores, int) and 1 <= cores <= 256):
+        cores = cpu_cores()
+    if cores and hw.get("cores") != cores:
+        notes.append("ядра: %s → %s (реальное железо)" % (hw.get("cores"), cores))
+        hw["cores"] = cores
+
+    # ── deviceMemory: в воркере он настоящий, а Chrome огрубляет его до 0.25…8 ──
+    dm = real.get("device_memory")
+    if not (isinstance(dm, (int, float)) and dm > 0):
+        dm = device_memory_bucket(real_memory_gb())
+    if dm and hw.get("device_memory") != dm:
+        notes.append("deviceMemory: %s → %s ГБ" % (hw.get("device_memory"), dm))
+        hw["device_memory"] = dm
+
+    ram = real_memory_gb()
+    if ram and 1 < ram <= 256 and hw.get("memory") != ram:
+        hw["memory"] = ram
+
+    # ── GPU ──
+    wgl = ident.get("webgl")
+    real_wgl = real.get("webgl")
+    if isinstance(real_wgl, dict) and real_wgl.get("renderer"):
+        real_renderer = str(real_wgl["renderer"])
+        real_limits = {k: v for k, v in (real_wgl.get("limits") or {}).items() if v is not None}
+        ident["real_gpu"] = real_renderer[:160]
+        if is_software_gpu(real_renderer):
+            # Программный рендер: подставлять его в отпечаток нельзя — Cloudflare
+            # такие значения считает признаком бота. Держим GPU профиля, но честно
+            # говорим, что лимиты разойтись могут (в воркере видно настоящее железо).
+            ident["software_gpu"] = True
+            notes.append("реальный рендер — программный (%s): оставляем GPU профиля, "
+                         "но лимиты воркера с ним не совпадут" % real_renderer[:60])
+        elif isinstance(wgl, dict):
+            changed = []
+            for key, value in real_limits.items():
+                if wgl_limits_get(wgl, key) != value:
+                    changed.append(key)
+            if real_wgl.get("vendor") and wgl.get("vendor") != real_wgl["vendor"]:
+                changed.append("vendor")
+            if wgl.get("renderer") != real_renderer:
+                changed.append("renderer")
+            if changed:
+                wgl["renderer"] = real_renderer
+                if real_wgl.get("vendor"):
+                    wgl["vendor"] = real_wgl["vendor"]
+                wgl["unmasked_renderer"] = real_wgl.get("unmasked_renderer") or real_renderer
+                wgl["unmasked_vendor"] = real_wgl.get("unmasked_vendor") or real_wgl.get("vendor")
+                if real_limits:
+                    limits = dict(wgl.get("limits") or {})
+                    limits.update(real_limits)
+                    wgl["limits"] = limits
+                tier = gpu_tier_from_limits(real_limits or (wgl.get("limits") or {}))
+                if tier:
+                    wgl["tier"] = tier
+                notes.append("GPU профиля заменён на реальный (%s; лимиты и класс — по железу)"
+                             % real_renderer[:60])
+
+    # ── navigator.platform ──
+    real_platform = real.get("platform")
+    if real_platform:
+        ident["platform"] = real_platform
+        if _os_family(real_platform) != _ua_family(ident.get("user_agent")):
+            src = str(ident.get("user_agent_source") or "")
+            if src == "generated" or ident.get("ua_os_aligned"):
+                note = align_ua_to_os(ident, real_platform)
+                if note:
+                    notes.append(note)
+            else:
+                ident["platform_mismatch"] = True
+                notes.append("ВНИМАНИЕ: реальная ОС — %s, а UA задан вручную и заявляет другую. "
+                             "Воркеры отдают настоящий navigator.platform — это видно без всяких проб."
+                             % real_platform)
+
+    # ── языки: в воркере живёт список из самого браузера (--lang), поэтому
+    #    выравниваем отпечаток под него, если основной язык тот же ──
+    real_langs = real.get("languages")
+    langs = ident.get("languages") or []
+    if isinstance(real_langs, list) and real_langs and langs:
+        def primary(x):
+            return str(x).split("-")[0].lower()
+        if primary(real_langs[0]) == primary(langs[0]):
+            if list(real_langs) != list(langs):
+                notes.append("языки: %s → %s (как в самом браузере)"
+                             % (",".join(langs), ",".join([str(x) for x in real_langs])))
+                ident["languages"] = [str(x) for x in real_langs]
+        elif primary(real_langs[0]) != primary(langs[0]):
+            notes.append("ВНИМАНИЕ: браузер стартовал с языком %s, а профиль заявляет %s — "
+                         "в воркере будет настоящий список (проверь --lang)" % (real_langs[0], langs[0]))
+    return notes
+
+
+def wgl_limits_get(wgl, key):
+    try:
+        return (wgl.get("limits") or {}).get(key)
+    except Exception:
+        return None
+
+
+class WorkerPatchManager:
+    """
+    Патчит dedicated-воркеры тем же отпечатком, что и главный поток.
+
+    Авто-подключение включается ФИЛЬТРОМ «только worker»: иначе Chrome
+    приостанавливает и iframe'ы (в них живут виджеты капчи) — а мы обязаны
+    отпускать только то, что патчим сами.
+    """
+
+    def __init__(self, driver, script, log=print, poll=0.4):
+        self.driver = driver
+        self.script = script
+        self.log = log
+        self.poll = poll
+        self.enabled = False
+        self.patched = 0
+        self.errors = 0
+        self._seen = set()          # успешно пропатченные цели
+        self._attempts = {}         # попытки по цели (чтобы не штормить CDP)
+        self.max_attempts = 2
+        self._stop = threading.Event()
+        self._thread = None
+
+    # ── запуск/остановка ──
+    def start(self):
+        if not self._enable_auto_attach():
+            return False
+        self._thread = threading.Thread(target=self._loop, name="artofix-worker-patch", daemon=True)
+        self._thread.start()
+        return True
+
+    def _enable_auto_attach(self):
+        eager = {"autoAttach": True, "waitForDebuggerOnStart": True, "flatten": False,
+                 "filter": [{"type": "worker", "exclude": False}, {"exclude": True}]}
+        try:
+            self.driver.execute_cdp_cmd("Target.setAutoAttach", eager)
+            self.enabled = True
+            self.log("[cf] патч воркеров включён (только Worker, iframe не трогаем)")
+            return True
+        except Exception as e:
+            self.log("[cf] авто-подключение к воркерам не поддержано: " + str(e))
+        # Откат: без фильтра подключаемся, но НЕ приостанавливаем цели
+        # (иначе можно «заморозить» чужой iframe и сломать страницу).
+        try:
+            self.driver.execute_cdp_cmd("Target.setAutoAttach", {
+                "autoAttach": True, "waitForDebuggerOnStart": False, "flatten": False})
+            self.enabled = True
+            self.log("[cf] патч воркеров включён в мягком режиме (без паузы целей)")
+            return True
+        except Exception as e:
+            self.log("[cf] патч воркеров недоступен: " + str(e))
+            return False
+
+    def stop(self):
+        self._stop.set()
+        thread = self._thread
+        if thread and thread.is_alive():
+            thread.join(timeout=2.0)
+        self._thread = None
+
+    # ── рабочий цикл ──
+    def _loop(self):
+        while not self._stop.wait(self.poll):
+            try:
+                self.patch_pending()
+            except Exception:
+                self.errors += 1
+
+    def patch_pending(self):
+        """Одна итерация: находим новые воркеры и патчим их (по одному разу)."""
+        try:
+            targets = self.driver.execute_cdp_cmd("Target.getTargets", {}) or {}
+        except Exception:
+            self.errors += 1
+            return 0
+        infos = targets.get("targetInfos") or []
+        done = 0
+        for info in infos:
+            if not isinstance(info, dict):
+                continue
+            if info.get("type") not in WORKER_TARGET_TYPES:
+                continue
+            target_id = info.get("targetId")
+            if not target_id or target_id in self._seen:
+                continue
+            if self._attempts.get(target_id, 0) >= self.max_attempts:
+                continue
+            self._attempts[target_id] = self._attempts.get(target_id, 0) + 1
+            if self._patch_target(target_id):
+                self._seen.add(target_id)
+                done += 1
+        return done
+
+    def _patch_target(self, target_id):
+        session_id = None
+        ok = False
+        try:
+            attached = self.driver.execute_cdp_cmd(
+                "Target.attachToTarget", {"targetId": target_id, "flatten": False}) or {}
+            session_id = attached.get("sessionId")
+            if not session_id:
+                return False
+            self._send(session_id, "Runtime.evaluate",
+                       {"expression": self.script, "returnByValue": False, "awaitPromise": False})
+            ok = True
+            self.patched += 1
+        except Exception:
+            self.errors += 1
+        finally:
+            if session_id:
+                # Воркер ОБЯЗАН быть отпущен, даже если патч не удался:
+                # приостановленный воркер = сломанный сайт.
+                try:
+                    self._send(session_id, "Runtime.runIfWaitingForDebugger", {})
+                except Exception:
+                    pass
+                try:
+                    self.driver.execute_cdp_cmd("Target.detachFromTarget", {"sessionId": session_id})
+                except Exception:
+                    pass
+        return ok
+
+    def _send(self, session_id, method, params):
+        self.driver.execute_cdp_cmd("Target.sendMessageToTarget", {
+            "sessionId": session_id,
+            "message": json.dumps({"id": self._next_id(), "method": method, "params": params}),
+        })
+
+    _msg_seq = 0
+
+    def _next_id(self):
+        WorkerPatchManager._msg_seq += 1
+        return WorkerPatchManager._msg_seq
+
+
+# Синхронная самопроверка: главный поток против воркера. Антиботы сравнивают
+# именно эти значения, поэтому расхождение = «подделка отпечатка».
+WORKER_CHECK_JS = r"""
+(function () {
+  if (window.__artofixWorkerCheck) return 'pending';
+  window.__artofixWorkerCheck = 'pending';
+  try {
+    var src = "self.onmessage = function () { try { self.postMessage({ " +
+      "platform: navigator.platform, cores: navigator.hardwareConcurrency, " +
+      "deviceMemory: navigator.deviceMemory, langs: navigator.languages.join(','), " +
+      "ua: navigator.userAgent.slice(0, 40) }); } catch (e) { self.postMessage({ error: String(e) }); } };";
+    var url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
+    var w = new Worker(url);
+    var timer = setTimeout(function () {
+      try { w.terminate(); } catch (e) {}
+      window.__artofixWorkerCheck = { error: 'timeout' };
+    }, 4000);
+    w.onmessage = function (e) {
+      clearTimeout(timer);
+      try { w.terminate(); } catch (e2) {}
+      window.__artofixWorkerCheck = {
+        platform: e.data.platform, cores: e.data.cores, deviceMemory: e.data.deviceMemory,
+        langs: e.data.langs, ua: e.data.ua,
+        main: { platform: navigator.platform, cores: navigator.hardwareConcurrency,
+                langs: navigator.languages.join(',') }
+      };
+    };
+    w.postMessage('check');
+  } catch (e) { window.__artofixWorkerCheck = { error: String(e) }; }
+  return 'pending';
+})();
+"""
+
+
+def worker_selftest(driver, timeout=5.0):
+    """
+    Создаёт воркер и сравнивает его значения с главным потоком.
+    Возвращает список расхождений (пусто — всё согласовано).
+    """
+    try:
+        driver.execute_script(js_expr(WORKER_CHECK_JS))
+    except Exception as e:
+        return ["проверка воркера не запустилась: " + str(e)]
+    deadline = time.time() + max(1.0, float(timeout))
+    result = None
+    while time.time() < deadline:
+        try:
+            result = driver.execute_script("return window.__artofixWorkerCheck || null;")
+        except Exception:
+            return []
+        if isinstance(result, dict) and result.get("error") != "pending":
+            break
+        time.sleep(0.3)
+    if not isinstance(result, dict) or result.get("error") == "pending":
+        return ["воркер не ответил за отведённое время"]
+    if result.get("error"):
+        return ["воркер: " + str(result["error"])]
+    diffs = []
+    main = result.get("main") or {}
+    if result.get("platform") != main.get("platform"):
+        diffs.append("platform: главный поток %s, воркер %s" % (main.get("platform"), result.get("platform")))
+    if result.get("cores") != main.get("cores"):
+        diffs.append("hardwareConcurrency: главный поток %s, воркер %s" % (main.get("cores"), result.get("cores")))
+    if result.get("langs") != main.get("langs"):
+        diffs.append("languages: главный поток %s, воркер %s" % (main.get("langs"), result.get("langs")))
+    return diffs
+
 
 
 # ─────────────────────────────────────────────
@@ -1006,6 +1758,8 @@ CF_DEFAULTS = {
     "wait_challenge": True,    # ждать прохождение проверки, не «читать» её
     "challenge_timeout": 25,   # секунд на одну попытку прохождения проверки
     "max_retries": 2,          # повторов после блокировки/незавершённой проверки
+    "worker_patch": True,      # патчить воркеры тем же отпечатком (см. WorkerPatchManager)
+    "align_hardware": True,    # приводить ядра/лимиты GPU к реальному железу
 }
 
 CF_CHALLENGE_MARKERS = (
@@ -1054,7 +1808,7 @@ def cf_settings(cfg):
     raw = (cfg or {}).get("cf")
     if not isinstance(raw, dict):
         raw = {}
-    for key in ("enabled", "soft_landing", "wait_challenge"):
+    for key in ("enabled", "soft_landing", "wait_challenge", "worker_patch", "align_hardware"):
         if isinstance(raw.get(key), bool):
             out[key] = raw[key]
     for key, lo, hi in (("challenge_timeout", 5, 90), ("max_retries", 0, 3)):
@@ -1089,7 +1843,7 @@ def cf_ray_id(text):
 def page_cf_state(driver):
     """(state, ray_id) текущей страницы: ok | challenge | blocked | unknown."""
     try:
-        probe = driver.execute_script(CF_PROBE_JS)
+        probe = driver.execute_script(js_expr(CF_PROBE_JS))
     except Exception:
         return "unknown", None
     if not isinstance(probe, dict):
@@ -1288,6 +2042,9 @@ class BrowserManager:
         merged = {
             "schema": ident.get("schema", 1),
             "user_agent": ua,
+            # 'generated' — UA собран генератором (его можно и нужно выравнивать по
+            # реальной ОС); 'user' — UA задан пользователем, трогать нельзя.
+            "user_agent_source": ident.get("user_agent_source"),
             "ua_full_version": ident.get("ua_full_version"),
             "ua_major": ident.get("ua_major"),
             "brands": ident.get("brands") or [],
@@ -1593,7 +2350,9 @@ class BrowserManager:
             print(f"[engine] proxy -> {ident['proxy'].get('server')}")
 
         driver = None
+        patcher = None
         browser = (b_type or "chrome").lower()
+        cfs = cf_settings(cfg)
         try:
             if browser == "firefox":
                 driver = self._launch_firefox(profile_path, ident)
@@ -1604,9 +2363,25 @@ class BrowserManager:
             else:
                 driver = self._launch_chrome(profile_path, ident)
 
-            # Отпечаток применяем ДО первой навигации
+            # 1) Снимаем РЕАЛЬНОЕ железо, пока документ (about:blank) ещё не пропатчен.
+            #    Это последний момент, когда видно правду: ядра, deviceMemory, лимиты GPU.
+            real = probe_real_hardware(driver)
+
+            # 2) Расхождения с реальностью — единственное, что нельзя спрятать
+            #    (воркеры и OffscreenCanvas патчатся не везде) — убираем их в самом
+            #    отпечатке, а не косметикой поверх.
+            for note in align_identity_to_hardware(ident, real, cfs):
+                print("[fp] " + note)
+
+            # 3) Отпечаток применяем ДО первой навигации
             self._inject_init(driver, ident)
             self.apply_identity(driver, ident, cfg)
+
+            # 4) Воркеры: тот же отпечаток, что и в кадрах (иначе скрипт сравнивает
+            #    главный поток с Worker и видит подмену).
+            if cfs.get("worker_patch", True):
+                patcher = WorkerPatchManager(driver, build_worker_init(ident))
+                patcher.start()
 
             if url and url != "about:blank":
                 # Сначала Cloudflare-логика (ожидание проверки/повтор), и только
@@ -1618,6 +2393,17 @@ class BrowserManager:
                 else:
                     print("[cf] разогрев поведения пропущен — страница сайта ещё не открыта")
 
+                # 5) Самопроверка «главный поток ↔ воркер» — ровно то, чем
+                #    проверяют подделку отпечатка. Пишем в лог как есть.
+                if patcher is not None and patcher.enabled:
+                    diffs = worker_selftest(driver)
+                    if diffs:
+                        print("[cf] РАСХОЖДЕНИЕ главный поток ↔ Worker: " + "; ".join(diffs) +
+                              " — это видно антибот-скриптам (смени профиль/перезапусти браузер)")
+                    else:
+                        print("[cf] воркер-проверка: главный поток и Worker согласованы "
+                              "(platform, ядра, языки)")
+
             while True:
                 try:
                     _ = driver.window_handles
@@ -1627,6 +2413,8 @@ class BrowserManager:
         except Exception as e:
             print(f"[engine] error ({browser}): {e}")
         finally:
+            if patcher is not None:
+                patcher.stop()
             if driver:
                 try:
                     driver.quit()

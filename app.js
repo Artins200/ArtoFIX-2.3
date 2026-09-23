@@ -792,9 +792,13 @@ async function loadCfConfig() {
     var en = document.getElementById('cf-enabled');
     var sl = document.getElementById('cf-soft-landing');
     var wc = document.getElementById('cf-wait-challenge');
+    var wp = document.getElementById('cf-worker-patch');
+    var ah = document.getElementById('cf-align-hardware');
     if (en) en.checked = cf.enabled !== false;
     if (sl) sl.checked = cf.soft_landing !== false;
     if (wc) wc.checked = cf.wait_challenge !== false;
+    if (wp) wp.checked = cf.worker_patch !== false;
+    if (ah) ah.checked = cf.align_hardware !== false;
     cfStatus(cf.enabled === false
       ? 'Сейчас: выключено — движок просто откроет ссылку'
       : 'Сейчас: включено — проверка ожидается, блокировка обходится повтором', 'var(--tx3)');
@@ -805,15 +809,21 @@ async function saveCfConfig() {
   var en = document.getElementById('cf-enabled');
   var sl = document.getElementById('cf-soft-landing');
   var wc = document.getElementById('cf-wait-challenge');
+  var wp = document.getElementById('cf-worker-patch');
+  var ah = document.getElementById('cf-align-hardware');
   try {
     // Читаем текущий конфиг и дописываем только блок cf — остальные
     // настройки (UA, разрешение, обманка) не трогаем.
     var cur = (await apiBridge.readConfig()) || {};
-    cur.cf = {
+    // Ключи, которых нет в окне (таймаут проверки, число повторов), обязаны
+    // выжить: собираем новый блок поверх старого, а не вместо него.
+    cur.cf = Object.assign({}, cur.cf || {}, {
       enabled: en ? en.checked : true,
       soft_landing: sl ? sl.checked : true,
       wait_challenge: wc ? wc.checked : true,
-    };
+      worker_patch: wp ? wp.checked : true,
+      align_hardware: ah ? ah.checked : true,
+    });
     var r = await apiBridge.writeConfig(cur);
     if (r && r.ok) {
       cfStatus('✓ Сохранено — применится при следующем запуске браузера', 'var(--grn)');

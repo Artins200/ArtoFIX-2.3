@@ -55,7 +55,10 @@ async function main() {
   }
   function sub(name) { return function (cb) { (subs[name] = subs[name] || []).push(cb); return function () {}; }; }
   const store = { settings: {}, binds: [], profiles: { demo: { browser: 'chrome', note: '', country: '' } },
-    config: { user_agent: 'UA', resolution: '1920,1080' } };
+    // как в живом config.json: в блоке cf есть ключи, которых нет в окне
+    config: { user_agent: 'UA', resolution: '1920,1080',
+      cf: { enabled: true, soft_landing: true, wait_challenge: true,
+            challenge_timeout: 25, max_retries: 2, worker_patch: true, align_hardware: true } } };
   const api = {
     ready: true, platform: 'win32', version: '2.5.0',
     getIconUrl: rec('getIconUrl', () => Promise.resolve(null)),
@@ -299,14 +302,23 @@ async function main() {
   click(document.querySelector('[data-tab="config"]'));
   await sleep(60);
   const cfEn = $('cf-enabled'), cfSl = $('cf-soft-landing'), cfWc = $('cf-wait-challenge');
+  const cfWp = $('cf-worker-patch'), cfAh = $('cf-align-hardware');
   check('тумблеры Cloudflare в «Конфигурации»', !!cfEn && !!cfSl && !!cfWc);
   check('по умолчанию защита от блокировок включена', cfEn.checked === true && cfSl.checked === true && cfWc.checked === true);
+  check('есть тумблеры воркеров и согласия с железом', !!cfWp && !!cfAh);
+  check('воркеры и железо включены по умолчанию', cfWp.checked === true && cfAh.checked === true);
   cfEn.checked = false;
   cfWc.checked = false;
+  cfWp.checked = false;
   changeEv(cfEn);
   await sleep(60);
   check('настройки Cloudflare уходят в config.json (блок cf)',
     store.config.cf && store.config.cf.enabled === false && store.config.cf.wait_challenge === false,
+    JSON.stringify(store.config.cf));
+  check('выключенный тумблер воркеров доехал до конфига', store.config.cf.worker_patch === false,
+    JSON.stringify(store.config.cf));
+  check('настройки, которых нет в окне, не стёрлись',
+    store.config.cf.challenge_timeout === 25 && store.config.cf.max_retries === 2 && store.config.cf.align_hardware === true,
     JSON.stringify(store.config.cf));
   check('соседние поля конфига не потерялись', store.config.user_agent === 'UA' && store.config.resolution === '1920,1080',
     JSON.stringify(store.config));

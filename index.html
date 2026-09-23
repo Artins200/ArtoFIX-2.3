@@ -1470,10 +1470,20 @@ body.th-night .sys-banner {
         <input type="checkbox" id="cf-wait-challenge" checked data-af-on="change" data-af-action="saveCfConfig">
         Ждать прохождение Cloudflare-проверки (не «читать» страницу проверки)
       </label>
+      <label class="cf-row" for="cf-worker-patch">
+        <input type="checkbox" id="cf-worker-patch" checked data-af-on="change" data-af-action="saveCfConfig">
+        Тот же отпечаток в воркерах (иначе скрипт сравнивает поток и Worker — и видит подмену)
+      </label>
+      <label class="cf-row" for="cf-align-hardware">
+        <input type="checkbox" id="cf-align-hardware" checked data-af-on="change" data-af-action="saveCfConfig">
+        Держать отпечаток в согласии с реальным железом (ядра, память, видеокарта, ОС)
+      </label>
       <p style="font-size:10.5px;color:var(--tx3);line-height:1.6;margin:10px 0 12px">
         Включённый режим никого не «обходит»: он перестаёт злить Cloudflare лишними
         автоматическими действиями и повторяет заход так, как это сделал бы человек.
-        Если Ray ID приходит постоянно — проблема в IP: поставь профилю прокси.
+        Воркеры и видеокарта — самые заметные расхождения: скрипт запускает Worker
+        и сравнивает его значения с главным потоком. Если Ray ID приходит постоянно —
+        дело уже в IP: поставь профилю прокси (резидентский, той же страны).
       </p>
       <div class="grid-2">
         <button class="btn btn-primary" data-af-on="click" data-af-action="saveCfConfig">Сохранить настройки Cloudflare</button>

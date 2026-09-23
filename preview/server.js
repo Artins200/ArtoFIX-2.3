@@ -59,7 +59,9 @@ http.createServer((req, res) => {
   if (urlPath === '/' || urlPath === '/preview/' || urlPath === '/preview/harness.html') {
     return serveFile(res, path.join(__dirname, 'harness.html'));
   }
-  if (urlPath === '/app.html') {
+  // относительный путь из harness.html превращается в /preview/app.html —
+  // поддерживаем и его, чтобы предпросмотр не открывался пустым фреймом
+  if (urlPath === '/app.html' || urlPath === '/preview/app.html') {
     try { return send(res, 200, appHtml(), MIME['.html']); }
     catch (e) { return send(res, 500, 'index.html read error'); }
   }

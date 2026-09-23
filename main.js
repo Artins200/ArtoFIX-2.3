@@ -509,7 +509,7 @@ function sanitizeConfig(input) {
   // открывается напрямую, как раньше.
   if (input.cf && typeof input.cf === 'object') {
     const cf = {};
-    for (const key of ['enabled', 'soft_landing', 'wait_challenge']) {
+    for (const key of ['enabled', 'soft_landing', 'wait_challenge', 'worker_patch', 'align_hardware']) {
       if (typeof input.cf[key] === 'boolean') cf[key] = input.cf[key];
     }
     const timeout = Number(input.cf.challenge_timeout);

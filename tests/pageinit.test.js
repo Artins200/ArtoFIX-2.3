@@ -330,6 +330,63 @@ test('WebRTC: приватные ICE-кандидаты фильтруются �
   assert.strictEqual(got.length, 1, 'публичный кандидат должен проходить');
 });
 
+/* ── Раздел: воркеры и platform ─────────────────────────────────────────
+   Скрипт в воркере отдельный (WorkerGlobalScope), и именно там остаются
+   настоящие значения — поэтому у него свой шаблон + проверки ниже. */
+
+test('navigator.platform берётся из identity.platform, а не только «Win32»', () => {
+  const mac = Object.assign({}, IDENTITY, { platform: 'MacIntel', ua_platform: 'macOS' });
+  const dom2 = runInit(mac);
+  assert.strictEqual(dom2.win.navigator.platform, 'MacIntel');
+  const linux = Object.assign({}, IDENTITY, { platform: 'Linux x86_64', ua_platform: 'Linux' });
+  assert.strictEqual(runInit(linux).win.navigator.platform, 'Linux x86_64');
+});
+
+test('без identity.platform остаётся Windows-вариант (обратная совместимость)', () => {
+  const old = Object.assign({}, IDENTITY, { platform: undefined });
+  assert.strictEqual(runInit(old).win.navigator.platform, 'Win32');
+});
+
+function extractWorkerTemplate() {
+  const src = fs.readFileSync(path.join(ROOT, 'engine.py'), 'utf-8');
+  const marker = 'WORKER_INIT_TEMPLATE = r"""';
+  const start = src.indexOf(marker) + marker.length;
+  const end = src.indexOf('"""', start);
+  return src.slice(start, end);
+}
+
+test('воркер-шаблон собирается подстановкой JSON и остаётся валидным JS', () => {
+  const rendered = extractWorkerTemplate().replace('/*__IDENTITY__*/ null', JSON.stringify(IDENTITY));
+  assert.ok(!rendered.includes('/*__IDENTITY__*/'), 'плейсхолдер не подставлен');
+  new vm.Script(rendered, { filename: 'worker-init.js' });   // бросит при синтаксисе
+  const engine = fs.readFileSync(path.join(ROOT, 'engine.py'), 'utf-8');
+  assert.ok(engine.includes('build_worker_init'), 'нет сборщика воркер-скрипта');
+});
+
+test('воркер-шаблон закрывает те же векторы, что и кадры', () => {
+  const tpl = extractWorkerTemplate();
+  for (const needle of ['languages', 'platform', 'hardwareConcurrency', 'deviceMemory',
+                        'MAX_TEXTURE_SIZE', 'WEBGL_debug_renderer_info',
+                        'OffscreenCanvas', 'getImageData', 'toString']) {
+    assert.ok(tpl.includes(needle), 'в воркер-шаблоне нет ' + needle);
+  }
+});
+
+test('воркер-шаблон не создаёт свойств, которых в WorkerNavigator не бывает', () => {
+  const tpl = extractWorkerTemplate();
+  // В настоящем Chrome внутри воркера нет navigator.webdriver и maxTouchPoints:
+  // их появление — мгновенный признак подделки, поэтому только «in navigator».
+  assert.ok(!/defineGetter\(NAV, 'webdriver'/.test(tpl), 'в воркере не должно быть webdriver');
+  assert.ok(!/defineGetter\(NAV, 'maxTouchPoints'/.test(tpl), 'в воркере не должно быть maxTouchPoints');
+  assert.ok(tpl.includes("var CAN = function (name)"), 'нет проверки наличия свойства');
+});
+
+test('воркер-скрипт несёт шум canvas профиля (как <canvas> в кадрах)', () => {
+  const tpl = extractWorkerTemplate();
+  assert.ok(tpl.includes('ID.canvas_noise'), 'шум не берётся из отпечатка');
+  assert.ok(tpl.includes('cseed'), 'нет детерминированного зерна профиля');
+});
+
 // отчёт
 const failed = results.filter((r) => r[0] === 'fail');
 results.forEach((r) => console.log((r[0] === 'ok' ? '  ✓ ' : '  ✗ ') + r[1]));
