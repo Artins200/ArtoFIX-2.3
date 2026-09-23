@@ -124,6 +124,36 @@
     writeConfig: function (data) { lsSet('config', Object.assign(lsGet('config', {}), data || {})); return Promise.resolve(ok()); },
     readSettings: function () { return Promise.resolve(lsGet('settings', {})); },
     writeSettings: function (data) { lsSet('settings', data || {}); return Promise.resolve(ok()); },
+
+    // ── фон-картинка ──
+    // В Electron файл выбирает main-процесс (dialog + проверка сигнатуры).
+    // В превью рисуем картинку прямо в canvas: этого достаточно, чтобы
+    // посмотреть, как фон просвечивает сквозь меню, карточки и кнопки.
+    pickBgImage: function () {
+      try {
+        var c = document.createElement('canvas');
+        c.width = 640; c.height = 360;
+        var g = c.getContext('2d');
+        var grd = g.createLinearGradient(0, 0, 640, 360);
+        grd.addColorStop(0, '#12203f');
+        grd.addColorStop(0.45, '#2b4a8f');
+        grd.addColorStop(1, '#8f3fb0');
+        g.fillStyle = grd;
+        g.fillRect(0, 0, 640, 360);
+        g.globalAlpha = 0.5;
+        for (var i = 0; i < 90; i++) {
+          g.beginPath();
+          g.fillStyle = 'rgba(255,255,255,' + (0.05 + Math.random() * 0.25).toFixed(2) + ')';
+          g.arc(Math.random() * 640, Math.random() * 360, Math.random() * 2.6 + 0.6, 0, Math.PI * 2);
+          g.fill();
+        }
+        g.globalAlpha = 1;
+        g.fillStyle = 'rgba(255,255,255,.78)';
+        g.font = 'bold 30px Segoe UI, sans-serif';
+        g.fillText('Artofix · превью фона', 28, 330);
+        return Promise.resolve(ok({ dataUrl: c.toDataURL('image/png'), name: 'preview.png' }));
+      } catch (e) { return Promise.resolve(no('Canvas недоступен: ' + e.message)); }
+    },
     readBinds: function () { return Promise.resolve(lsGet('binds', [])); },
     writeBinds: function (data) { lsSet('binds', data || []); return Promise.resolve(ok()); },
 
@@ -183,7 +213,23 @@
     onSetupHw: function (cb) { return subscribe('setup-hw', cb); },
     onSetupAskPerm: function (cb) { return subscribe('setup-ask-perm', cb); },
     onWinMaximized: function (cb) { return subscribe('win-maximized', cb); },
+    // Cloudflare-предупреждения приходят из engine.py через main;
+    // в превью подписка есть, но событий нет (движок тут не запускается).
+    onCfWarning: function (cb) { return subscribe('cf-warning', cb); },
   };
+
+  // ── демо-события из harness.html (только превью) ──
+  // В Electron событие 'cf-warning' приходит из main, который разбирает
+  // строки engine.py '[cf] BLOCKED …'. Здесь его можно показать кнопкой.
+  window.addEventListener('message', function (e) {
+    var d = e.data;
+    if (!d || d.src !== 'artofix-preview-parent') return;
+    if (d.act === 'cf-demo-block') {
+      emit('cf-warning', { state: 'blocked', host: 'site.com', ray: '8f3c1d2e4a5b6c7d', profile: 'demo' });
+    } else if (d.act === 'cf-demo-challenge') {
+      emit('cf-warning', { state: 'challenge', host: 'site.com', ray: '', profile: 'demo' });
+    }
+  });
 
   window.api = Object.freeze(api);
 })();

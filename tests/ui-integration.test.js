@@ -54,7 +54,8 @@ async function main() {
     return function () { calls[name].push(Array.prototype.slice.call(arguments)); return impl.apply(null, arguments); };
   }
   function sub(name) { return function (cb) { (subs[name] = subs[name] || []).push(cb); return function () {}; }; }
-  const store = { settings: {}, binds: [], profiles: { demo: { browser: 'chrome', note: '', country: '' } } };
+  const store = { settings: {}, binds: [], profiles: { demo: { browser: 'chrome', note: '', country: '' } },
+    config: { user_agent: 'UA', resolution: '1920,1080' } };
   const api = {
     ready: true, platform: 'win32', version: '2.5.0',
     getIconUrl: rec('getIconUrl', () => Promise.resolve(null)),
@@ -75,8 +76,8 @@ async function main() {
     deleteProfile: rec('deleteProfile', (n) => { delete store.profiles[n]; return Promise.resolve({ ok: true }); }),
     readProfileMeta: rec('readProfileMeta', (n) => Promise.resolve(store.profiles[n] || {})),
     writeProfileMeta: rec('writeProfileMeta', (n, d) => { store.profiles[n] = Object.assign({}, store.profiles[n], d); return Promise.resolve({ ok: true }); }),
-    readConfig: () => Promise.resolve({ user_agent: 'UA', resolution: '1920,1080' }),
-    writeConfig: () => Promise.resolve({ ok: true }),
+    readConfig: rec('readConfig', () => Promise.resolve(store.config)),
+    writeConfig: rec('writeConfig', (cfg) => { store.config = Object.assign({}, store.config, cfg); return Promise.resolve({ ok: true }); }),
     readSettings: rec('readSettings', () => Promise.resolve(store.settings)),
     writeSettings: rec('writeSettings', (s) => { store.settings = JSON.parse(JSON.stringify(s)); return Promise.resolve({ ok: true }); }),
     readBinds: rec('readBinds', () => Promise.resolve(store.binds)),
@@ -90,6 +91,8 @@ async function main() {
     cbnTestWarp: () => Promise.resolve({ ok: false }),
     readLogs: () => Promise.resolve([]), clearLogs: () => Promise.resolve({ ok: true }), copyLogs: () => Promise.resolve({ ok: true }),
     previewProfile: () => Promise.resolve({ identity: null }),
+    // фон-картинка: в Electron файл выбирает main, в тесте отдаём готовый data URL
+    pickBgImage: rec('pickBgImage', () => Promise.resolve({ ok: true, dataUrl: 'data:image/png;base64,AAAB' })),
     listCountries: rec('listCountries', () => Promise.resolve([
       { code: 'US', name: 'США', flag: '🇺🇸' }, { code: 'DE', name: 'Германия', flag: '🇩🇪' },
     ])),
@@ -102,6 +105,7 @@ async function main() {
       setTimeout(() => cb({ platform: 'win32', version: '2.5.0', isAdmin: true, sandbox: true, zapretRunning: false, hostsAvailable: true }), 0);
       return () => {}; },
     onWinMaximized: sub('win-maximized'),
+    onCfWarning: sub('cf-warning'),
   };
   window.api = Object.freeze(api);
 
@@ -262,7 +266,52 @@ async function main() {
   check('с выключенным авто-обходом Zapret НЕ стартует', calls.zapretStart.length === zBefore3,
     calls.zapretStart.length + ' vs ' + zBefore3);
 
-  // ═══ 11. Превью-шим: поверхность window.api соответствует запросам app.js ═══
+  // ═══ 11. Фон-картинка: меню и кнопки показывают картинку («стекло») ═══
+  click(document.querySelector('[data-tab="settings"]'));
+  await sleep(30);
+  const bgBtn = document.querySelector('[data-af-action="pickBgImage"]');
+  check('кнопка выбора картинки в «Внешнем виде»', !!bgBtn);
+  click(bgBtn);
+  await sleep(60);
+  check('картинка применена (data URL у слоя фона)',
+    ($('bg-image-layer').style.backgroundImage || '').indexOf('data:image/png;base64,AAAB') !== -1,
+    $('bg-image-layer').style.backgroundImage);
+  check('включён режим has-bg-image (панели и кнопки становятся полупрозрачными)',
+    $('app').classList.contains('has-bg-image'));
+  const surfaceA = parseFloat(document.documentElement.style.getPropertyValue('--surface-a'));
+  check('плотность панелей по умолчанию ~0.74 (видно картинку, но текст читается)',
+    surfaceA > 0.5 && surfaceA < 1, 'surface-a=' + surfaceA);
+  const veil = parseFloat(document.documentElement.style.getPropertyValue('--img-veil'));
+  check('у картинки есть лёгкое затемнение (--img-veil)', veil > 0 && veil < 1, 'veil=' + veil);
+  const bgSlider = $('bg-surface');
+  check('ползунок плотности панелей в разметке', !!bgSlider);
+  bgSlider.value = '45';
+  inputEv(bgSlider);
+  await sleep(30);
+  check('ползунок меняет --surface-a (0.45)', document.documentElement.style.getPropertyValue('--surface-a') === '0.45',
+    document.documentElement.style.getPropertyValue('--surface-a'));
+  check('плотность панелей сохраняется в настройках', store.settings.bgSurface === '45', String(store.settings.bgSurface));
+  click(document.querySelector('[data-af-action="clearBgImage"]'));
+  await sleep(40);
+  check('«Убрать картинку» снимает has-bg-image', !$('app').classList.contains('has-bg-image'));
+
+  // ═══ 12. Cloudflare: тумблеры сохраняются в config.json ═══
+  click(document.querySelector('[data-tab="config"]'));
+  await sleep(60);
+  const cfEn = $('cf-enabled'), cfSl = $('cf-soft-landing'), cfWc = $('cf-wait-challenge');
+  check('тумблеры Cloudflare в «Конфигурации»', !!cfEn && !!cfSl && !!cfWc);
+  check('по умолчанию защита от блокировок включена', cfEn.checked === true && cfSl.checked === true && cfWc.checked === true);
+  cfEn.checked = false;
+  cfWc.checked = false;
+  changeEv(cfEn);
+  await sleep(60);
+  check('настройки Cloudflare уходят в config.json (блок cf)',
+    store.config.cf && store.config.cf.enabled === false && store.config.cf.wait_challenge === false,
+    JSON.stringify(store.config.cf));
+  check('соседние поля конфига не потерялись', store.config.user_agent === 'UA' && store.config.resolution === '1920,1080',
+    JSON.stringify(store.config));
+
+  // ═══ 13. Превью-шим: поверхность window.api соответствует запросам app.js ═══
   // preview/api-shim.js — не часть сборки Electron, но npm run preview должен
   // работать: каждый apiBridge.<метод>, который зовёт app.js, обязан быть в шиме.
   const shimPath = path.join(ROOT, 'preview/api-shim.js');

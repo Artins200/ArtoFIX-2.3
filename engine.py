@@ -24,9 +24,11 @@ ARTOFIX 2.5 — BROWSER ENGINE
 import glob
 import json
 import os
+import re
 import subprocess
 import sys
 import time
+from urllib.parse import urlsplit
 
 
 # ─────────────────────────────────────────────
@@ -980,6 +982,262 @@ def human_pause(base=1.0, spread=0.8):
 
 
 # ─────────────────────────────────────────────
+#  CLOUDFLARE: ПРОВЕРКА, ОЖИДАНИЕ, ОБХОД БЛОКИРОВКИ
+#  ---------------------------------------------------------------
+#  Cloudflare вместо сайта отдаёт одну из трёх страниц:
+#    1) JS-проверка «Just a moment…» / «Checking your browser» — браузер
+#       проходит её сам за 3–15 секунд, если ему не мешать;
+#    2) страница блокировки «Sorry, you have been blocked» + Ray ID —
+#       сработала WAF/Bot Management: причина почти всегда репутация IP
+#       (и/или слишком «холодный» заход), а не отпечаток;
+#    3) нормальная страница сайта.
+#  Раньше движок после driver.get() сразу шёл «вести себя по-человечески»:
+#  курсор и прокрутка уходили на страницу проверки, а пользователь оставался
+#  смотреть на «Sorry, you have been blocked» на весь экран — и не понимал,
+#  почему (в логе про это не было ни слова).
+#  Теперь движок распознаёт состояние, спокойно ждёт проверку, а при
+#  блокировке делает человеческую лестницу повторов (пауза → обновление →
+#  заход через главную) и пишет причину в лог — main передаёт её в UI.
+# ─────────────────────────────────────────────
+
+CF_DEFAULTS = {
+    "enabled": True,           # вся логика включена (config.json → cf.enabled)
+    "soft_landing": True,      # сначала главная сайта, потом глубокая ссылка
+    "wait_challenge": True,    # ждать прохождение проверки, не «читать» её
+    "challenge_timeout": 25,   # секунд на одну попытку прохождения проверки
+    "max_retries": 2,          # повторов после блокировки/незавершённой проверки
+}
+
+CF_CHALLENGE_MARKERS = (
+    "just a moment",
+    "checking your browser",
+    "cf-chl",
+    "challenge-platform",
+    "__cf_chl",
+    "enable javascript and cookies to continue",
+    "verify you are human",
+    "проверка браузера",
+)
+
+CF_BLOCK_MARKERS = (
+    "you have been blocked",
+    "you are unable to access",
+    "why have i been blocked",
+    "attention required",
+    "cf-error-details",
+    "error 1020",
+    "error 1015",
+    "blocked by cloudflare",
+    "has been blocked",
+)
+
+# Мини-проба страницы: заголовок, адрес и видимый текст. DOM не трогаем,
+# поэтому проба безопасна и на странице проверки.
+CF_PROBE_JS = r"""
+(function () {
+  try {
+    var body = document.body;
+    var txt = body ? (body.innerText || body.textContent || '') : '';
+    return {
+      title: String(document.title || ''),
+      url: String(location.href || ''),
+      text: String(txt).slice(0, 4000)
+    };
+  } catch (e) { return null; }
+})();
+"""
+
+
+def cf_settings(cfg):
+    """Настройки CF-логики из config.json (блок cf) с проверкой диапазонов."""
+    out = dict(CF_DEFAULTS)
+    raw = (cfg or {}).get("cf")
+    if not isinstance(raw, dict):
+        raw = {}
+    for key in ("enabled", "soft_landing", "wait_challenge"):
+        if isinstance(raw.get(key), bool):
+            out[key] = raw[key]
+    for key, lo, hi in (("challenge_timeout", 5, 90), ("max_retries", 0, 3)):
+        val = raw.get(key)
+        if isinstance(val, (int, float)) and not isinstance(val, bool):
+            out[key] = max(lo, min(hi, int(val)))
+    return out
+
+
+def cf_state_from_text(text):
+    """'blocked' | 'challenge' | 'ok' по тексту страницы.
+
+    Блокировку проверяем первой: на странице блокировки тоже бывает Ray ID,
+    а маркеры проверки («just a moment») в неё не входят.
+    """
+    low = (text or "").lower()
+    for mark in CF_BLOCK_MARKERS:
+        if mark in low:
+            return "blocked"
+    for mark in CF_CHALLENGE_MARKERS:
+        if mark in low:
+            return "challenge"
+    return "ok"
+
+
+def cf_ray_id(text):
+    """Ray ID из страницы блокировки — по нему поддержка сайта ищет запрос."""
+    m = re.search(r"ray\s*id:?\s*([0-9a-fA-F]{8,24})", text or "", re.I)
+    return m.group(1).lower() if m else None
+
+
+def page_cf_state(driver):
+    """(state, ray_id) текущей страницы: ok | challenge | blocked | unknown."""
+    try:
+        probe = driver.execute_script(CF_PROBE_JS)
+    except Exception:
+        return "unknown", None
+    if not isinstance(probe, dict):
+        return "unknown", None
+    text = str(probe.get("text") or "")
+    blob = " ".join((str(probe.get("title") or ""), str(probe.get("url") or ""), text))
+    return cf_state_from_text(blob), cf_ray_id(text + " " + str(probe.get("title") or ""))
+
+
+def cf_wait_challenge(driver, timeout=25.0, poll=1.2):
+    """Ждём, пока браузер сам пройдёт JS-проверку. Возвращает (state, ray)."""
+    try:
+        deadline = time.time() + max(1.0, float(timeout))
+    except Exception:
+        deadline = time.time() + 25.0
+    state, ray = page_cf_state(driver)
+    while state == "challenge" and time.time() < deadline:
+        time.sleep(min(poll, max(0.2, deadline - time.time())))
+        state, ray = page_cf_state(driver)
+    return state, ray
+
+
+def cf_settle(driver, cfs):
+    """Дождаться проверки на текущей странице (если это разрешено) → (state, ray)."""
+    state, ray = page_cf_state(driver)
+    if state == "challenge" and cfs.get("wait_challenge", True):
+        state, ray = cf_wait_challenge(driver, cfs.get("challenge_timeout", 25))
+    return state, ray
+
+
+def cf_origin(url):
+    """«Главная страница» сайта: схема + хост + порт."""
+    try:
+        parts = urlsplit(url)
+    except Exception:
+        return None
+    if parts.scheme not in ("http", "https") or not parts.netloc:
+        return None
+    return parts.scheme + "://" + parts.netloc + "/"
+
+
+def cf_is_deep(url):
+    """Ссылка глубже главной (путь или параметры).
+
+    «Холодный» прямой заход на глубокую ссылку чаще ловит проверку, поэтому
+    с включённым soft_landing сначала открывается главная сайта.
+    """
+    try:
+        parts = urlsplit(url)
+    except Exception:
+        return False
+    if parts.scheme not in ("http", "https"):
+        return False
+    return bool((parts.path or "/").strip("/") or parts.query)
+
+
+def cf_light_read(driver):
+    """Лёгкое «чтение» страницы между шагами CF-лестницы: пара оборотов колеса."""
+    try:
+        import random
+        for _ in range(random.randint(1, 2)):
+            driver.execute_cdp_cmd("Input.dispatchMouseEvent",
+                                   {"type": "mouseWheel",
+                                    "x": random.randint(200, 700),
+                                    "y": random.randint(200, 500),
+                                    "deltaX": 0,
+                                    "deltaY": random.randint(140, 420)})
+            time.sleep(random.uniform(0.3, 0.8))
+    except Exception:
+        pass
+
+
+def cf_navigate(driver, url, cfg, log=print):
+    """
+    Заход на сайт с учётом Cloudflare.
+
+    Возвращает итоговое состояние: 'ok' | 'challenge' | 'blocked' | 'disabled' | 'unknown'.
+    Строки '[cf] BLOCKED …' / '[cf] CHALLENGE …' разбирает main-процесс и
+    показывает пользователю понятное объяснение (см. main.js → maybeSendCfNotice).
+    """
+    cfs = cf_settings(cfg)
+    if not cfs["enabled"]:
+        driver.get(url)
+        return "disabled"
+
+    try:
+        host = urlsplit(url).netloc or url
+    except Exception:
+        host = url
+
+    if cfs["soft_landing"] and cf_is_deep(url):
+        root = cf_origin(url)
+        if root:
+            log("[cf] мягкий вход: открываем главную " + root + " перед глубокой ссылкой")
+            driver.get(root)
+            state, _ray = cf_settle(driver, cfs)
+            if state == "ok":
+                human_pause(1.2, 0.9)     # человек сначала осматривается
+                cf_light_read(driver)
+
+    driver.get(url)
+    first_state, _first_ray = cf_settle(driver, cfs)
+    state, ray = first_state, _first_ray
+    attempts = 0
+    max_retries = int(cfs["max_retries"])
+    while state in ("challenge", "blocked") and attempts < max_retries:
+        attempts += 1
+        human_pause(2.6, 1.6)             # человек не жмёт F5 мгновенно
+        root = cf_origin(url)
+        if state == "blocked" and attempts == max_retries and root and cf_is_deep(url):
+            # Последняя попытка — как у человека: сначала главная (её проверка
+            # короче), затем целевая ссылка уже с полученной cookie.
+            log("[cf] блокировка: пробуем зайти через главную " + root)
+            try:
+                driver.get(root)
+            except Exception as exc:
+                log("[cf] переход на главную не удался: " + str(exc))
+                break
+            state, ray = cf_settle(driver, cfs)
+            if state == "ok":
+                human_pause(1.5, 1.0)
+                cf_light_read(driver)
+                driver.get(url)
+                state, ray = cf_settle(driver, cfs)
+            continue
+        log("[cf] попытка " + str(attempts) + ": обновляем страницу (" + state + ")")
+        try:
+            driver.refresh()
+        except Exception as exc:
+            log("[cf] обновление не удалось: " + str(exc))
+            break
+        state, ray = cf_settle(driver, cfs)
+
+    if state == "blocked":
+        log("[cf] BLOCKED ray=" + (ray or "-") + " host=" + host +
+            " — Cloudflare отдал страницу блокировки. Отпечаток и браузер тут не при чём: "
+            "так отвечает репутация IP/подсети. Что помогает: 1) резидентский прокси профиля, "
+            "2) пауза 10–30 минут, 3) повторный запуск профиля — его cookies уже сохранены.")
+    elif state == "challenge":
+        log("[cf] CHALLENGE host=" + host +
+            " — проверка Cloudflare не завершилась за отведённое время. Окно закрывать не нужно: "
+            "проверка часто досчитывается сама, либо нажми F5.")
+    elif first_state != "ok":
+        log("[cf] OK host=" + host + " — проверка Cloudflare пройдена, открываем страницу сайта")
+    return state
+
+
+# ─────────────────────────────────────────────
 #  БРАУЗЕР
 # ─────────────────────────────────────────────
 class BrowserManager:
@@ -1351,8 +1609,14 @@ class BrowserManager:
             self.apply_identity(driver, ident, cfg)
 
             if url and url != "about:blank":
-                driver.get(url)
-                self.humanize(driver, ident, cfg)
+                # Сначала Cloudflare-логика (ожидание проверки/повтор), и только
+                # потом «человеческое» поведение: прокрутка и курсор на странице
+                # блокировки выглядят как бот и мешают пройти проверку.
+                cf_state = cf_navigate(driver, url, cfg)
+                if cf_state in ("ok", "disabled", "unknown"):
+                    self.humanize(driver, ident, cfg)
+                else:
+                    print("[cf] разогрев поведения пропущен — страница сайта ещё не открыта")
 
             while True:
                 try:

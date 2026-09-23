@@ -205,14 +205,33 @@ test('sanitizeBinds сохраняет steam:// и пути .exe/.lnk, отби�
 test('sanitizeSettings хранит скругление/прозрачность окна и авто-обход', () => {
   const s = ctx.sanitizeSettings({
     theme: 'th-mint', uiScale: '1.2', winOpacity: '0.75', winRadius: '14', autoBypass: false,
+    bgSurface: 62,
   });
   assert.strictEqual(s.winOpacity, '0.75');
   assert.strictEqual(s.winRadius, '14');
   assert.strictEqual(s.autoBypass, false);
-  const junk = ctx.sanitizeSettings({ winOpacity: '5', winRadius: '999', autoBypass: 'yes' });
+  // плотность панелей поверх фон-картинки (35–100 %)
+  assert.strictEqual(s.bgSurface, '62');
+  const junk = ctx.sanitizeSettings({ winOpacity: '5', winRadius: '999', autoBypass: 'yes', bgSurface: 5 });
   assert.strictEqual(junk.winOpacity, undefined);
   assert.strictEqual(junk.winRadius, undefined);
   assert.strictEqual(junk.autoBypass, undefined);
+  assert.strictEqual(junk.bgSurface, undefined);
+});
+
+test('sanitizeConfig хранит блок Cloudflare (cf) и отбивает мусор', () => {
+  const cf = ctx.sanitizeConfig({
+    user_agent: 'UA', cf: { enabled: false, soft_landing: true, wait_challenge: false, challenge_timeout: 999, max_retries: -4 },
+  });
+  assert.strictEqual(cf.cf.enabled, false);
+  assert.strictEqual(cf.cf.soft_landing, true);
+  assert.strictEqual(cf.cf.wait_challenge, false);
+  assert.strictEqual(cf.cf.challenge_timeout, 90);
+  assert.strictEqual(cf.cf.max_retries, 0);
+  // строки вместо булевых не проходят
+  const junk = ctx.sanitizeConfig({ cf: { enabled: 'yes', soft_landing: 1 } });
+  assert.strictEqual(junk.cf.enabled, undefined);
+  assert.strictEqual(junk.cf.soft_landing, undefined);
 });
 
 test('главное окно прозрачное, а состояние maximize уходит в рендерер', () => {

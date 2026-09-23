@@ -31,6 +31,7 @@ const EVENTS = [
   'log-entry', 'zapret-status', 'zapret-dl-progress', 'diag-log', 'diag-progress',
   'tray-action', 'navigate', 'bootstrap', 'setup-step', 'setup-log', 'setup-error',
   'setup-restart', 'setup-done', 'setup-hw', 'setup-ask-perm', 'win-maximized',
+  'cf-warning',
 ];
 
 // ── гигиена аргументов ──
@@ -305,6 +306,8 @@ const api = {
   onSetupHw: function (cb) { return subscribe('setup-hw', cb); },
   onSetupAskPerm: function (cb) { return subscribe('setup-ask-perm', cb); },
   onWinMaximized: function (cb) { return subscribe('win-maximized', cb); },
+  // Cloudflare: движок распознал проверку/блокировку (см. engine.py → cf_navigate)
+  onCfWarning: function (cb) { return subscribe('cf-warning', cb); },
 };
 
 /** Текст для данных: обрезаем управляющие символы и длину. */

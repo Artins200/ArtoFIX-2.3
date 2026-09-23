@@ -44,6 +44,22 @@ test('в HTML нет инлайновых <script> (только внешние 
   }
 });
 
+test('все CSS-переменные index.html объявлены (нет опечаток в var(--x))', () => {
+  // «Стекло» поверх фон-картинки держится на переменных --panel-a/--card-a/
+  // --soft-a/--input-a и --surface-a: опечатка в имени молча ломает эффект
+  // (CSS не падает, просто свойство не применяется), поэтому проверяем текстом.
+  const defined = new Set();
+  const defRe = /(--[a-z0-9-]+)\s*:/gi;
+  let m;
+  while ((m = defRe.exec(indexHtml))) defined.add(m[1]);
+  const missing = [];
+  const useRe = /var\(\s*(--[a-z0-9-]+)\s*([,)])/gi;
+  while ((m = useRe.exec(indexHtml))) {
+    if (m[2] === ')' && !defined.has(m[1])) missing.push(m[1]);   // без фолбэка → обязан быть объявлен
+  }
+  assert.deepStrictEqual([...new Set(missing)], [], 'не объявлены: ' + [...new Set(missing)].join(', '));
+});
+
 test('в HTML нет ссылок на внешние CDN (шрифты/CDN-скрипты)', () => {
   assert.strictEqual(/fonts\.googleapis\.com|fonts\.gstatic\.com|cdn\.|unpkg|jsdelivr/i.test(indexHtml + setupHtml), false,
     'внешние подключения запрещены CSP и политикой приложения');
@@ -130,7 +146,7 @@ function apiStub() {
     'previewProfile', 'rerollProfile', 'reportError', 'skipSetup', 'setupOpenMain', 'setupConfirmInstall'];
   const subs = ['onLogEntry', 'onZapretStatus', 'onZapretProgress', 'onDiagLog', 'onDiagProgress',
     'onTrayAction', 'onNavigate', 'onBootstrap', 'onSetupStep', 'onSetupLog', 'onSetupError',
-    'onSetupRestart', 'onSetupDone', 'onSetupHw', 'onSetupAskPerm'];
+    'onSetupRestart', 'onSetupDone', 'onSetupHw', 'onSetupAskPerm', 'onCfWarning'];
   const api = { ready: true, platform: 'linux', version: '2.5.0' };
   fns.forEach((f) => { api[f] = () => Promise.resolve({}); });
   subs.forEach((f) => { api[f] = () => () => {}; });

@@ -401,12 +401,42 @@ const LOG_MAX = 300;
 const LOG_LINE_MAX = 500;
 let launchLogs = [];
 
+/* engine.py пишет состояние Cloudflare строками вида
+     [cf] BLOCKED ray=8f3c... host=site.com — ...
+     [cf] CHALLENGE host=site.com — ...
+   Разбираем их, чтобы рендерер показал понятный тост вместо «тихой» страницы
+   блокировки на весь экран (раньше причина была видна только в логах). */
+function cfNoticeFromLine(line) {
+  const m = line.match(/^\[cf\]\s+(BLOCKED|CHALLENGE)\b/);
+  if (!m) return null;
+  const ray = (line.match(/ray=([0-9a-zA-Z\-]+)/) || [])[1] || '';
+  const host = (line.match(/host=([^\s]+)/) || [])[1] || '';
+  return {
+    state: m[1] === 'BLOCKED' ? 'blocked' : 'challenge',
+    ray: ray === '-' ? '' : sec.sanitizeLabel(ray, 32),
+    host: host === '-' ? '' : sec.sanitizeLabel(host, 120),
+    msg: sec.clampString(line, 400),
+  };
+}
+
+let cfNoticeLast = { key: '', ts: 0 };
+function maybeSendCfNotice(profile, line) {
+  const notice = cfNoticeFromLine(line);
+  if (!notice) return;
+  const key = notice.state + '|' + notice.host + '|' + notice.ray;
+  const now = Date.now();
+  if (key === cfNoticeLast.key && now - cfNoticeLast.ts < 30000) return;   // движок повторяет попытки
+  cfNoticeLast = { key, ts: now };
+  send('cf-warning', Object.assign({ profile: sec.sanitizeLabel(profile, 40) }, notice));
+}
+
 function appendLog(profile, browser, text) {
   const lines = String(text).split('\n');
   for (const raw of lines) {
     const line = stripAnsi(raw).trim().slice(0, LOG_LINE_MAX);
     if (!line) continue;
     launchLogs.push({ ts: Date.now(), profile: sec.sanitizeLabel(profile, 40), browser: sec.clampString(browser, 12), msg: line });
+    maybeSendCfNotice(profile, line);
   }
   if (launchLogs.length > LOG_MAX) launchLogs = launchLogs.slice(-LOG_MAX);
   send('log-entry', launchLogs.slice(-5));
@@ -427,7 +457,7 @@ function pushDiag(channel, payload) {
 //  КОНФИГ / НАСТРОЙКИ (санитизация при записи)
 // ═══════════════════════════════════════════
 const CONFIG_KEYS = ['user_agent', 'resolution', 'spoof', 'fingerprint', 'proxy',
-  'chromedriver_path', 'edgedriver_path', 'identity', 'vectors'];
+  'chromedriver_path', 'edgedriver_path', 'identity', 'vectors', 'cf'];
 
 function sanitizePathField(v) {
   if (typeof v !== 'string' || v.length > 512) return undefined;
@@ -473,6 +503,20 @@ function sanitizeConfig(input) {
     if (typeof input.proxy.server === 'string' && /^(socks5|socks4|http|https):\/\/[A-Za-z0-9._:\-]{1,120}$/.test(input.proxy.server)) p.server = input.proxy.server;
     if (typeof input.proxy.username === 'string') p.username = sec.sanitizeLabel(input.proxy.username, 64);
     out.proxy = p;
+  }
+  // Cloudflare: как движок ведёт себя на странице проверки/блокировки
+  // (engine.py → cf_navigate). Выключение ничего не ломает: ссылка просто
+  // открывается напрямую, как раньше.
+  if (input.cf && typeof input.cf === 'object') {
+    const cf = {};
+    for (const key of ['enabled', 'soft_landing', 'wait_challenge']) {
+      if (typeof input.cf[key] === 'boolean') cf[key] = input.cf[key];
+    }
+    const timeout = Number(input.cf.challenge_timeout);
+    if (Number.isFinite(timeout)) cf.challenge_timeout = Math.min(90, Math.max(5, Math.floor(timeout)));
+    const retries = Number(input.cf.max_retries);
+    if (Number.isFinite(retries)) cf.max_retries = Math.min(3, Math.max(0, Math.floor(retries)));
+    out.cf = cf;
   }
   const cd = sanitizePathField(input.chromedriver_path);
   if (cd) out.chromedriver_path = cd;
@@ -546,6 +590,9 @@ function sanitizeSettings(input) {
   if (Number.isFinite(wop) && wop >= 0.3 && wop <= 1) out.winOpacity = String(Math.round(wop * 100) / 100);
   const wrad = Number(input.winRadius);
   if (Number.isFinite(wrad) && wrad >= 0 && wrad <= 28) out.winRadius = String(Math.floor(wrad));
+  // Плотность панелей/кнопок поверх фон-картинки: 35–100 % (см. app.js → applyBgSurface)
+  const bgs = Number(input.bgSurface);
+  if (Number.isFinite(bgs) && bgs >= 35 && bgs <= 100) out.bgSurface = String(Math.round(bgs));
   // Авто-обход без VPN: включать Zapret сам при выборе страны / запуске биндов
   if (typeof input.autoBypass === 'boolean') out.autoBypass = input.autoBypass;
   if (input.fingerprint && typeof input.fingerprint === 'object') {
@@ -1880,9 +1927,18 @@ handle('api:read-config', () => {
 });
 handle('api:write-config', (_e, data) => {
   try {
-    const current = readConfig();
-    const next = Object.assign({}, sanitizeConfig(data));
-    next.identity = current.identity || null;  // отпечаток правит только main
+    const incoming = (data && typeof data === 'object') ? data : {};
+    const raw = sec.readJsonSafe(dataPath('config.json')) || {};
+    const clean = sanitizeConfig(incoming);
+    // Мержим с тем, что уже лежит в файле: формы присылают только свои поля,
+    // и раньше «Сохранить всё» в одной вкладке стирало настройки других
+    // (UA-форма — блок cf, форма Cloudflare — spoof и т.д.).
+    const next = Object.assign({}, raw, clean);
+    // Поле прислано, но не прошло валидацию (пустое) — значит его чистят.
+    for (const key of ['user_agent', 'resolution', 'spoof', 'fingerprint', 'proxy', 'cf']) {
+      if (Object.prototype.hasOwnProperty.call(incoming, key) && !(key in clean)) delete next[key];
+    }
+    next.identity = (raw.identity) || null;    // отпечаток правит только main
     writeConfig(next);
     return { ok: true };
   } catch (e) { return { ok: false, msg: e.message }; }

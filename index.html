@@ -49,6 +49,22 @@
   --win-radius: 20px;
   --win-alpha: 1;
   --win-inset: 8px;
+
+  /* ── ПОВЕРХНОСТИ: цвет ОТДЕЛЬНО от «плотности» ──
+     Панели (шапка, меню), карточки, кнопки и поля заданы в rgba с отдельной
+     альфой. Пока фон-картинки нет, все альфы = 1 и вид не меняется.
+     Когда картинка включена, #app.has-bg-image подменяет альфы из
+     --surface-a (ползунок «Плотность панелей» в «Внешнем виде»): картинка
+     видна и в меню со всеми вкладками, и в шапке, и сквозь кнопки — но не
+     «насквозь», текст остаётся читаемым. */
+  --panel-rgb: 247,248,252;
+  --card-rgb:  255,255,255;
+  --soft-rgb:  238,241,248;
+  --input-rgb: 244,246,251;
+  --panel-a: 1;
+  --card-a:  1;
+  --soft-a:  1;
+  --input-a: 1;
 }
 
 /* ── АЦЕНТНЫЕ ТЕМЫ (светлые) ── */
@@ -68,6 +84,9 @@ body.th-night {
   --red:#f2636a; --redr:242,99,106;
   --ylw:#f4bf55; --ylwr:244,191,85;
   --btn-soft:#1d2839; --input-bg:#0f1729; --row-hover:rgba(231,236,245,.055);
+  /* те же поверхности, но тройками RGB — для «стекла» поверх картинки */
+  --panel-rgb:17,24,39; --card-rgb:22,31,49;
+  --soft-rgb:29,40,57;  --input-rgb:15,23,41;
 }
 
 /* =========================================
@@ -151,7 +170,32 @@ select  { cursor:pointer; }
   background:
     radial-gradient(1100px 460px at 80% -10%, rgba(var(--acr),.09), transparent 62%),
     radial-gradient(900px 420px at -12% 110%, rgba(var(--ac2r),.10), transparent 60%),
-    rgba(var(--bg-rgb, 237,240,247), calc(var(--win-alpha, 1) * 0.45));
+    rgba(var(--bg-rgb, 237,240,247), calc(var(--win-alpha, 1) * 0.35));
+
+  /* ── «СТЕКЛО» ПОВЕРХ КАРТИНКИ ──
+     Пока картинка включена, меню (сайдбар со всеми вкладками), шапка,
+     карточки, кнопки и поля становятся полупрозрачными — рисунок видно
+     сквозь них, но приглушённо, чтобы текст читался.
+     Насколько — задаёт --surface-a (ползунок «Плотность панелей»), т.е.
+     «не прям сильно прозрачно» настраивается одним движением. */
+  --panel-a: var(--surface-a, .74);
+  --card-a:  calc(var(--surface-a, .74) * .94);
+  --soft-a:  calc(var(--surface-a, .74) * .80);
+  --input-a: calc(var(--surface-a, .74) * .86);
+}
+/* Размытие фона под «стеклом»: без него полупрозрачная панель над
+   пёстрой картинкой съедает контраст у текста. */
+#app.has-bg-image #titlebar,
+#app.has-bg-image #sidebar,
+#app.has-bg-image #status-box,
+#app.has-bg-image .af-card,
+#app.has-bg-image .profile-card,
+#app.has-bg-image .bind-item,
+#app.has-bg-image .theme-card,
+#app.has-bg-image .toast,
+#app.has-bg-image .modal-box {
+  -webkit-backdrop-filter:blur(9px) saturate(1.12);
+  backdrop-filter:blur(9px) saturate(1.12);
 }
 @keyframes appBoot {
   from { opacity:0; transform:translateY(10px) scale(.99); }
@@ -164,7 +208,7 @@ body.is-max #app { border-color:transparent; box-shadow:none; }
    ========================================= */
 #titlebar {
   height:48px; flex-shrink:0;
-  background:var(--panel);
+  background:rgba(var(--panel-rgb), var(--panel-a));
   border-bottom:1px solid var(--divider);
   display:flex; align-items:center; justify-content:space-between;
   padding:0 14px 0 18px; -webkit-app-region:drag;
@@ -200,7 +244,7 @@ body.is-max #app { border-color:transparent; box-shadow:none; }
   display:flex; align-items:center; justify-content:center;
   transition:all .16s; cursor:pointer;
 }
-.winbtn:hover { background:var(--btn-soft); color:var(--tx); }
+.winbtn:hover { background:rgba(var(--soft-rgb), var(--soft-a)); color:var(--tx); }
 #winbtn-close:hover {
   background:rgba(var(--redr),.1); border-color:rgba(var(--redr),.25); color:var(--red);
 }
@@ -215,7 +259,7 @@ body.is-max #app { border-color:transparent; box-shadow:none; }
    ========================================= */
 #sidebar {
   width:var(--sidebar-w); flex-shrink:0;
-  background:var(--panel);
+  background:rgba(var(--panel-rgb), var(--panel-a));
   border-right:1px solid var(--divider);
   display:flex; flex-direction:column;
   padding:14px 12px 12px; gap:2px;
@@ -254,7 +298,7 @@ body.is-max #app { border-color:transparent; box-shadow:none; }
    ========================================= */
 #status-box {
   margin-top:auto; padding:13px;
-  background:var(--card); border-radius:14px;
+  background:rgba(var(--card-rgb), var(--card-a)); border-radius:14px;
   border:1px solid var(--card-br);
   box-shadow:0 1px 2px rgba(20,24,44,.04);
   flex-shrink:0;
@@ -357,7 +401,7 @@ body.th-night #zapret-dot { background:#39445c; }
    CARDS
    ========================================= */
 .af-card {
-  background:var(--card); border:1px solid var(--card-br);
+  background:rgba(var(--card-rgb), var(--card-a)); border:1px solid var(--card-br);
   border-radius:var(--radius); padding:18px;
   box-shadow:0 1px 2px rgba(20,24,44,.04);
   transition:border-color .22s, transform .22s, box-shadow .22s;
@@ -392,7 +436,7 @@ body.th-night #zapret-dot { background:#39445c; }
 .btn-primary:active { transform:none; box-shadow:0 1px 2px rgba(var(--acr),.3); }
 
 .btn-secondary {
-  background:var(--btn-soft); color:var(--tx);
+  background:rgba(var(--soft-rgb), var(--soft-a)); color:var(--tx);
   border-color:var(--card-br);
 }
 .btn-secondary:hover {
@@ -421,13 +465,13 @@ body.th-night #zapret-dot { background:#39445c; }
 .af-input {
   width:100%; padding:10px 12px; border-radius:12px;
   border:1px solid var(--card-br);
-  background:var(--input-bg); color:var(--tx); font-size:12.5px;
+  background:rgba(var(--input-rgb), var(--input-a)); color:var(--tx); font-size:12.5px;
   outline:none; transition:all .18s;
   display:block; margin-bottom:9px;
 }
 .af-input:focus {
   border-color:var(--ac);
-  background:var(--card);
+  background:rgba(var(--card-rgb), calc(var(--card-a) + (1 - var(--card-a)) * .5));
   box-shadow:0 0 0 3px rgba(var(--acr),.14);
 }
 .af-input::placeholder { color:var(--tx3); }
@@ -449,7 +493,7 @@ select.af-input option { background:var(--card); color:var(--tx); }
    PROFILE CARDS
    ========================================= */
 .profile-card {
-  background:var(--card); border:1px solid var(--card-br);
+  background:rgba(var(--card-rgb), var(--card-a)); border:1px solid var(--card-br);
   border-radius:16px; padding:14px;
   display:flex; align-items:center; gap:13px;
   box-shadow:0 1px 2px rgba(20,24,44,.04);
@@ -508,7 +552,7 @@ select.af-input option { background:var(--card); color:var(--tx); }
 }
 .theme-card {
   border-radius:13px; padding:11px; cursor:pointer;
-  border:1.5px solid var(--card-br); background:var(--card);
+  border:1.5px solid var(--card-br); background:rgba(var(--card-rgb), var(--card-a));
   display:flex; flex-direction:column; align-items:center; gap:9px;
   font-size:11px; font-weight:600; color:var(--tx2);
   transition:all .18s;
@@ -557,6 +601,19 @@ select.af-input option { background:var(--card); color:var(--tx); }
 .color-row input[type=color]:hover { border-color:var(--ac); transform:scale(1.04); }
 
 /* =========================================
+   CLOUDFLARE — строки настроек (тумблеры)
+   ========================================= */
+.cf-row {
+  display:flex; align-items:center; gap:10px;
+  padding:8px 0; border-bottom:1px solid var(--divider);
+  font-size:11.5px; color:var(--tx2); font-weight:600; cursor:pointer;
+}
+.cf-row:last-of-type { border-bottom:none; }
+.cf-row input[type=checkbox] {
+  width:16px; height:16px; flex-shrink:0; accent-color:var(--ac); cursor:pointer;
+}
+
+/* =========================================
    TOASTS
    ========================================= */
 #toasts {
@@ -567,7 +624,7 @@ select.af-input option { background:var(--card); color:var(--tx); }
   z-index:8000; pointer-events:none;
 }
 .toast {
-  background:var(--card); border:1px solid var(--card-br);
+  background:rgba(var(--card-rgb), calc(var(--card-a) + (1 - var(--card-a)) * .6)); border:1px solid var(--card-br);
   border-left:3px solid var(--ac); padding:12px 16px; border-radius:11px;
   color:var(--tx); font-size:12px; font-weight:600; font-family:var(--font);
   box-shadow:0 12px 32px rgba(20,24,44,.18);
@@ -597,7 +654,7 @@ select.af-input option { background:var(--card); color:var(--tx); }
 }
 #modal-overlay.is-open { display:flex; }
 .modal-box {
-  background:var(--card); border:1px solid var(--card-br);
+  background:rgba(var(--card-rgb), calc(var(--card-a) + (1 - var(--card-a)) * .6)); border:1px solid var(--card-br);
   border-radius:22px; padding:24px; width:460px; max-width:92vw;
   box-shadow:0 30px 80px rgba(13,19,32,.4);
   animation:modalIn .24s cubic-bezier(.22,1,.36,1);
@@ -612,7 +669,7 @@ select.af-input option { background:var(--card); color:var(--tx); }
 }
 .modal-close {
   margin-left:auto; width:26px; height:26px; border-radius:8px; cursor:pointer;
-  background:var(--btn-soft); border:1px solid var(--card-br);
+  background:rgba(var(--soft-rgb), var(--soft-a)); border:1px solid var(--card-br);
   color:var(--tx3); display:flex; align-items:center; justify-content:center;
   font-size:12px; transition:.16s;
 }
@@ -622,7 +679,7 @@ select.af-input option { background:var(--card); color:var(--tx); }
    BIND CARDS + BADGES
    ========================================= */
 .bind-item {
-  background:var(--card); border:1px solid var(--card-br);
+  background:rgba(var(--card-rgb), var(--card-a)); border:1px solid var(--card-br);
   border-radius:13px; padding:13px 15px;
   display:flex; align-items:center; gap:12px;
   box-shadow:0 1px 2px rgba(20,24,44,.04);
@@ -648,11 +705,11 @@ select.af-input option { background:var(--card); color:var(--tx); }
   font-family:var(--mono); font-weight:700; text-transform:uppercase;
 }
 .badge-bypass { background:rgba(var(--grnr),.12); color:var(--grn); border:1px solid rgba(var(--grnr),.28); }
-.badge-direct { background:var(--btn-soft); color:var(--tx3); border:1px solid var(--card-br); }
+.badge-direct { background:rgba(var(--soft-rgb), var(--soft-a)); color:var(--tx3); border:1px solid var(--card-br); }
 
 .bind-badge { font-size:8.5px; letter-spacing:1.2px; padding:2px 7px; border-radius:5px; font-family:var(--mono); font-weight:700; text-transform:uppercase; }
 .bind-badge.bypass { background:rgba(var(--grnr),.12); color:var(--grn); border:1px solid rgba(var(--grnr),.28); }
-.bind-badge.direct { background:var(--btn-soft); color:var(--tx3); border:1px solid var(--card-br); }
+.bind-badge.direct { background:rgba(var(--soft-rgb), var(--soft-a)); color:var(--tx3); border:1px solid var(--card-br); }
 
 /* =========================================
    HOME: HERO-КАРТОЧКА ZAPRET + САЙТЫ
@@ -683,7 +740,7 @@ select.af-input option { background:var(--card); color:var(--tx); }
 .home-site-card { padding:15px 16px; }
 .home-site-btns { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
 .home-site-btns button {
-  background:var(--input-bg); border:1px solid var(--card-br);
+  background:rgba(var(--input-rgb), var(--input-a)); border:1px solid var(--card-br);
   color:var(--tx2); border-radius:8px; padding:7px 8px;
   font-size:10.5px; font-weight:600; font-family:var(--font); cursor:pointer; transition:all .16s;
 }
@@ -739,7 +796,7 @@ body.th-night .toggle-knob { background:#33405c; }
 .diag-row {
   display:flex; align-items:center; gap:12px;
   padding:8px 12px; border-radius:9px;
-  background:var(--input-bg); border:1px solid var(--divider);
+  background:rgba(var(--input-rgb), var(--input-a)); border:1px solid var(--divider);
   transition:.16s;
 }
 .diag-row:hover { background:var(--row-hover); }
@@ -763,7 +820,7 @@ body.th-night .toggle-knob { background:#33405c; }
    ========================================= */
 .cbn-test-row {
   display:flex; align-items:center; gap:9px; padding:7px 10px;
-  border-radius:9px; background:var(--input-bg);
+  border-radius:9px; background:rgba(var(--input-rgb), var(--input-a));
   border:1px solid var(--divider); font-size:11px; font-weight:600;
   transition:all .2s;
 }
@@ -787,7 +844,7 @@ body.th-night .cbn-dot { background:#39445c; }
    ========================================= */
 .hosts-list-box {
   max-height:200px; overflow-y:auto;
-  background:var(--input-bg); border:1px solid var(--divider);
+  background:rgba(var(--input-rgb), var(--input-a)); border:1px solid var(--divider);
   border-radius:10px; padding:8px 10px; margin-bottom:14px;
   font-family:var(--mono); font-size:10.5px;
 }
@@ -819,7 +876,7 @@ body.th-night .cbn-dot { background:#39445c; }
    PROGRESS BAR
    ========================================= */
 .progress-track {
-  background:var(--input-bg); border:1px solid var(--divider);
+  background:rgba(var(--input-rgb), var(--input-a)); border:1px solid var(--divider);
   border-radius:6px; height:8px; overflow:hidden;
 }
 .progress-fill {
@@ -832,7 +889,7 @@ body.th-night .cbn-dot { background:#39445c; }
    MONO LOG BOXES (diag / zapret update)
    ========================================= */
 .mono-box {
-  background:var(--input-bg); border:1px solid var(--divider);
+  background:rgba(var(--input-rgb), var(--input-a)); border:1px solid var(--divider);
   border-radius:10px; padding:10px 12px;
   font-family:var(--mono); font-size:10.5px; line-height:1.85;
   overflow-y:auto;
@@ -1320,8 +1377,28 @@ body.th-night .sys-banner {
       Выбери картинку для заднего фона окна. Картинка показывается под контентом с лёгким затемнением
       для читаемости. Прозрачность окна (ползунок выше) продолжает работать — при 30% окно и картинка
       полупрозрачны и видно рабочий стол.
+      <br><br>
+      Пока картинка включена, <b style="color:var(--tx)">меню со всеми вкладками, шапка и кнопки тоже
+      становятся полупрозрачными</b> — картинку видно и там, но не «насквозь»: текст остаётся читаемым
+      (свой фон каждой панели + размытие). Насколько сильно — ползунок ниже.
     </p>
     <div id="bg-preview" style="display:none;margin-bottom:12px;border-radius:12px;overflow:hidden;border:1px solid var(--card-br);height:120px;background-size:cover;background-position:center"></div>
+
+    <div class="color-row">
+      <label>Плотность панелей и кнопок</label>
+      <span class="range-val"><span id="surface-display">74</span>%</span>
+    </div>
+    <div class="range-row" style="margin-top:6px">
+      <label></label>
+      <input type="range" id="bg-surface" min="35" max="100" step="1" value="74"
+             data-af-on="input" data-af-action="mirrorInput" data-af-args='["surface-display", "saveBgSurface", false]'>
+    </div>
+    <p style="font-size:10.5px;color:var(--tx3);line-height:1.6;margin-bottom:12px">
+      Чем меньше значение, тем сильнее сквозь меню, карточки и кнопки видно картинку.
+      100% — панели полностью закрашены (видно только фон рабочего стола), 35% — самый
+      прозрачный вариант.
+    </p>
+
     <div class="grid-2">
       <button class="btn btn-primary" data-af-on="click" data-af-action="pickBgImage">🖼 Выбрать картинку</button>
       <button class="btn btn-secondary" data-af-on="click" data-af-action="clearBgImage">✕ Убрать картинку</button>
@@ -1369,6 +1446,40 @@ body.th-night .sys-banner {
         <button class="btn btn-primary" data-af-on="click" data-af-action="saveConfig">Сохранить всё</button>
         <button class="btn btn-secondary" data-af-on="click" data-af-action="loadConfig">Загрузить</button>
       </div>
+    </div>
+
+    <!-- Cloudflare: меньше страниц «Sorry, you have been blocked» -->
+    <div class="af-card" style="grid-column:1/-1">
+      <div class="section-title">Cloudflare — меньше блокировок на весь экран</div>
+      <p style="font-size:11.5px;color:var(--tx2);margin-bottom:10px;line-height:1.7">
+        Движок распознаёт страницу Cloudflare вместо сайта и ведёт себя как человек:
+        спокойно ждёт окончание проверки («Just a moment…»), а на странице блокировки
+        («Sorry, you have been blocked») делает паузу, обновляет страницу и пробует зайти
+        через главную. Причина блокировки попадает в «Логи» и всплывает в окне тостом —
+        вместе с Ray ID. Настройки применяются при следующем запуске браузера.
+      </p>
+      <label class="cf-row" for="cf-enabled">
+        <input type="checkbox" id="cf-enabled" checked data-af-on="change" data-af-action="saveCfConfig">
+        Умное ожидание проверки и обход страницы блокировки
+      </label>
+      <label class="cf-row" for="cf-soft-landing">
+        <input type="checkbox" id="cf-soft-landing" checked data-af-on="change" data-af-action="saveCfConfig">
+        Мягкий вход: на глубокую ссылку заходить через главную страницу сайта
+      </label>
+      <label class="cf-row" for="cf-wait-challenge">
+        <input type="checkbox" id="cf-wait-challenge" checked data-af-on="change" data-af-action="saveCfConfig">
+        Ждать прохождение Cloudflare-проверки (не «читать» страницу проверки)
+      </label>
+      <p style="font-size:10.5px;color:var(--tx3);line-height:1.6;margin:10px 0 12px">
+        Включённый режим никого не «обходит»: он перестаёт злить Cloudflare лишними
+        автоматическими действиями и повторяет заход так, как это сделал бы человек.
+        Если Ray ID приходит постоянно — проблема в IP: поставь профилю прокси.
+      </p>
+      <div class="grid-2">
+        <button class="btn btn-primary" data-af-on="click" data-af-action="saveCfConfig">Сохранить настройки Cloudflare</button>
+        <button class="btn btn-secondary" data-af-on="click" data-af-action="loadCfConfig">Загрузить</button>
+      </div>
+      <div id="cf-status" style="font-size:10.5px;color:var(--tx3);font-family:var(--mono);margin-top:9px;min-height:16px"></div>
     </div>
 
     <div class="af-card" style="grid-column:1/-1">

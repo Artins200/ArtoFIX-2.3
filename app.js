@@ -58,7 +58,7 @@ function makeNullApi() {
     reportError: function () {},
     onLogEntry: off, onZapretStatus: off, onZapretProgress: off, onDiagLog: off,
     onDiagProgress: off, onTrayAction: off, onNavigate: off, onBootstrap: off,
-    onWinMaximized: off,
+    onWinMaximized: off, onCfWarning: off,
     onProfileThumb: off, platform: 'web',
   };
 }
@@ -259,7 +259,7 @@ function goTab(tabName, btn) {
   // tab-specific init
   if (tabName === 'profiles') renderProfiles();
   if (tabName === 'settings') initSettingsTab();
-  if (tabName === 'config')   { loadConfig(); loadSpoofConfig(); initFpProfileSelect(); }
+  if (tabName === 'config')   { loadConfig(); loadSpoofConfig(); loadCfConfig(); initFpProfileSelect(); }
   if (tabName === 'binds')         initBindsTab();
   if (tabName === 'adblock')       initAdblock();
   if (tabName === 'zapret-update') initZapretUpdate();
@@ -773,6 +773,61 @@ async function loadSpoofConfig() {
     if (langEl) langEl.value = s.lang         || '';
   } catch(e) {}
 }
+
+// ── CLOUDFLARE: настройки движка (config.json → блок cf) ──
+// Раньше на «Sorry, you have been blocked» и «Just a moment…» движок никак
+// не реагировал: пользователь просто видел чужую страницу на весь экран.
+// Теперь это настраиваемое поведение (см. engine.py → cf_navigate).
+function cfStatus(text, color) {
+  var el = document.getElementById('cf-status');
+  if (!el) return;
+  el.style.color = color || 'var(--tx3)';
+  el.textContent = text || '';
+}
+
+async function loadCfConfig() {
+  try {
+    var data = await apiBridge.readConfig();
+    var cf = (data && data.cf) || {};
+    var en = document.getElementById('cf-enabled');
+    var sl = document.getElementById('cf-soft-landing');
+    var wc = document.getElementById('cf-wait-challenge');
+    if (en) en.checked = cf.enabled !== false;
+    if (sl) sl.checked = cf.soft_landing !== false;
+    if (wc) wc.checked = cf.wait_challenge !== false;
+    cfStatus(cf.enabled === false
+      ? 'Сейчас: выключено — движок просто откроет ссылку'
+      : 'Сейчас: включено — проверка ожидается, блокировка обходится повтором', 'var(--tx3)');
+  } catch (e) { cfStatus('Не удалось прочитать config.json', 'var(--red)'); }
+}
+
+async function saveCfConfig() {
+  var en = document.getElementById('cf-enabled');
+  var sl = document.getElementById('cf-soft-landing');
+  var wc = document.getElementById('cf-wait-challenge');
+  try {
+    // Читаем текущий конфиг и дописываем только блок cf — остальные
+    // настройки (UA, разрешение, обманка) не трогаем.
+    var cur = (await apiBridge.readConfig()) || {};
+    cur.cf = {
+      enabled: en ? en.checked : true,
+      soft_landing: sl ? sl.checked : true,
+      wait_challenge: wc ? wc.checked : true,
+    };
+    var r = await apiBridge.writeConfig(cur);
+    if (r && r.ok) {
+      cfStatus('✓ Сохранено — применится при следующем запуске браузера', 'var(--grn)');
+      showToast('🛡 Cloudflare: настройки сохранены', 'ok');
+    } else {
+      cfStatus('✗ ' + ((r && r.msg) || 'ошибка записи'), 'var(--red)');
+      showToast('Ошибка записи конфига', 'err');
+    }
+  } catch (e) {
+    cfStatus('✗ ' + e.message, 'var(--red)');
+    showToast('Ошибка моста API: ' + e.message, 'err');
+  }
+}
+
 var SAVED_BINDS = [];
 
 async function loadBinds() {
@@ -1057,6 +1112,8 @@ function saveWindowStyle() {
 // ── ФОН-КАРТИНКА ──
 // Картинка хранится как data URL в настройках (до 4 МБ). Слой #bg-image-layer
 // имеет opacity: var(--win-alpha) — прозрачность продолжает работать и с картинкой.
+// Затемнение поверх картинки берётся из --img-veil (зависит от «Плотности
+// панелей»), поэтому ползунок меняет вид мгновенно — без пересборки data URL.
 function applyBgImage(dataUrl) {
   var layer = document.getElementById('bg-image-layer');
   var app = document.getElementById('app');
@@ -1067,8 +1124,10 @@ function applyBgImage(dataUrl) {
     // Безопасно: dataUrl из main-процесса, но экранируем кавычки
     var safe = dataUrl.replace(/"/g, '\\"');
     // Оверлей из --bg-rgb для читаемости текста поверх картинки
-    layer.style.backgroundImage = 'linear-gradient(rgba(var(--bg-rgb,237,240,247),0.62), rgba(var(--bg-rgb,237,240,247),0.62)), url("' + safe + '")';
+    layer.style.backgroundImage = 'linear-gradient(rgba(var(--bg-rgb,237,240,247),var(--img-veil,.42)), rgba(var(--bg-rgb,237,240,247),var(--img-veil,.42))), url("' + safe + '")';
     app.classList.add('has-bg-image');
+    // Панели «на стекло»: меню, шапка, карточки и кнопки тоже показывают картинку
+    applyBgSurface(APP_SETTINGS.bgSurface);
     if (preview) {
       preview.style.display = '';
       preview.style.backgroundImage = 'url("' + safe + '")';
@@ -1107,6 +1166,35 @@ async function clearBgImage() {
   applyBgImage(null);
   await saveSettings();
   showToast('Фон сброшен на стандартный', '');
+}
+
+// ── ПЛОТНОСТЬ ПАНЕЛЕЙ ПОВЕРХ КАРТИНКИ ──
+// bgSurface — процент (35…100) «сколько краски остаётся» у панелей, карточек,
+// кнопок и полей, когда включена фон-картинка. 100 — плотный интерфейс,
+// 35 — самый прозрачный. Значение пишем в --surface-a (его читает CSS-правило
+// #app.has-bg-image) и в --img-veil (лёгкое затемнение самой картинки).
+function applyBgSurface(val) {
+  var s = (val === undefined || val === null || val === '')
+    ? parseFloat(APP_SETTINGS.bgSurface)
+    : parseFloat(val);
+  if (!Number.isFinite(s)) s = 74;
+  s = Math.round(Math.min(100, Math.max(35, s)));
+  APP_SETTINGS.bgSurface = String(s);
+  var a = s / 100;
+  // затемнение картинки: чем плотнее панели, тем сильнее можно «гасить» рисунок
+  var veil = Math.round((0.22 + 0.42 * (1 - a)) * 100) / 100;
+  setCssVar('--surface-a', String(a));
+  setCssVar('--img-veil', String(veil));
+  var disp = document.getElementById('surface-display');
+  if (disp) disp.textContent = String(s);
+  var slider = document.getElementById('bg-surface');
+  if (slider && String(slider.value) !== String(s)) slider.value = String(s);
+  return s;
+}
+
+function saveBgSurface(val) {
+  applyBgSurface(val);
+  saveSettings();
 }
 
 // Эффекты фона (частицы/сканлайны) из старого дизайна удалены —
@@ -1149,7 +1237,14 @@ function initSettingsTab() {
   if (opEl)  opEl.value  = String(Math.round(op * 100));
   if (radD)  radD.textContent = String(Math.round(rad));
   if (opD)   opD.textContent  = String(Math.round(op * 100));
-  // Фон-картинка
+  // Фон-картинка: сама картинка + плотность панелей/кнопок поверх неё
+  var bs = parseFloat(s.bgSurface);
+  if (!Number.isFinite(bs) || bs < 35 || bs > 100) bs = 74;
+  var bsEl = document.getElementById('bg-surface');
+  var bsD  = document.getElementById('surface-display');
+  if (bsEl) bsEl.value = String(Math.round(bs));
+  if (bsD)  bsD.textContent = String(Math.round(bs));
+  applyBgSurface(bs);
   applyBgImage(s.bgImage || null);
 }
 
@@ -1173,6 +1268,8 @@ async function loadSettings() {
   } catch(e) {}
   // Скругление/прозрачность окна применяем всегда (есть настройки или дефолты)
   applyWindowStyle();
+  // Плотность панелей (нужна и без картинки — переменные просто не читаются)
+  try { applyBgSurface(APP_SETTINGS.bgSurface); } catch (_) {}
   // Фон-картинка — применяем сразу при старте, чтобы прозрачность не ломалась
   try { applyBgImage(APP_SETTINGS.bgImage || null); } catch (_) {}
 }
@@ -1215,9 +1312,9 @@ async function saveConfig() {
   if (res && !/^\d{3,4},\d{3,4}$/.test(res)) {
     showToast('Формат разрешения: 1920,1080', 'err'); return;
   }
-  var data = {};
-  if (ua)  data.user_agent = ua;
-  if (res) data.resolution = res;
+  // Отправляем только свои поля: main бережно мержит их с текущим config.json,
+  // поэтому сохранение UA/разрешения больше не стирает блоки spoof/fingerprint/cf.
+  var data = { user_agent: ua, resolution: res };
   try {
     var r = await apiBridge.writeConfig(data);
     if (r && r.ok) showToast('config.json сохранён! Настройки применятся при следующем запуске браузера.', 'ok');
@@ -1636,6 +1733,31 @@ async function diagInstallAll() {
   if (checkBtn)   checkBtn.disabled = false;
   await diagCheck();
 }
+
+// =====================================================
+//   CLOUDFLARE: ПРЕДУПРЕЖДЕНИЯ ДВИЖКА
+//   engine.py сам распознаёт страницу проверки и блокировки Cloudflare
+//   и присылает сюда состояние. Раньше пользователь видел «Sorry, you have
+//   been blocked» на весь экран и не знал причины — теперь причина
+//   и рецепт («нужен прокси / подождать / открыть ещё раз») в тосте.
+// =====================================================
+var CF_NOTICE_AT = 0;
+
+apiBridge.onCfWarning(function (info) {
+  if (!info || typeof info !== 'object') return;
+  if (Date.now() - CF_NOTICE_AT < 5000) return;      // не спамим: движок повторяет попытки
+  CF_NOTICE_AT = Date.now();
+  var host = typeof info.host === 'string' && info.host ? info.host : 'сайт';
+  var ray  = typeof info.ray === 'string' && info.ray ? ' · Ray ID ' + info.ray : '';
+  if (info.state === 'blocked') {
+    showToast('⛔ Cloudflare заблокировал ' + host + ray +
+      '. Отпечаток тут не виноват — так отвечает IP. Поставь профилю прокси, подожди 10–30 минут ' +
+      'или просто открой сайт снова: cookies профиля уже сохранены.', 'err');
+  } else {
+    showToast('🛡 Cloudflare проверяет ' + host +
+      ': Artofix подождал проверку, не трогая страницу. Если она не открылась сама — обнови (F5).', '');
+  }
+});
 
 // =====================================================
 //   ЛОГИ ЗАПУСКОВ
@@ -2795,7 +2917,7 @@ function mirrorInput(labelId, saverName, asFloat) {
   if (label) label.textContent = asFloat ? parseFloat(val).toFixed(1) : val;
   // saver получает значение: раньше вызов был без аргумента, и applyScale
   // строил scale(NaN) — масштабирование «не работало».
-  var savers = { saveFx: saveFx, saveCbn: saveCbn, saveScale: applyScale, saveWin: saveWindowStyle };
+  var savers = { saveFx: saveFx, saveCbn: saveCbn, saveScale: applyScale, saveWin: saveWindowStyle, saveBgSurface: saveBgSurface };
   if (typeof savers[saverName] === 'function') savers[saverName](val);
 }
 
@@ -2845,6 +2967,8 @@ AF_ACTIONS = {
   setSpoof: setSpoof,
   saveSpoofConfig: saveSpoofConfig,
   loadSpoofConfig: loadSpoofConfig,
+  saveCfConfig: saveCfConfig,
+  loadCfConfig: loadCfConfig,
   loadConfig: loadConfig,
   saveConfig: saveConfig,
   saveFpConfig: saveFpConfig,
@@ -2864,6 +2988,7 @@ AF_ACTIONS = {
   saveWindowStyle: saveWindowStyle,
   pickBgImage: pickBgImage,
   clearBgImage: clearBgImage,
+  saveBgSurface: saveBgSurface,
 
   // adblock
   addPreset: addPreset,

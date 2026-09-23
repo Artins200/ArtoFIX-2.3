@@ -267,6 +267,138 @@ def _full_version_list():
     assert all("grease" not in b for b in md["brands"]), "служебные флаги не уходят в CDP"
 
 
+
+@check("Cloudflare: состояние страницы распознаётся по маркерам")
+def _cf_state():
+    engine = load_engine()
+    blocked = ('Sorry, you have been blocked. You are unable to access site.com. '
+               'Why have I been blocked? Cloudflare Ray ID: 8f3c1d2e4a5b6c7d')
+    assert engine.cf_state_from_text(blocked) == "blocked"
+    assert engine.cf_ray_id(blocked) == "8f3c1d2e4a5b6c7d"
+    assert engine.cf_state_from_text("Just a moment... Enable JavaScript and cookies to continue") == "challenge"
+    assert engine.cf_state_from_text("Checking your browser before accessing site.com") == "challenge"
+    # на странице проверки тоже печатают Ray ID — это НЕ блокировка
+    assert engine.cf_state_from_text("Just a moment... Ray ID: aabbccddeeff0011") == "challenge"
+    assert engine.cf_state_from_text("Обычная страница сайта") == "ok"
+    assert engine.cf_ray_id("никаких меток") is None
+
+
+@check("Cloudflare: настройки с клампом, ссылки разбираются на главную")
+def _cf_settings():
+    engine = load_engine()
+    assert engine.cf_settings({}) == engine.CF_DEFAULTS
+    cfs = engine.cf_settings({"cf": {"enabled": False, "challenge_timeout": 999,
+                                     "max_retries": -1, "soft_landing": "yes"}})
+    assert cfs["enabled"] is False
+    assert cfs["challenge_timeout"] == 90
+    assert cfs["max_retries"] == 0
+    assert cfs["soft_landing"] is True, "строка вместо bool не должна проходить валидацию"
+    assert engine.cf_settings({"cf": "мусор"}) == engine.CF_DEFAULTS
+    assert engine.cf_origin("https://site.com/login?x=1") == "https://site.com/"
+    assert engine.cf_origin("about:blank") is None
+    assert engine.cf_is_deep("https://site.com/login") is True
+    assert engine.cf_is_deep("https://site.com/?a=1") is True
+    assert engine.cf_is_deep("https://site.com") is False
+    assert engine.cf_is_deep("about:blank") is False
+
+
+class _FakeCfDriver:
+    """Драйвер-стенд: отдаёт заранее заданную последовательность состояний."""
+
+    def __init__(self, states):
+        self.states = list(states)          # 'blocked' | 'challenge' | 'ok'
+        self.opened = []
+        self.refreshed = 0
+
+    def get(self, url):
+        self.opened.append(url)
+
+    def refresh(self):
+        self.refreshed += 1
+
+    def _next_state(self):
+        if len(self.states) > 1:
+            return self.states.pop(0)
+        return self.states[0] if self.states else "ok"
+
+    def execute_script(self, _js):
+        state = self._next_state()
+        if state == "blocked":
+            return {"title": "Attention Required! | Cloudflare", "url": "https://site.com/x",
+                    "text": "Sorry, you have been blocked. Ray ID: 0123456789abcdef"}
+        if state == "challenge":
+            return {"title": "Just a moment...", "url": "https://site.com/x",
+                    "text": "Checking your browser before accessing site.com"}
+        return {"title": "Сайт", "url": "https://site.com/x", "text": "обычная страница"}
+
+
+@check("Cloudflare: блокировка обходится повтором (обновлением страницы)")
+def _cf_blocked_recovery():
+    engine = load_engine()
+    driver = _FakeCfDriver(["blocked", "ok"])
+    logs = []
+    state = engine.cf_navigate(driver, "https://site.com/",
+                               {"cf": {"soft_landing": False, "max_retries": 1}}, log=logs.append)
+    assert state == "ok", state
+    assert driver.refreshed == 1, "после блокировки страница должна обновиться"
+    assert any("обновляем" in line for line in logs), "в логе нет шага повтора"
+
+
+@check("Cloudflare: если блокировка не снялась — причина и Ray ID в логе")
+def _cf_blocked_persistent():
+    engine = load_engine()
+    driver = _FakeCfDriver(["blocked"])
+    logs = []
+    state = engine.cf_navigate(driver, "https://site.com/x", {"cf": {}}, log=logs.append)
+    assert state == "blocked", state
+    assert any("BLOCKED" in line for line in logs), \
+        "маркер [cf] BLOCKED (его показывает main в UI) не найден"
+    assert any("ray=0123456789abcdef" in line for line in logs), "Ray ID не разобран"
+    assert any("host=site.com" in line for line in logs), "хост не попал в лог"
+
+
+@check("Cloudflare: проверка ожидается, а не «читается» действиями бота")
+def _cf_wait_challenge():
+    engine = load_engine()
+    driver = _FakeCfDriver(["challenge", "challenge", "ok"])
+    state = engine.cf_navigate(driver, "https://site.com/",
+                               {"cf": {"challenge_timeout": 6}}, log=lambda *_: None)
+    assert state == "ok", state
+    assert driver.refreshed == 0, "успешную проверку обновлять не нужно"
+
+
+@check("Cloudflare: мягкий вход идёт через главную, затем на глубокую ссылку")
+def _cf_soft_landing():
+    engine = load_engine()
+    driver = _FakeCfDriver(["ok"])
+    state = engine.cf_navigate(driver, "https://site.com/cabinet/orders",
+                               {"cf": {}}, log=lambda *_: None)
+    assert state == "ok"
+    assert driver.opened == ["https://site.com/", "https://site.com/cabinet/orders"], driver.opened
+    # выключенный soft_landing — прямой заход, как раньше
+    driver2 = _FakeCfDriver(["ok"])
+    engine.cf_navigate(driver2, "https://site.com/cabinet/orders",
+                       {"cf": {"soft_landing": False}}, log=lambda *_: None)
+    assert driver2.opened == ["https://site.com/cabinet/orders"]
+
+
+@check("Cloudflare: выключенный режим не меняет прежнее поведение")
+def _cf_disabled():
+    engine = load_engine()
+    driver = _FakeCfDriver(["ok"])
+    state = engine.cf_navigate(driver, "https://site.com/x", {"cf": {"enabled": False}},
+                               log=lambda *_: None)
+    assert state == "disabled"
+    assert driver.opened == ["https://site.com/x"]
+
+
+@check("Cloudflare: движок связан с UI (маркеры лога и пропуск разогрева)")
+def _cf_wiring():
+    src = ENGINE_SRC
+    assert "cf_navigate(driver, url, cfg)" in src, "start_browser не зовёт CF-логику"
+    assert "[cf] BLOCKED" in src and "[cf] CHALLENGE" in src, "нет машинных маркеров для main"
+    assert "разогрев поведения пропущен" in src, "разогрев может уйти на страницу проверки"
+
 def main():
     failed = [r for r in RESULTS if r[0] == "fail"]
     for status, name in RESULTS:

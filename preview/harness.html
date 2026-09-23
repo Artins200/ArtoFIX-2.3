@@ -24,12 +24,23 @@
   }
   body.is-max #app-frame { width:100vw; height:100vh; max-width:100vw; max-height:100vh; }
   #hint {
-    position:fixed; left:50%; transform:translateX(-50%); bottom:10px;
-    color:rgba(255,255,255,.75); font-size:12px; text-align:center;
-    background:rgba(10,14,26,.45); border:1px solid rgba(255,255,255,.14);
-    padding:7px 14px; border-radius:999px; backdrop-filter:blur(6px);
-    pointer-events:none; max-width:94vw;
+    position:fixed; left:10px; bottom:10px; max-width:min(420px, 42vw);
+    color:rgba(255,255,255,.7); font-size:10.5px; line-height:1.5; text-align:left;
+    background:rgba(10,14,26,.42); border:1px solid rgba(255,255,255,.12);
+    padding:6px 10px; border-radius:12px; backdrop-filter:blur(6px);
+    pointer-events:none;
   }
+  #demo-panel {
+    position:fixed; right:10px; bottom:10px; display:flex; flex-direction:column; gap:6px;
+    background:rgba(10,14,26,.5); border:1px solid rgba(255,255,255,.14);
+    padding:8px 10px; border-radius:12px; backdrop-filter:blur(6px);
+    font-family:'Segoe UI',system-ui,sans-serif; font-size:10.5px; color:rgba(255,255,255,.8);
+  }
+  #demo-panel button {
+    background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.22);
+    color:#fff; border-radius:8px; padding:6px 9px; font-size:10.5px; cursor:pointer;
+  }
+  #demo-panel button:hover { background:rgba(255,255,255,.2); }
   #restore-chip {
     position:fixed; left:50%; top:50%; transform:translate(-50%,-50%);
     display:none; padding:14px 22px; border-radius:14px; cursor:pointer;
@@ -46,12 +57,26 @@
   </div>
   <div id="restore-chip">🪟 ArtoFIX скрыт — нажмите, чтобы показать окно</div>
   <div id="hint">
-    Превью интерфейса ArtoFIX 2.5 в браузере: окно полностью скруглено и полупрозрачно —
-    регулируйте «Внешний вид → Окно», темы и цвета работают вместе. Кнопка □ в заголовке — развернуть.
+    Превью UI ArtoFIX 2.5: «Внешний вид → Фон приложения — картинка» (кнопка «Выбрать картинку»
+    нарисует демо-фон) — картинка видна и в меню, плотность панелей/кнопок регулируется ползунком.
+    Тумблеры Cloudflare — во вкладке «Конфигурация».
+  </div>
+  <div id="demo-panel">
+    превью-события движка:
+    <button id="demo-cf-block" type="button">⛔ Cloudflare: блокировка</button>
+    <button id="demo-cf-challenge" type="button">🛡 Cloudflare: проверка</button>
   </div>
 <script>
   var chip = document.getElementById('restore-chip');
   chip.addEventListener('click', function () { document.body.classList.remove('is-hidden'); });
+
+  // Кнопки демонстрации: движок в браузере не запускается, поэтому
+  // cf-warning шлём вручную — видно, какой тост получит пользователь,
+  // когда engine.py распознает проверку/блокировку Cloudflare.
+  var frame = document.getElementById('app-frame');
+  function demo(act) { try { frame.contentWindow.postMessage({ src: 'artofix-preview-parent', act: act }, '*'); } catch (_) {} }
+  document.getElementById('demo-cf-block').addEventListener('click', function () { demo('cf-demo-block'); });
+  document.getElementById('demo-cf-challenge').addEventListener('click', function () { demo('cf-demo-challenge'); });
   window.addEventListener('message', function (e) {
     var d = e.data;
     if (!d || d.src !== 'artofix-preview') return;

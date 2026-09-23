@@ -52,9 +52,19 @@ class El {
   closest() { return null; }
   querySelector() { return null; }
   querySelectorAll() { return []; }
-  classList = {
-    add: () => {}, remove: () => {}, toggle: () => {}, contains: () => false,
-  };
+  // classList ведёт себя как настоящий: классы реально добавляются/снимаются.
+  // Нужно для проверок вида app.classList.contains('has-bg-image') —
+  // именно этот класс включает «стекло» панелей поверх фон-картинки.
+  classList = (() => {
+    const set = new Set();
+    const sync = () => { this.className = Array.from(set).join(' '); };
+    return {
+      add: (...c) => { c.forEach((x) => set.add(x)); sync(); },
+      remove: (...c) => { c.forEach((x) => set.delete(x)); sync(); },
+      toggle: (c) => { if (set.has(c)) set.delete(c); else set.add(c); sync(); },
+      contains: (c) => set.has(c),
+    };
+  })();
 }
 
 /** Загружает рендерер и отдаёт контекст + реестр элементов по id. */
@@ -104,7 +114,7 @@ function loadApp(file) {
     });
   ['onLogEntry', 'onZapretStatus', 'onZapretProgress', 'onDiagLog', 'onDiagProgress', 'onTrayAction',
     'onNavigate', 'onBootstrap', 'onSetupStep', 'onSetupLog', 'onSetupError', 'onSetupRestart',
-    'onSetupDone', 'onSetupHw', 'onSetupAskPerm'].forEach((f) => { apiStub[f] = () => () => {}; });
+    'onSetupDone', 'onSetupHw', 'onSetupAskPerm', 'onCfWarning'].forEach((f) => { apiStub[f] = () => () => {}; });
 
   const windowStub = {
     document: documentStub,
@@ -440,9 +450,79 @@ test('saveWindowStyle читает ползунки (проценты → дол
   assert.strictEqual(ctx.APP_SETTINGS.winOpacity, '0.8');
 });
 
+test('applyBgSurface: плотность панелей поверх картинки клампится и уходит в CSS', () => {
+  const { ctx, byId } = loadApp('app.js');
+  const vars = {};
+  ctx.document.documentElement.style.setProperty = (k, v) => { vars[k] = v; };
+  ctx.APP_SETTINGS = {};
+  ctx.applyBgSurface();                       // без значения — дефолт 74 %
+  assert.strictEqual(ctx.APP_SETTINGS.bgSurface, '74');
+  assert.strictEqual(vars['--surface-a'], '0.74');
+  assert.ok(parseFloat(vars['--img-veil']) > 0, 'картинка должна получать лёгкое затемнение');
+  assert.strictEqual(byId['surface-display'].textContent, '74');
+  ctx.applyBgSurface(95);
+  assert.strictEqual(vars['--surface-a'], '0.95');
+  ctx.applyBgSurface(10);                     // ниже минимума → кламп в 35 (не «в ноль»)
+  assert.strictEqual(vars['--surface-a'], '0.35');
+  ctx.applyBgSurface(100);                    // 100 % — панели плотные, затемнение минимально
+  assert.strictEqual(vars['--surface-a'], '1');
+  assert.strictEqual(vars['--img-veil'], '0.22');
+});
+
+test('applyBgImage вешает has-bg-image и включает «стекло» панелей', () => {
+  const { ctx } = loadApp('app.js');
+  const app = ctx.document.getElementById('app');
+  const vars = {};
+  ctx.document.documentElement.style.setProperty = (k, v) => { vars[k] = v; };
+  ctx.APP_SETTINGS = { bgSurface: '62' };
+  ctx.applyBgImage('data:image/png;base64,AAAA');
+  assert.ok(app.classList.contains('has-bg-image'), 'нет класса has-bg-image — меню останется непрозрачным');
+  assert.strictEqual(vars['--surface-a'], '0.62', 'плотность панелей не применилась');
+  assert.ok(ctx.document.getElementById('bg-image-layer').style.backgroundImage.indexOf('data:image/png;base64,AAAA') !== -1);
+  ctx.applyBgImage(null);
+  assert.strictEqual(app.classList.contains('has-bg-image'), false);
+});
+
+test('CLOUDFLARE: cf_navigate-настройки сохраняются в config.json', async () => {
+  const { ctx, byId } = loadApp('app.js');
+  const written = [];
+  ctx.apiBridge.readConfig = () => Promise.resolve({ user_agent: 'UA', resolution: '1920,1080' });
+  ctx.apiBridge.writeConfig = (cfg) => { written.push(cfg); return Promise.resolve({ ok: true }); };
+  ctx.document.getElementById('cf-enabled').checked = false;
+  ctx.document.getElementById('cf-soft-landing').checked = true;
+  ctx.document.getElementById('cf-wait-challenge').checked = false;
+  await ctx.saveCfConfig();
+  assert.strictEqual(written.length, 1, 'config.json не записан');
+  assert.strictEqual(written[0].cf.enabled, false);
+  assert.strictEqual(written[0].cf.wait_challenge, false);
+  assert.strictEqual(written[0].user_agent, 'UA', 'чужие поля конфига потерялись');
+  assert.strictEqual(ctx.AF_ACTIONS.saveCfConfig, ctx.saveCfConfig);
+});
+
+test('CLOUDFLARE: loadCfConfig заполняет тумблеры из config.json', async () => {
+  const { ctx } = loadApp('app.js');
+  ctx.apiBridge.readConfig = () => Promise.resolve({ cf: { enabled: false, soft_landing: false } });
+  await ctx.loadCfConfig();
+  assert.strictEqual(ctx.document.getElementById('cf-enabled').checked, false);
+  assert.strictEqual(ctx.document.getElementById('cf-soft-landing').checked, false);
+  assert.strictEqual(ctx.document.getElementById('cf-wait-challenge').checked, true, 'по умолчанию ожидание включено');
+});
+
+test('Сохранить всё в UA-форме не стирает остальные блоки config.json', async () => {
+  const { ctx } = loadApp('app.js');
+  const written = [];
+  ctx.apiBridge.writeConfig = (cfg) => { written.push(cfg); return Promise.resolve({ ok: true }); };
+  ctx.document.getElementById('cfg-ua').value = 'Mozilla/5.0 Test';
+  ctx.document.getElementById('cfg-res').value = '1920,1080';
+  await ctx.saveConfig();
+  // рендерер отправляет только свои поля, остальное main мержит с файлом
+  assert.deepStrictEqual(Object.keys(written[0]).sort(), ['resolution', 'user_agent']);
+});
+
 test('AF_ACTIONS содержит действия окна/авто-обхода из разметки', () => {
   const { ctx } = loadApp('app.js');
-  ['saveAutoBypass', 'saveWindowStyle', 'winMax', 'setTheme', 'previewColors', 'saveColors', 'resetColors']
+  ['saveAutoBypass', 'saveWindowStyle', 'winMax', 'setTheme', 'previewColors', 'saveColors', 'resetColors',
+    'saveBgSurface', 'saveCfConfig', 'loadCfConfig', 'pickBgImage', 'clearBgImage']
     .forEach((a) => assert.strictEqual(typeof ctx.AF_ACTIONS[a], 'function', a + ' отсутствует'));
 });
 
